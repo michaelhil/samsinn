@@ -1,7 +1,7 @@
 // ============================================================================
 // Delivery — Creates the postAndDeliver function.
-// This is the single coordination point: posts messages to rooms and/or
-// delivers DMs, using the team for recipient lookup.
+// Room messages: Room handles delivery internally via its DeliverFn.
+// DMs: Delivered explicitly to both sender and recipient.
 // ============================================================================
 
 import type { House, Message, MessageTarget, PostAndDeliver, Team } from './types.ts'
@@ -19,16 +19,17 @@ export const createPostAndDeliver = (house: House, team: Team): PostAndDeliver =
     const correlationId = crypto.randomUUID()
     const delivered: Message[] = []
 
+    // Room messages — Room.post() handles member delivery internally
     if (target.rooms) {
       for (const roomId of target.rooms) {
         const room = house.getRoom(roomId)
         if (!room) continue
-        const { message, recipientIds } = room.post({ ...params, correlationId })
+        const message = room.post({ ...params, correlationId })
         delivered.push(message)
-        for (const id of recipientIds) deliver(id, message)
       }
     }
 
+    // DMs — no Room involved, deliver explicitly to both parties
     if (target.agents) {
       for (const agentRef of target.agents) {
         const recipient = team.getAgent(agentRef)

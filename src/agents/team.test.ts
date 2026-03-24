@@ -10,12 +10,9 @@ const makeAgent = (overrides?: Partial<Agent>): Agent => ({
   kind: 'ai',
   metadata: {},
   state: { get: () => 'idle' as const, subscribe: () => () => {} },
-  getMessages: () => [],
   receive: () => {},
   join: async () => {},
   getRoomIds: () => [],
-  getMessagesForRoom: () => [],
-  getMessagesForPeer: () => [],
   ...overrides,
 })
 

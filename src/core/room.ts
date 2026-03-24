@@ -1,23 +1,24 @@
 // ============================================================================
-// Room — Pure data structure. Array of messages + profile + member tracking.
-// Zero external dependencies. Does NOT handle delivery.
-// post() appends and returns recipient IDs. Caller handles delivery.
+// Room — Self-contained component: messages + members + delivery.
+// post() appends the message, delivers to all members, and returns it.
 // Room stamps its own roomId on messages — caller never passes roomId.
+// Delivery includes message history (all messages before the new one) so
+// recipients can distinguish old context from fresh arrivals.
 //
 // Members are tracked via addMember/removeMember/hasMember for access control.
 // post() implicitly adds the sender as a member.
 // Messages are capped at maxMessages to prevent unbounded growth.
 // ============================================================================
 
-import type { Message, PostParams, PostResult, Room, RoomProfile } from './types.ts'
+import type { DeliverFn, Message, PostParams, Room, RoomProfile } from './types.ts'
 import { DEFAULTS, SYSTEM_SENDER_ID } from './types.ts'
 
-export const createRoom = (profile: RoomProfile, maxMessages?: number): Room => {
+export const createRoom = (profile: RoomProfile, deliver?: DeliverFn, maxMessages?: number): Room => {
   const messages: Message[] = []
   const members = new Set<string>()
   const messageLimit = maxMessages ?? DEFAULTS.roomMessageLimit
 
-  const post = (params: PostParams): PostResult => {
+  const post = (params: PostParams): Message => {
     // Validate sender
     if (!params.senderId || params.senderId.trim() === '') {
       throw new Error('post() requires a non-empty senderId')
@@ -46,12 +47,15 @@ export const createRoom = (profile: RoomProfile, maxMessages?: number): Room => 
       messages.splice(0, messages.length - messageLimit)
     }
 
-    // Build recipient list directly from Set (no intermediate array)
-    const recipientIds: string[] = []
-    for (const id of members) {
-      if (id !== message.senderId) recipientIds.push(id)
+    // Deliver to all members (including sender, so agents see their own responses in history)
+    if (deliver) {
+      const history = messages.slice(0, -1)
+      for (const id of members) {
+        deliver(id, message, history)
+      }
     }
-    return { message, recipientIds }
+
+    return message
   }
 
   const getRecent = (n: number): ReadonlyArray<Message> => {

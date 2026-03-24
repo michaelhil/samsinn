@@ -12,8 +12,10 @@ const FAST_MODEL = 'llama3.2:latest'
 
 // Create the full system wiring
 const createSystem = () => {
-  const house = createHouse()
   const team = createTeam()
+  const house = createHouse((agentId, message, history) => {
+    team.getAgent(agentId)?.receive(message, history)
+  })
   const postAndDeliver = createPostAndDeliver(house, team)
   const intro = house.createRoom({
     name: 'Introductions',
@@ -81,9 +83,8 @@ describe('Integration — Room + Team + postAndDeliver', () => {
 
     // Bob receives via transport
     expect(bobInbox.some(m => m.content === 'Private hello')).toBe(true)
-    // Alice stores own DM internally but doesn't echo to transport
+    // Alice doesn't echo own DMs to transport
     expect(aliceInbox.some(m => m.content === 'Private hello')).toBe(false)
-    expect(alice.getMessages().some(m => m.content === 'Private hello')).toBe(true)
   })
 
   test('correlationId shared across multi-target delivery', () => {
@@ -200,7 +201,6 @@ describe('Integration — AI Agent with real Ollama', () => {
         description: 'Analyzes data',
         model: FAST_MODEL,
         systemPrompt: 'You are a data analyst. Be concise.',
-        cooldownMs: 1000,
       },
       ollamaProvider, house, team, postAndDeliver,
     )
@@ -232,7 +232,6 @@ describe('Integration — AI Agent with real Ollama', () => {
         description: 'Responds to questions',
         model: FAST_MODEL,
         systemPrompt: 'You are a friendly assistant. Always respond to questions concisely. Never pass. Always target the room you are in.',
-        cooldownMs: 500,
       },
       ollamaProvider, house, team, postAndDeliver,
     )

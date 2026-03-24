@@ -39,7 +39,7 @@ describe('executeActions — create_room', () => {
 
   test('auto-renames on collision and notifies agent', async () => {
     const { house, team, postAndDeliver } = createTestSystem()
-    const { agent } = makeAgent('Creator')
+    const { agent, inbox } = makeAgent('Creator')
     team.addAgent(agent)
 
     house.createRoom({ name: 'Planning', visibility: 'public', createdBy: 'test' })
@@ -51,7 +51,7 @@ describe('executeActions — create_room', () => {
 
     expect(house.getRoom('Planning-2')).toBeDefined()
 
-    const systemMsg = agent.getMessages().find(
+    const systemMsg = inbox.find(
       m => m.senderId === SYSTEM_SENDER_ID && m.content.includes('Planning-2'),
     )
     expect(systemMsg).toBeDefined()

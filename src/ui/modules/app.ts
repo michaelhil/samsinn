@@ -30,6 +30,7 @@ interface AgentInfo {
   name: string
   description: string
   kind: string
+  state?: string
 }
 
 type WSOutbound =
@@ -40,6 +41,14 @@ type WSOutbound =
   | { type: 'agent_joined'; agent: AgentInfo }
   | { type: 'agent_removed'; agentName: string }
   | { type: 'error'; message: string }
+
+type WSInbound =
+  | { type: 'post_message'; target: { rooms?: string[]; agents?: string[] }; content: string }
+  | { type: 'create_room'; name: string; description?: string; visibility: string }
+  | { type: 'add_to_room'; roomName: string; agentName: string }
+  | { type: 'create_agent'; config: Record<string, unknown> }
+  | { type: 'remove_agent'; name: string }
+  | { type: 'update_agent'; name: string; systemPrompt: string }
 
 // === State ===
 
@@ -118,10 +127,15 @@ const handleMessage = (msg: WSOutbound & { sessionToken?: string }) => {
       myAgentId = msg.agentId
       rooms.clear()
       agents.clear()
+      agentStates.clear()
       for (const r of msg.rooms) rooms.set(r.id, r)
-      for (const a of msg.agents) agents.set(a.id, a)
+      for (const a of msg.agents) {
+        agents.set(a.id, a)
+        if (a.state === 'generating') agentStates.set(a.name, { state: 'generating' })
+      }
       renderRooms()
       renderAgents()
+      renderTypingIndicators()
       // Auto-select first room
       if (!selectedRoomId && rooms.size > 0) {
         selectRoom(rooms.values().next().value!.id)
@@ -217,8 +231,20 @@ const renderAgents = () => {
     div.appendChild(kindSpan)
 
     if (agent.kind === 'ai') {
+      const btnRow = document.createElement('div')
+      btnRow.className = 'flex gap-2 mt-1'
+
+      const editBtn = document.createElement('button')
+      editBtn.className = 'text-xs text-blue-400 hover:text-blue-600'
+      editBtn.textContent = 'Edit Prompt'
+      editBtn.onclick = (e) => {
+        e.stopPropagation()
+        openPromptEditor(agent.name)
+      }
+      btnRow.appendChild(editBtn)
+
       const removeBtn = document.createElement('button')
-      removeBtn.className = 'text-xs text-red-400 hover:text-red-600 mt-1'
+      removeBtn.className = 'text-xs text-red-400 hover:text-red-600'
       removeBtn.textContent = 'Remove'
       removeBtn.onclick = (e) => {
         e.stopPropagation()
@@ -226,11 +252,62 @@ const renderAgents = () => {
         agents.delete(agent.id)
         renderAgents()
       }
-      div.appendChild(removeBtn)
+      btnRow.appendChild(removeBtn)
+
+      div.appendChild(btnRow)
     }
 
     agentList.appendChild(div)
   }
+}
+
+const openPromptEditor = async (agentName: string) => {
+  // Fetch current prompt from API
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentName)}`)
+  if (!res.ok) return
+  const data = await res.json()
+  const currentPrompt = data.systemPrompt ?? ''
+
+  // Create modal overlay
+  const overlay = document.createElement('div')
+  overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
+
+  const modal = document.createElement('div')
+  modal.className = 'bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4'
+
+  const title = document.createElement('h3')
+  title.className = 'text-lg font-semibold mb-3'
+  title.textContent = `System Prompt — ${agentName}`
+
+  const textarea = document.createElement('textarea')
+  textarea.className = 'w-full h-48 border rounded p-3 text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-blue-300'
+  textarea.value = currentPrompt
+
+  const btnRow = document.createElement('div')
+  btnRow.className = 'flex justify-end gap-2 mt-3'
+
+  const cancelBtn = document.createElement('button')
+  cancelBtn.className = 'px-4 py-2 text-sm text-gray-600 hover:text-gray-800'
+  cancelBtn.textContent = 'Cancel'
+  cancelBtn.onclick = () => overlay.remove()
+
+  const saveBtn = document.createElement('button')
+  saveBtn.className = 'px-4 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600'
+  saveBtn.textContent = 'Save'
+  saveBtn.onclick = () => {
+    send({ type: 'update_agent', name: agentName, systemPrompt: textarea.value } as WSInbound)
+    overlay.remove()
+  }
+
+  btnRow.appendChild(cancelBtn)
+  btnRow.appendChild(saveBtn)
+  modal.appendChild(title)
+  modal.appendChild(textarea)
+  modal.appendChild(btnRow)
+  overlay.appendChild(modal)
+  document.body.appendChild(overlay)
+  textarea.focus()
 }
 
 const selectRoom = (roomId: string) => {
@@ -371,7 +448,6 @@ agentForm.onsubmit = (e) => {
       description: data.get('description') as string || '',
       model: data.get('model') as string,
       systemPrompt: data.get('systemPrompt') as string,
-      cooldownMs: 15000,
     },
   })
   agentModal.close()

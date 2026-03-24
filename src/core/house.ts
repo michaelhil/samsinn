@@ -1,16 +1,16 @@
 // ============================================================================
 // House — Room collection. Creates, stores, and retrieves rooms.
-// No delivery logic. No participant awareness. Just rooms.
+// Accepts an optional DeliverFn, forwarded to every Room for member delivery.
 //
 // Names are unique (case-insensitive). createRoom throws on collision.
 // createRoomSafe auto-renames on collision and returns CreateResult.
 // ============================================================================
 
-import type { CreateResult, House, Room, RoomConfig, RoomProfile } from './types.ts'
+import type { CreateResult, DeliverFn, House, Room, RoomConfig, RoomProfile } from './types.ts'
 import { createRoom } from './room.ts'
 import { ensureUniqueName, validateName } from './names.ts'
 
-export const createHouse = (): House => {
+export const createHouse = (deliver?: DeliverFn): House => {
   const rooms = new Map<string, Room>()
 
   const getExistingNames = (): ReadonlyArray<string> =>
@@ -32,7 +32,7 @@ export const createHouse = (): House => {
       createdBy: config.createdBy,
       createdAt: Date.now(),
     }
-    const room = createRoom(profile)
+    const room = createRoom(profile, deliver)
     rooms.set(id, room)
     return room
   }

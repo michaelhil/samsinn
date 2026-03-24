@@ -55,22 +55,21 @@ export interface MessageTarget {
 
 export type PostParams = Omit<Message, 'id' | 'roomId' | 'timestamp' | 'recipientId'>
 
-// === Room — pure data structure returned by createRoom ===
+// === Delivery — callback for Room to deliver messages to agents ===
+
+export type DeliverFn = (agentId: string, message: Message, history: ReadonlyArray<Message>) => void
+
+// === Room — self-contained component: stores messages and delivers to members ===
 
 export interface Room {
   readonly profile: RoomProfile
-  readonly post: (params: PostParams) => PostResult
+  readonly post: (params: PostParams) => Message
   readonly getRecent: (n: number) => ReadonlyArray<Message>
   readonly getParticipantIds: () => ReadonlyArray<string>
   readonly addMember: (id: string) => void
   readonly removeMember: (id: string) => void
   readonly hasMember: (id: string) => boolean
   readonly getMessageCount: () => number
-}
-
-export interface PostResult {
-  readonly message: Message
-  readonly recipientIds: ReadonlyArray<string>
 }
 
 // === CreateResult — returned when name uniqueness is enforced ===
@@ -120,12 +119,9 @@ export interface Agent {
   readonly kind: 'ai' | 'human'
   readonly metadata: Record<string, unknown>
   readonly state: AgentState
-  readonly getMessages: () => ReadonlyArray<Message>
-  readonly receive: (message: Message) => void
+  readonly receive: (message: Message, history?: ReadonlyArray<Message>) => void
   readonly join: (room: Room) => Promise<void>
   readonly getRoomIds: () => ReadonlyArray<string>
-  readonly getMessagesForRoom: (roomId: string, limit?: number) => ReadonlyArray<Message>
-  readonly getMessagesForPeer: (peerId: string, limit?: number) => ReadonlyArray<Message>
 }
 
 // === AIAgent — extended Agent with query + observability ===
@@ -133,6 +129,8 @@ export interface Agent {
 export interface AIAgent extends Agent {
   readonly whenIdle: (timeoutMs?: number) => Promise<void>
   readonly query: (question: string, askerId: string, askerName?: string) => Promise<string>
+  readonly updateSystemPrompt: (prompt: string) => void
+  readonly getSystemPrompt: () => string
 }
 
 // === Team — agent collection (AI + human) ===
@@ -191,7 +189,6 @@ export interface AIAgentConfig {
   readonly model: string
   readonly systemPrompt: string
   readonly temperature?: number
-  readonly cooldownMs: number
   readonly historyLimit?: number
   readonly tools?: ReadonlyArray<string>        // tool names this agent can use
   readonly maxToolIterations?: number           // default 5
@@ -265,6 +262,7 @@ export type WSInbound =
   | { readonly type: 'add_to_room'; readonly roomName: string; readonly agentName: string }
   | { readonly type: 'create_agent'; readonly config: AIAgentConfig }
   | { readonly type: 'remove_agent'; readonly name: string }
+  | { readonly type: 'update_agent'; readonly name: string; readonly systemPrompt: string }
 
 export type WSOutbound =
   | { readonly type: 'message'; readonly message: Message }
@@ -284,6 +282,5 @@ export const DEFAULTS = {
   ollamaBaseUrl: 'http://localhost:11434',
   historyLimit: 50,
   roomMessageLimit: 500,
-  cooldownMs: 15000,
   maxAgentActionsPerResponse: 5,
 } as const

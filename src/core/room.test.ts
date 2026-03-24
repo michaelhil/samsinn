@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { createRoom } from './room.ts'
-import type { RoomProfile } from './types.ts'
+import type { Message, RoomProfile } from './types.ts'
 import { SYSTEM_SENDER_ID } from './types.ts'
 
 const makeProfile = (overrides?: Partial<RoomProfile>): RoomProfile => ({
@@ -12,7 +12,7 @@ const makeProfile = (overrides?: Partial<RoomProfile>): RoomProfile => ({
   ...overrides,
 })
 
-describe('Room — pure data structure', () => {
+describe('Room — self-contained component', () => {
   test('starts with zero messages and no participants', () => {
     const room = createRoom(makeProfile())
     expect(room.getMessageCount()).toBe(0)
@@ -22,37 +22,70 @@ describe('Room — pure data structure', () => {
 
   test('post appends message with auto-generated id, timestamp, and roomId', () => {
     const room = createRoom(makeProfile({ id: 'my-room' }))
-    const result = room.post({
+    const message = room.post({
       senderId: 'alice',
       content: 'Hello',
       type: 'chat',
     })
 
-    expect(result.message.id).toBeTruthy()
-    expect(result.message.timestamp).toBeGreaterThan(0)
-    expect(result.message.roomId).toBe('my-room') // room stamps its own ID
-    expect(result.message.content).toBe('Hello')
-    expect(result.message.senderId).toBe('alice')
-    expect(result.message.type).toBe('chat')
+    expect(message.id).toBeTruthy()
+    expect(message.timestamp).toBeGreaterThan(0)
+    expect(message.roomId).toBe('my-room') // room stamps its own ID
+    expect(message.content).toBe('Hello')
+    expect(message.senderId).toBe('alice')
+    expect(message.type).toBe('chat')
     expect(room.getMessageCount()).toBe(1)
   })
 
-  test('post returns recipient IDs excluding the sender', () => {
+  test('post delivers to all members including sender', () => {
+    const delivered: Array<{ agentId: string; message: Message; historyLen: number }> = []
+    const room = createRoom(makeProfile(), (agentId, message, history) => {
+      delivered.push({ agentId, message, historyLen: history.length })
+    })
+
+    room.addMember('alice')
+    room.addMember('bob')
+
+    // Alice posts — delivered to both Alice and Bob
+    room.post({ senderId: 'alice', content: 'Hi', type: 'chat' })
+    expect(delivered).toHaveLength(2)
+    expect(delivered.map(d => d.agentId).sort()).toEqual(['alice', 'bob'])
+    expect(delivered[0]!.historyLen).toBe(0) // no prior messages
+
+    delivered.length = 0
+
+    // Bob posts — delivered to both, with 1 message of history
+    room.post({ senderId: 'bob', content: 'Hey', type: 'chat' })
+    expect(delivered).toHaveLength(2)
+    expect(delivered.every(d => d.historyLen === 1)).toBe(true)
+  })
+
+  test('post delivers history excluding the new message', () => {
+    const histories: ReadonlyArray<Message>[] = []
+    const room = createRoom(makeProfile(), (_agentId, _message, history) => {
+      histories.push(history)
+    })
+
+    room.addMember('alice')
+    room.addMember('bob')
+
+    room.post({ senderId: 'alice', content: 'msg-1', type: 'chat' })
+    room.post({ senderId: 'alice', content: 'msg-2', type: 'chat' })
+    room.post({ senderId: 'alice', content: 'msg-3', type: 'chat' })
+
+    // Third post: history should contain msg-1 and msg-2 but NOT msg-3
+    const lastHistory = histories[histories.length - 1]!
+    expect(lastHistory).toHaveLength(2)
+    expect(lastHistory[0]!.content).toBe('msg-1')
+    expect(lastHistory[1]!.content).toBe('msg-2')
+  })
+
+  test('works without deliver callback', () => {
     const room = createRoom(makeProfile())
-
-    // Alice posts first — no recipients yet
-    const r1 = room.post({ senderId: 'alice', content: 'Hi', type: 'chat' })
-    expect(r1.recipientIds).toEqual([])
-
-    // Bob posts — Alice is now a recipient
-    const r2 = room.post({ senderId: 'bob', content: 'Hey', type: 'chat' })
-    expect(r2.recipientIds).toContain('alice')
-    expect(r2.recipientIds).not.toContain('bob')
-
-    // Alice posts again — Bob is a recipient
-    const r3 = room.post({ senderId: 'alice', content: 'Howdy', type: 'chat' })
-    expect(r3.recipientIds).toContain('bob')
-    expect(r3.recipientIds).not.toContain('alice')
+    room.addMember('alice')
+    const message = room.post({ senderId: 'alice', content: 'Hi', type: 'chat' })
+    expect(message.content).toBe('Hi')
+    expect(room.getMessageCount()).toBe(1)
   })
 
   test('getParticipantIds derives from message senders, excludes system', () => {
@@ -112,24 +145,24 @@ describe('Room — pure data structure', () => {
 
   test('preserves generationMs when provided', () => {
     const room = createRoom(makeProfile())
-    const result = room.post({
+    const message = room.post({
       senderId: 'bot-1',
       content: 'Analyzed data',
       type: 'chat',
       generationMs: 2400,
     })
-    expect(result.message.generationMs).toBe(2400)
+    expect(message.generationMs).toBe(2400)
   })
 
   test('preserves metadata when provided', () => {
     const room = createRoom(makeProfile())
-    const result = room.post({
+    const message = room.post({
       senderId: 'alice',
       content: 'With meta',
       type: 'chat',
       metadata: { source: 'test', priority: 1 },
     })
-    expect(result.message.metadata).toEqual({ source: 'test', priority: 1 })
+    expect(message.metadata).toEqual({ source: 'test', priority: 1 })
   })
 
   test('message IDs are unique (UUID-based)', () => {
@@ -137,8 +170,8 @@ describe('Room — pure data structure', () => {
     const ids = new Set<string>()
 
     for (let i = 0; i < 100; i++) {
-      const result = room.post({ senderId: 'alice', content: `msg-${i}`, type: 'chat' })
-      ids.add(result.message.id)
+      const message = room.post({ senderId: 'alice', content: `msg-${i}`, type: 'chat' })
+      ids.add(message.id)
     }
 
     expect(ids.size).toBe(100)
@@ -150,27 +183,17 @@ describe('Room — pure data structure', () => {
     const ids = new Set<string>()
 
     for (let i = 0; i < 50; i++) {
-      ids.add(room1.post({ senderId: 'alice', content: `r1-${i}`, type: 'chat' }).message.id)
-      ids.add(room2.post({ senderId: 'bob', content: `r2-${i}`, type: 'chat' }).message.id)
+      ids.add(room1.post({ senderId: 'alice', content: `r1-${i}`, type: 'chat' }).id)
+      ids.add(room2.post({ senderId: 'bob', content: `r2-${i}`, type: 'chat' }).id)
     }
 
     expect(ids.size).toBe(100)
   })
 
-  test('room has no external dependencies — no delivery, no events', () => {
-    const room = createRoom(makeProfile())
-    room.post({ senderId: 'alice', content: 'Standalone', type: 'chat' })
-    const msgs = room.getRecent(10)
-    const participants = room.getParticipantIds()
-
-    expect(msgs).toHaveLength(1)
-    expect(participants).toEqual(['alice'])
-  })
-
   // === Message eviction ===
 
   test('evicts oldest messages when exceeding maxMessages', () => {
-    const room = createRoom(makeProfile(), 5)
+    const room = createRoom(makeProfile(), undefined, 5)
 
     for (let i = 0; i < 8; i++) {
       room.post({ senderId: 'alice', content: `msg-${i}`, type: 'chat' })
@@ -183,7 +206,7 @@ describe('Room — pure data structure', () => {
   })
 
   test('eviction does not affect member tracking', () => {
-    const room = createRoom(makeProfile(), 3)
+    const room = createRoom(makeProfile(), undefined, 3)
 
     room.post({ senderId: 'alice', content: 'a', type: 'chat' })
     room.post({ senderId: 'bob', content: 'b', type: 'chat' })
@@ -220,20 +243,20 @@ describe('Room — pure data structure', () => {
     expect(room.getParticipantIds().filter(id => id === 'alice')).toHaveLength(1)
   })
 
-  test('removeMember removes agent from members and future recipients', () => {
-    const room = createRoom(makeProfile())
+  test('removeMember removes agent from members and future delivery', () => {
+    const delivered: string[] = []
+    const room = createRoom(makeProfile(), (agentId) => { delivered.push(agentId) })
 
-    room.post({ senderId: 'alice', content: 'Hi', type: 'chat' })
-    room.post({ senderId: 'bob', content: 'Hey', type: 'chat' })
-    expect(room.hasMember('alice')).toBe(true)
+    room.addMember('alice')
+    room.addMember('bob')
 
     room.removeMember('alice')
     expect(room.hasMember('alice')).toBe(false)
     expect(room.getParticipantIds()).not.toContain('alice')
 
-    // Alice no longer receives messages
-    const result = room.post({ senderId: 'bob', content: 'Still here?', type: 'chat' })
-    expect(result.recipientIds).not.toContain('alice')
+    // Alice no longer receives messages (bob gets his own echo)
+    room.post({ senderId: 'bob', content: 'Still here?', type: 'chat' })
+    expect(delivered).toEqual(['bob'])
   })
 
   test('removeMember is safe for non-existent members', () => {

@@ -5,18 +5,13 @@
 // - receive() pushes message over transport instead of LLM evaluation
 // - join() sends recent history over transport (no LLM summary)
 //
+// No message storage — Room is the source of truth for room messages.
+// Room membership tracked via roomIds Set.
 // ID is auto-generated UUID, same as AI agents.
 // ============================================================================
 
 import type { Agent, AgentState, Message, Room } from '../core/types.ts'
 import { DEFAULTS } from '../core/types.ts'
-import {
-  addMessageWithEviction,
-  getMessagesAll,
-  getMessagesForPeer as getMessagesForPeerHelper,
-  getMessagesForRoom as getMessagesForRoomHelper,
-  getRoomIdsFromMessages,
-} from '../core/messages.ts'
 
 export interface HumanAgentConfig {
   readonly name: string
@@ -36,7 +31,7 @@ export const createHumanAgent = (
 ): HumanAgent => {
   const agentId = crypto.randomUUID()
   let send = initialSend
-  const messages: Message[] = []
+  const roomIds = new Set<string>()
   const historyLimit = DEFAULTS.historyLimit
 
   // Human agents are always 'idle' — state changes come from UI interaction, not LLM
@@ -45,20 +40,7 @@ export const createHumanAgent = (
     subscribe: () => () => {},
   }
 
-  const addMessage = (message: Message): void => {
-    addMessageWithEviction(messages, message, agentId, historyLimit)
-  }
-
-  const getMessages = (): ReadonlyArray<Message> => getMessagesAll(messages)
-  const getRoomIds = (): ReadonlyArray<string> => getRoomIdsFromMessages(messages)
-  const getMessagesForRoom = (roomId: string, limit?: number): ReadonlyArray<Message> =>
-    getMessagesForRoomHelper(messages, roomId, limit ?? historyLimit)
-  const getMessagesForPeer = (peerId: string, limit?: number): ReadonlyArray<Message> =>
-    getMessagesForPeerHelper(messages, agentId, peerId, limit ?? historyLimit)
-
-  const receive = (message: Message): void => {
-    addMessage(message)
-
+  const receive = (message: Message, _history?: ReadonlyArray<Message>): void => {
     // Don't echo own messages back over transport
     if (message.senderId === agentId) return
 
@@ -70,12 +52,9 @@ export const createHumanAgent = (
   }
 
   const join = async (room: Room): Promise<void> => {
+    roomIds.add(room.profile.id)
     const recent = room.getRecent(historyLimit)
-    const existingIds = new Set(messages.map(m => m.id))
     for (const msg of recent) {
-      if (existingIds.has(msg.id)) continue
-
-      addMessage(msg)
       try {
         send(msg)
       } catch (err) {
@@ -92,12 +71,9 @@ export const createHumanAgent = (
     kind: 'human',
     metadata: config.metadata ?? {},
     state,
-    getMessages,
     receive,
     join,
-    getRoomIds,
-    getMessagesForRoom,
-    getMessagesForPeer,
+    getRoomIds: () => [...roomIds],
     setTransport: (newSend: TransportSend) => { send = newSend },
   }
 }

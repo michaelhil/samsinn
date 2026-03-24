@@ -12,7 +12,6 @@ const makeConfig = (overrides?: Partial<AIAgentConfig>): AIAgentConfig => ({
   description: 'A test bot',
   model: 'test-model',
   systemPrompt: 'You are a helpful test bot.',
-  cooldownMs: 100,
   historyLimit: 10,
   ...overrides,
 })
@@ -43,17 +42,10 @@ const makeMessage = (overrides?: Partial<Message>): Message => ({
   ...overrides,
 })
 
+const makeHistory = (messages: Array<Partial<Message>>): ReadonlyArray<Message> =>
+  messages.map(m => makeMessage(m))
+
 describe('AI Agent — unit tests', () => {
-  test('receive adds message to internal store', () => {
-    const agent = createAIAgent(makeConfig(), makeLLMProvider(), () => {})
-    const msg = makeMessage()
-
-    agent.receive(msg)
-
-    expect(agent.getMessages()).toHaveLength(1)
-    expect(agent.getMessages()[0]!.content).toBe('Hello')
-  })
-
   test('receive skips own messages (no self-reply)', async () => {
     const decisions: Decision[] = []
     const agent = createAIAgent(
@@ -101,25 +93,6 @@ describe('AI Agent — unit tests', () => {
     expect(decisions[0]!.generationMs).toBe(42)
   })
 
-  test('cooldown prevents rapid re-evaluation', async () => {
-    const decisions: Decision[] = []
-    const agent = createAIAgent(
-      makeConfig({ cooldownMs: 500 }),
-      makeLLMProvider('{"action":"respond","content":"Hi"}'),
-      (d) => { decisions.push(d) },
-    )
-
-    // First message triggers evaluation
-    agent.receive(makeMessage({ senderId: 'alice', content: 'msg-1' }))
-    await agent.whenIdle()
-
-    // Second message during cooldown — should be skipped
-    agent.receive(makeMessage({ senderId: 'bob', content: 'msg-2' }))
-    await agent.whenIdle()
-
-    expect(decisions).toHaveLength(1) // only first triggered
-  })
-
   test('per-room generation: same room queues, different rooms run concurrently', async () => {
     let callCount = 0
     const slowProvider: LLMProvider = {
@@ -136,7 +109,7 @@ describe('AI Agent — unit tests', () => {
     }
 
     const agent = createAIAgent(
-      makeConfig({ cooldownMs: 0 }),
+      makeConfig(),
       slowProvider,
       () => {},
     )
@@ -174,58 +147,14 @@ describe('AI Agent — unit tests', () => {
     }
   })
 
-  test('eviction keeps messages within historyLimit per room', () => {
-    const agent = createAIAgent(
-      makeConfig({ historyLimit: 5 }),
-      makeLLMProvider(),
-      () => {},
-    )
-
-    // Add 10 messages to room-1 (own messages — won't trigger eval)
-    for (let i = 0; i < 10; i++) {
-      agent.receive(makeMessage({
-        senderId: agent.id,
-        roomId: 'room-1',
-        content: `msg-${i}`,
-      }))
-    }
-
-    const roomMsgs = agent.getMessagesForRoom('room-1')
-    expect(roomMsgs.length).toBeLessThanOrEqual(5)
-    expect(roomMsgs[roomMsgs.length - 1]!.content).toBe('msg-9')
-  })
-
-  test('getMessagesForRoom filters by roomId', () => {
+  test('getRoomIds tracks rooms from join()', async () => {
     const agent = createAIAgent(makeConfig(), makeLLMProvider(), () => {})
-
-    agent.receive(makeMessage({ senderId: agent.id, roomId: 'room-1', content: 'r1-msg' }))
-    agent.receive(makeMessage({ senderId: agent.id, roomId: 'room-2', content: 'r2-msg' }))
-
-    expect(agent.getMessagesForRoom('room-1')).toHaveLength(1)
-    expect(agent.getMessagesForRoom('room-2')).toHaveLength(1)
-    expect(agent.getMessagesForRoom('room-1')[0]!.content).toBe('r1-msg')
-  })
-
-  test('getRoomIds returns unique room IDs from messages', () => {
-    const agent = createAIAgent(makeConfig(), makeLLMProvider(), () => {})
-
-    agent.receive(makeMessage({ senderId: agent.id, roomId: 'room-1' }))
-    agent.receive(makeMessage({ senderId: agent.id, roomId: 'room-2' }))
-    agent.receive(makeMessage({ senderId: agent.id, roomId: 'room-1' }))
-
-    const roomIds = agent.getRoomIds()
-    expect(roomIds).toHaveLength(2)
-    expect(roomIds).toContain('room-1')
-    expect(roomIds).toContain('room-2')
-  })
-
-  test('join snapshots room profile', async () => {
-    const agent = createAIAgent(makeConfig(), makeLLMProvider(), () => {})
-    const room = makeRoom('room-1', 'Project Alpha')
+    const room = makeRoom('room-1', 'Test Room')
 
     await agent.join(room)
 
-    expect(agent.getRoomIds()).toHaveLength(0) // no messages yet from this room
+    const roomIds = agent.getRoomIds()
+    expect(roomIds).toContain('room-1')
   })
 
   test('join generates summary for rooms with history', async () => {
@@ -233,18 +162,27 @@ describe('AI Agent — unit tests', () => {
     room.post({ senderId: 'alice', content: 'We should build a pipeline', type: 'chat' })
     room.post({ senderId: 'bob', content: 'I agree', type: 'chat' })
 
-    const agent = createAIAgent(
-      makeConfig(),
-      makeLLMProvider('Summary: [alice] proposed building a pipeline. [bob] agreed.'),
-      () => {},
-    )
+    let capturedMessages: ReadonlyArray<{ role: string; content: string }> = []
+    const provider: LLMProvider = {
+      chat: async (req) => {
+        capturedMessages = req.messages
+        return {
+          content: 'Summary: [alice] proposed building a pipeline. [bob] agreed.',
+          generationMs: 10,
+          tokensUsed: { prompt: 10, completion: 5 },
+        }
+      },
+      models: async () => [],
+    }
 
+    const agent = createAIAgent(makeConfig(), provider, () => {})
     await agent.join(room)
 
-    const msgs = agent.getMessages()
-    expect(msgs).toHaveLength(1)
-    expect(msgs[0]!.type).toBe('room_summary')
-    expect(msgs[0]!.content).toContain('[alice]')
+    // Summary LLM call should have been made
+    expect(capturedMessages.length).toBeGreaterThan(0)
+    const userMsg = capturedMessages.find(m => m.role === 'user')
+    expect(userMsg?.content).toContain('Active Room')
+    expect(userMsg?.content).toContain('pipeline')
   })
 
   test('join does not generate summary for empty rooms', async () => {
@@ -263,7 +201,6 @@ describe('AI Agent — unit tests', () => {
     await agent.join(room)
 
     expect(chatCalled).toBe(false)
-    expect(agent.getMessages()).toHaveLength(0)
   })
 
   test('LLM error is caught — agent does not crash', async () => {
@@ -332,7 +269,7 @@ describe('AI Agent — unit tests', () => {
       models: async () => [],
     }
 
-    const agent = createAIAgent(makeConfig({ cooldownMs: 0 }), provider, () => {})
+    const agent = createAIAgent(makeConfig(), provider, () => {})
 
     // Two messages to same room — second becomes pending
     agent.receive(makeMessage({ senderId: 'alice', roomId: 'room-1', content: 'msg-1' }))
@@ -342,6 +279,132 @@ describe('AI Agent — unit tests', () => {
 
     // Both evaluations should have completed
     expect(callCount).toBe(2)
+  })
+})
+
+describe('[NEW] message tagging', () => {
+  test('new messages are tagged [NEW] in LLM context', async () => {
+    let capturedMessages: ReadonlyArray<{ role: string; content: string }> = []
+    const provider: LLMProvider = {
+      chat: async (req) => {
+        capturedMessages = req.messages
+        return {
+          content: '{"action":"pass","reason":"done"}',
+          generationMs: 10,
+          tokensUsed: { prompt: 10, completion: 5 },
+        }
+      },
+      models: async () => [],
+    }
+
+    const agent = createAIAgent(makeConfig(), provider, () => {})
+
+    // Receive a message — should be tagged [NEW] since buffer was empty
+    agent.receive(makeMessage({ senderId: 'alice', roomId: 'room-1', content: 'Fresh message' }))
+    await agent.whenIdle()
+
+    const userMsgs = capturedMessages.filter(m => m.role === 'user')
+    expect(userMsgs.some(m => m.content.includes('[NEW]') && m.content.includes('Fresh message'))).toBe(true)
+  })
+
+  test('history messages are NOT tagged [NEW]', async () => {
+    let capturedMessages: ReadonlyArray<{ role: string; content: string }> = []
+    const provider: LLMProvider = {
+      chat: async (req) => {
+        capturedMessages = req.messages
+        return {
+          content: '{"action":"pass","reason":"done"}',
+          generationMs: 10,
+          tokensUsed: { prompt: 10, completion: 5 },
+        }
+      },
+      models: async () => [],
+    }
+
+    const agent = createAIAgent(makeConfig(), provider, () => {})
+
+    const history = makeHistory([
+      { senderId: 'bob', roomId: 'room-1', content: 'Old message 1' },
+      { senderId: 'charlie', roomId: 'room-1', content: 'Old message 2' },
+    ])
+
+    // Receive with history — new message should be [NEW], history should not
+    agent.receive(
+      makeMessage({ senderId: 'alice', roomId: 'room-1', content: 'New message' }),
+      history,
+    )
+    await agent.whenIdle()
+
+    const userMsgs = capturedMessages.filter(m => m.role === 'user')
+
+    // Old messages should NOT have [NEW]
+    const oldMsgs = userMsgs.filter(m => m.content.includes('Old message'))
+    expect(oldMsgs.every(m => !m.content.includes('[NEW]'))).toBe(true)
+
+    // New message SHOULD have [NEW]
+    const newMsgs = userMsgs.filter(m => m.content.includes('New message'))
+    expect(newMsgs.every(m => m.content.includes('[NEW]'))).toBe(true)
+  })
+
+  test('system prompt mentions [NEW] message handling', async () => {
+    let capturedMessages: ReadonlyArray<{ role: string; content: string }> = []
+    const provider: LLMProvider = {
+      chat: async (req) => {
+        capturedMessages = req.messages
+        return {
+          content: '{"action":"pass","reason":"done"}',
+          generationMs: 10,
+          tokensUsed: { prompt: 10, completion: 5 },
+        }
+      },
+      models: async () => [],
+    }
+
+    const agent = createAIAgent(makeConfig(), provider, () => {})
+    agent.receive(makeMessage({ senderId: 'alice', roomId: 'room-1' }))
+    await agent.whenIdle()
+
+    const systemMsg = capturedMessages.find(m => m.role === 'system')
+    expect(systemMsg?.content).toContain('[NEW]')
+    expect(systemMsg?.content).toContain('Prioritise')
+  })
+
+  test('buffered messages during generation are all tagged [NEW]', async () => {
+    let callCount = 0
+    let lastCapturedMessages: ReadonlyArray<{ role: string; content: string }> = []
+    const provider: LLMProvider = {
+      chat: async (req) => {
+        callCount++
+        lastCapturedMessages = req.messages
+        if (callCount === 1) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+        return {
+          content: '{"action":"pass","reason":"done"}',
+          generationMs: 10,
+          tokensUsed: { prompt: 10, completion: 5 },
+        }
+      },
+      models: async () => [],
+    }
+
+    const agent = createAIAgent(makeConfig(), provider, () => {})
+
+    // First message triggers eval
+    agent.receive(makeMessage({ senderId: 'alice', roomId: 'room-1', content: 'msg-1' }))
+
+    // Wait a tick for eval to start, then send more while generating
+    await new Promise(resolve => setTimeout(resolve, 10))
+    agent.receive(makeMessage({ senderId: 'bob', roomId: 'room-1', content: 'msg-2' }))
+    agent.receive(makeMessage({ senderId: 'charlie', roomId: 'room-1', content: 'msg-3' }))
+
+    await agent.whenIdle()
+
+    // Second evaluation should have all 3 messages — they're all [NEW]
+    // (msg-1 was flushed after first eval, but msg-2 and msg-3 arrived during eval)
+    expect(callCount).toBe(2)
+    const newMsgs = lastCapturedMessages.filter(m => m.role === 'user' && m.content.includes('[NEW]'))
+    expect(newMsgs.length).toBeGreaterThanOrEqual(2) // at least msg-2 and msg-3
   })
 })
 
@@ -444,7 +507,7 @@ describe('Tool use (ReAct loop)', () => {
 
     const decisions: Decision[] = []
     const agent = createAIAgent(
-      makeConfig({ cooldownMs: 0 }),
+      makeConfig(),
       provider,
       (d) => decisions.push(d),
       { toolExecutor, toolDescriptions: 'Available tools:\n- get_time: Returns the current time.' },
@@ -470,7 +533,7 @@ describe('Tool use (ReAct loop)', () => {
     }
 
     const decisions: Decision[] = []
-    const agent = createAIAgent(makeConfig({ cooldownMs: 0 }), provider, (d) => decisions.push(d))
+    const agent = createAIAgent(makeConfig(), provider, (d) => decisions.push(d))
 
     agent.receive(makeMessage({ senderId: 'alice', roomId: 'room-1' }))
     await agent.whenIdle()
@@ -500,7 +563,7 @@ describe('Tool use (ReAct loop)', () => {
 
     const decisions: Decision[] = []
     const agent = createAIAgent(
-      makeConfig({ cooldownMs: 0, maxToolIterations: 3 }),
+      makeConfig({ maxToolIterations: 3 }),
       provider,
       (d) => decisions.push(d),
       { toolExecutor, toolDescriptions: 'Available tools:\n- loop: Test tool.' },
@@ -530,7 +593,7 @@ describe('Tool use (ReAct loop)', () => {
     }
 
     const agent = createAIAgent(
-      makeConfig({ cooldownMs: 0 }),
+      makeConfig(),
       provider,
       () => {},
       { toolDescriptions: 'Available tools:\n- get_time: Returns the current time.' },
@@ -592,12 +655,5 @@ describe('Query (synchronous inter-agent)', () => {
 
     resolveChat!()
     await first
-  })
-
-  test('query does not affect message history', async () => {
-    const agent = createAIAgent(makeConfig(), makeLLMProvider('Answer'), () => {})
-    await agent.query('Question?', 'alice-1')
-
-    expect(agent.getMessages()).toHaveLength(0)
   })
 })

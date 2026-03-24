@@ -140,9 +140,9 @@ describe('House — room collection', () => {
     const house = createHouse()
     const room = house.createRoom({ name: 'Active', visibility: 'public', createdBy: 'alice' })
 
-    const result = room.post({ senderId: 'alice', content: 'Hello', type: 'chat' })
-    expect(result.message.content).toBe('Hello')
-    expect(result.message.roomId).toBe(room.profile.id)
+    const message = room.post({ senderId: 'alice', content: 'Hello', type: 'chat' })
+    expect(message.content).toBe('Hello')
+    expect(message.roomId).toBe(room.profile.id)
     expect(room.getMessageCount()).toBe(1)
     expect(room.getRecent(10)).toHaveLength(1)
     expect(room.getParticipantIds()).toContain('alice')

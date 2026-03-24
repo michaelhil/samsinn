@@ -40,8 +40,8 @@ export const executeActions = async (
 }
 
 // Add an agent to a room: addMember, join, post join message.
-// Shared by create_room (for creator + invitees) and add_to_room.
-const addAgentToRoom = async (
+// Shared by create_room, add_to_room, and spawn.ts.
+export const addAgentToRoom = async (
   targetId: string,
   targetName: string,
   roomId: string,

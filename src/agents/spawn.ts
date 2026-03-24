@@ -26,8 +26,7 @@ import type {
 } from '../core/types.ts'
 import { createAIAgent } from './ai-agent.ts'
 import type { Decision } from './ai-agent.ts'
-import { executeActions } from './actions.ts'
-import { makeJoinMetadata } from './shared.ts'
+import { addAgentToRoom, executeActions } from './actions.ts'
 
 // --- Tool support ---
 
@@ -145,16 +144,7 @@ export const spawnAIAgent = async (
 
   const publicRooms = house.listPublicRooms()
   for (const roomProfile of publicRooms) {
-    const room = house.getRoom(roomProfile.id)
-    if (!room) continue
-
-    room.addMember(agent.id)
-    await agent.join(room)
-
-    postAndDeliver(
-      { rooms: [room.profile.id] },
-      { senderId: agent.id, content: `[${agent.name}] has joined`, type: 'join', metadata: makeJoinMetadata(agent) },
-    )
+    await addAgentToRoom(agent.id, agent.name, roomProfile.id, undefined, team, postAndDeliver, house)
   }
 
   return agent
@@ -174,12 +164,7 @@ export const spawnHumanAgent = async (
   ).filter((r): r is Room => r !== undefined)
 
   for (const room of rooms) {
-    room.addMember(agent.id)
-    await agent.join(room)
-    postAndDeliver(
-      { rooms: [room.profile.id] },
-      { senderId: agent.id, content: `[${agent.name}] has joined`, type: 'join', metadata: makeJoinMetadata(agent) },
-    )
+    await addAgentToRoom(agent.id, agent.name, room.profile.id, undefined, team, postAndDeliver, house)
   }
 
   return agent

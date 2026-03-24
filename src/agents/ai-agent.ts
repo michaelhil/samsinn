@@ -1,14 +1,20 @@
 // ============================================================================
 // AI Agent — Self-contained agent that uses an LLM to decide responses.
 //
-// Internal state: messages[], roomProfiles, agentProfiles, cooldowns, per-context generation.
-// receive() adds message, extracts profiles, triggers evaluation.
-// evaluate() builds context from own data → LLM call → parses JSON with target.
+// Two-buffer architecture for message context:
+// - Room messages: Room is the source of truth. Room delivers each message
+//   with the full history preceding it. The agent stores a history snapshot
+//   (accepted when the incoming buffer is empty for that context) and an
+//   incoming buffer (fresh messages not yet seen by the LLM).
+// - DM messages: stored locally (no Room involved).
+//
+// buildContext() formats history as old context and incoming as [NEW] messages,
+// so the LLM can prioritise fresh arrivals. After the LLM responds, incoming
+// is flushed and appended to the history snapshot for re-evaluation continuity.
 //
 // Handles both room messages and DMs uniformly:
-// - Room trigger: context built from room messages, room profile
-// - DM trigger: context built from DM thread with peer
-// Both paths produce the same AgentResponse with target field.
+// - Room trigger: context from room-sourced history + incoming buffer
+// - DM trigger: context from local DM history + incoming buffer
 //
 // ID Architecture: The agent generates its own UUID. The LLM sees names only.
 // Names are resolved to UUIDs externally by resolveTarget in spawn.ts.
@@ -34,13 +40,6 @@ import type {
   ToolExecutor,
 } from '../core/types.ts'
 import { DEFAULTS, SYSTEM_SENDER_ID } from '../core/types.ts'
-import {
-  addMessageWithEviction,
-  getMessagesAll,
-  getMessagesForPeer as getMessagesForPeerHelper,
-  getMessagesForRoom as getMessagesForRoomHelper,
-  getRoomIdsFromMessages,
-} from '../core/messages.ts'
 import { extractAgentProfile as extractProfile } from './shared.ts'
 
 // === Decision — what the agent wants to do after evaluation ===
@@ -79,15 +78,26 @@ export const createAIAgent = (
   options?: AIAgentOptions,
 ): AIAgent => {
   const agentId = crypto.randomUUID()
-  const messages: Message[] = []
+
+  // Room message context: history snapshot from Room + incoming buffer
+  const roomHistory = new Map<string, ReadonlyArray<Message>>()  // triggerKey → history snapshot
+  const incoming: Message[] = []                                   // fresh messages (room + DM)
+
+  // DM messages: stored locally (no Room source of truth)
+  const dmMessages: Message[] = []
+
+  // Agent knowledge
   const roomProfiles = new Map<string, RoomProfile>()
   const agentProfiles = new Map<string, AgentProfile>()
-  const cooldowns = new Map<string, number>()
+  const roomIds = new Set<string>()
+
+  // Concurrency control
   const generatingContexts = new Set<string>()
   const pendingContexts = new Set<string>()
   let idleResolvers: Array<() => void> = []
   const stateSubscribers = new Set<StateSubscriber>()
 
+  let currentSystemPrompt: string = config.systemPrompt
   const historyLimit = config.historyLimit ?? DEFAULTS.historyLimit
   const maxToolIterations = config.maxToolIterations ?? 5
   const toolExecutor = options?.toolExecutor
@@ -113,23 +123,51 @@ export const createAIAgent = (
     extractProfile(message, agentId, agentProfiles)
   }
 
-  // --- Message management (delegates to shared helpers) ---
+  // --- DM message management ---
 
-  const addMessage = (message: Message): void => {
-    addMessageWithEviction(messages, message, agentId, historyLimit)
+  const addDMMessage = (message: Message): void => {
+    dmMessages.push(message)
+    // Simple eviction: keep last N DM messages per peer
+    const peerId = message.senderId === agentId ? message.recipientId : message.senderId
+    if (!peerId) return
+    const peerMsgs = dmMessages.filter(m =>
+      m.roomId === undefined && (
+        (m.senderId === peerId && m.recipientId === agentId) ||
+        (m.senderId === agentId && m.recipientId === peerId)
+      ),
+    )
+    if (peerMsgs.length > historyLimit) {
+      const excess = peerMsgs.length - historyLimit
+      const toRemove = new Set(peerMsgs.slice(0, excess).map(m => m.id))
+      const kept = dmMessages.filter(m => !toRemove.has(m.id))
+      dmMessages.length = 0
+      dmMessages.push(...kept)
+    }
   }
 
-  const getMessages = (): ReadonlyArray<Message> => getMessagesAll(messages)
-  const getRoomIds = (): ReadonlyArray<string> => getRoomIdsFromMessages(messages)
-  const getMessagesForRoom = (roomId: string, limit?: number): ReadonlyArray<Message> =>
-    getMessagesForRoomHelper(messages, roomId, limit ?? historyLimit)
-  const getMessagesForPeer = (peerId: string, limit?: number): ReadonlyArray<Message> =>
-    getMessagesForPeerHelper(messages, agentId, peerId, limit ?? historyLimit)
+  const getDMMessagesForPeer = (peerId: string): ReadonlyArray<Message> => {
+    const peerMsgs = dmMessages.filter(m =>
+      m.roomId === undefined && (
+        (m.senderId === peerId && m.recipientId === agentId) ||
+        (m.senderId === agentId && m.recipientId === peerId)
+      ),
+    )
+    if (peerMsgs.length <= historyLimit) return peerMsgs
+    return peerMsgs.slice(-historyLimit)
+  }
+
+  // --- Participants for room context ---
 
   const getParticipantsForRoom = (roomId: string): ReadonlyArray<AgentProfile | string> => {
+    // Build from history + incoming for that room
+    const key = triggerKey(roomId, undefined)
+    const history = roomHistory.get(key) ?? []
+    const fresh = incoming.filter(m => m.roomId === roomId)
+    const allMsgs = [...history, ...fresh]
+
     const senderIds = new Set<string>()
-    for (const msg of messages) {
-      if (msg.roomId === roomId && msg.senderId !== SYSTEM_SENDER_ID && msg.senderId !== agentId) {
+    for (const msg of allMsgs) {
+      if (msg.senderId !== SYSTEM_SENDER_ID && msg.senderId !== agentId) {
         senderIds.add(msg.senderId)
       }
     }
@@ -142,23 +180,6 @@ export const createAIAgent = (
     if (senderId === SYSTEM_SENDER_ID) return 'System'
     if (senderId === agentId) return config.name
     return agentProfiles.get(senderId)?.name ?? senderId
-  }
-
-  // --- Cooldown ---
-
-  const isOnCooldown = (key: string): boolean => {
-    const lastTime = cooldowns.get(key)
-    if (lastTime === undefined) return false
-    const now = Date.now()
-    if (now - lastTime >= config.cooldownMs) {
-      cooldowns.delete(key)  // lazy prune expired entries
-      return false
-    }
-    return true
-  }
-
-  const setCooldown = (key: string): void => {
-    cooldowns.set(key, Date.now())
   }
 
   // --- Idle detection — resolves when all evaluations complete ---
@@ -184,10 +205,62 @@ export const createAIAgent = (
     })
   }
 
+  // --- Format messages for LLM context ---
+
+  const formatMessage = (msg: Message, prefix: string): { role: 'user' | 'assistant'; content: string } | null => {
+    if (msg.type === 'system' || msg.type === 'join' || msg.type === 'leave') return null
+    if (msg.senderId === agentId) {
+      return { role: 'assistant' as const, content: msg.content }
+    }
+    const name = resolveName(msg.senderId)
+    return { role: 'user' as const, content: `${prefix}[${name}]: ${msg.content}` }
+  }
+
+  // Flush info returned by buildContext — describes which incoming messages were used
+  // and should be removed after the LLM call completes.
+  interface FlushInfo {
+    readonly ids: Set<string>
+    readonly dmMessages: Message[]
+    readonly triggerRoomId?: string
+  }
+
+  const flushIncoming = (info: FlushInfo): void => {
+    if (info.ids.size === 0) return
+
+    // Collect the flushed messages before removing them
+    const flushed = incoming.filter(m => info.ids.has(m.id))
+
+    // Remove flushed messages from incoming
+    const remaining = incoming.filter(m => !info.ids.has(m.id))
+    incoming.length = 0
+    incoming.push(...remaining)
+
+    // Append flushed messages to room history snapshot so re-evaluations
+    // (triggered by pendingContexts) still have full context.
+    // The snapshot is replaced when a fresh one arrives via receive().
+    if (info.triggerRoomId && flushed.length > 0) {
+      const key = triggerKey(info.triggerRoomId, undefined)
+      const current = roomHistory.get(key) ?? []
+      roomHistory.set(key, [...current, ...flushed])
+    }
+
+    // Move flushed DMs to persistent DM store
+    for (const msg of info.dmMessages) {
+      addDMMessage(msg)
+    }
+  }
+
   // --- Context assembly (names only — no UUIDs shown to LLM) ---
 
-  const buildContext = (triggerRoomId?: string, triggerPeerId?: string): ChatRequest['messages'] => {
-    let systemContent = config.systemPrompt
+  interface ContextResult {
+    readonly messages: ChatRequest['messages']
+    readonly flushInfo: FlushInfo
+  }
+
+  const buildContext = (triggerRoomId?: string, triggerPeerId?: string): ContextResult => {
+    const flushIds = new Set<string>()
+    const flushDMs: Message[] = []
+    let systemContent = currentSystemPrompt
 
     // Current conversation context
     if (triggerRoomId) {
@@ -212,10 +285,9 @@ export const createAIAgent = (
       if (peerProfile?.description) systemContent += ` ${peerProfile.description}`
     }
 
-    // Available rooms — names only
-    const roomIds = getRoomIds()
-    if (roomIds.length > 0) {
-      const roomNames = roomIds
+    // Available rooms — from explicit Set
+    if (roomIds.size > 0) {
+      const roomNames = [...roomIds]
         .map(id => roomProfiles.get(id)?.name ?? id)
         .map(name => `"${name}"`)
       systemContent += `\n\nYour rooms: ${roomNames.join(', ')}`
@@ -244,31 +316,53 @@ To stay silent: {"action": "pass", "reason": "..."}`
 Tool results will be provided, then you respond normally.`
     }
 
-    systemContent += `\n\nOnly respond when you have substantive input. Do not respond just to acknowledge.`
+    systemContent += `\n\nMessages marked [NEW] have arrived since you last responded. Prioritise responding to these. Only respond when you have substantive input. Do not respond just to acknowledge.`
 
     // Build message array
     const chatMessages: ChatRequest['messages'][number][] = [
       { role: 'system' as const, content: systemContent },
     ]
 
-    // Get recent messages for the triggering conversation
-    const recentMessages = triggerRoomId
-      ? getMessagesForRoom(triggerRoomId)
-      : triggerPeerId
-        ? getMessagesForPeer(triggerPeerId)
-        : []
+    // Room context: history (old) + incoming (new)
+    if (triggerRoomId) {
+      const key = triggerKey(triggerRoomId, undefined)
+      const old = roomHistory.get(key) ?? []
+      const fresh = incoming.filter(m => m.roomId === triggerRoomId)
 
-    for (const msg of recentMessages) {
-      if (msg.type === 'system' || msg.type === 'join' || msg.type === 'leave') continue
-      if (msg.senderId === agentId) {
-        chatMessages.push({ role: 'assistant' as const, content: msg.content })
-      } else {
-        const name = resolveName(msg.senderId)
-        chatMessages.push({ role: 'user' as const, content: `[${name}]: ${msg.content}` })
+      for (const msg of old) {
+        const formatted = formatMessage(msg, '')
+        if (formatted) chatMessages.push(formatted)
+      }
+      for (const msg of fresh) {
+        const formatted = formatMessage(msg, '[NEW] ')
+        if (formatted) chatMessages.push(formatted)
+        flushIds.add(msg.id)
       }
     }
 
-    return chatMessages
+    // DM context: local DM history (old) + incoming DMs (new)
+    if (triggerPeerId) {
+      const old = getDMMessagesForPeer(triggerPeerId)
+      const fresh = incoming.filter(m =>
+        m.roomId === undefined && (m.senderId === triggerPeerId || m.recipientId === triggerPeerId),
+      )
+
+      for (const msg of old) {
+        const formatted = formatMessage(msg, '')
+        if (formatted) chatMessages.push(formatted)
+      }
+      for (const msg of fresh) {
+        const formatted = formatMessage(msg, '[NEW] ')
+        if (formatted) chatMessages.push(formatted)
+        flushIds.add(msg.id)
+        flushDMs.push(msg)
+      }
+    }
+
+    return {
+      messages: chatMessages,
+      flushInfo: { ids: flushIds, dmMessages: flushDMs, triggerRoomId },
+    }
   }
 
   // --- JSON parsing with fallback ---
@@ -302,9 +396,17 @@ Tool results will be provided, then you respond normally.`
 
   // --- Evaluate ---
 
-  const evaluate = async (triggerRoomId?: string, triggerPeerId?: string): Promise<Decision | null> => {
-    const context = [...buildContext(triggerRoomId, triggerPeerId)]
+  interface EvalResult {
+    readonly decision: Decision | null
+    readonly flushInfo: FlushInfo
+  }
+
+  const evaluate = async (triggerRoomId?: string, triggerPeerId?: string): Promise<EvalResult> => {
+    const { messages: builtMessages, flushInfo } = buildContext(triggerRoomId, triggerPeerId)
+    const context = [...builtMessages]
     let totalGenerationMs = 0
+
+    const makeResult = (decision: Decision | null): EvalResult => ({ decision, flushInfo })
 
     try {
       // Loop: 1 initial call + up to maxToolIterations tool rounds
@@ -337,33 +439,33 @@ Tool results will be provided, then you respond normally.`
 
         // tool_call without executor — fall back to pass
         if (parsed.action === 'tool_call') {
-          return {
+          return makeResult({
             response: { action: 'pass', reason: 'Tool calls not available' },
             generationMs: totalGenerationMs,
             triggerRoomId,
             triggerPeerId,
-          }
+          })
         }
 
         // respond or pass — return decision
-        return {
+        return makeResult({
           response: parsed,
           generationMs: totalGenerationMs,
           triggerRoomId,
           triggerPeerId,
-        }
+        })
       }
 
       // Max iterations reached
-      return {
+      return makeResult({
         response: { action: 'pass', reason: `Tool call loop exceeded ${maxToolIterations} iterations` },
         generationMs: totalGenerationMs,
         triggerRoomId,
         triggerPeerId,
-      }
+      })
     } catch (err) {
       console.error(`[${config.name}] LLM call failed:`, err)
-      return null
+      return makeResult(null)
     }
   }
 
@@ -377,29 +479,25 @@ Tool results will be provided, then you respond normally.`
       return
     }
 
-    if (isOnCooldown(key)) return
-
     generatingContexts.add(key)
     notifyState('generating', key)
 
     evaluate(triggerRoomId, triggerPeerId)
-      .then(decision => {
-        if (decision) {
-          setCooldown(key)
-          onDecision(decision)
-        }
+      .then(({ decision, flushInfo }) => {
+        flushIncoming(flushInfo)
+        if (decision) onDecision(decision)
       })
       .catch(err => {
         console.error(`[${config.name}] Evaluation error:`, err)
       })
       .finally(() => {
         generatingContexts.delete(key)
+        notifyState('idle', key)
 
         if (pendingContexts.has(key)) {
           pendingContexts.delete(key)
           tryEvaluate(triggerRoomId, triggerPeerId)
         } else {
-          notifyState('idle', key)
           checkIdle()
         }
       })
@@ -407,9 +505,31 @@ Tool results will be provided, then you respond normally.`
 
   // --- Receive ---
 
-  const receive = (message: Message): void => {
-    addMessage(message)
+  const receive = (message: Message, history?: ReadonlyArray<Message>): void => {
     extractAgentProfileFromMessage(message)
+
+    if (message.roomId) {
+      const key = triggerKey(message.roomId, undefined)
+      // Accept history when no unprocessed external messages exist for this room.
+      // room_summary (from join) and own messages don't count — they're not from Room delivery.
+      const hasUnprocessed = incoming.some(m =>
+        m.roomId === message.roomId && m.type !== 'room_summary' && m.senderId !== agentId,
+      )
+      if (history && !hasUnprocessed) {
+        roomHistory.set(key, history)
+      }
+      if (message.senderId === agentId) {
+        // Own room messages go straight to history (not incoming) so they're
+        // visible as assistant context during re-evaluations.
+        const current = roomHistory.get(key) ?? []
+        roomHistory.set(key, [...current, message])
+      } else {
+        incoming.push(message)
+      }
+    } else {
+      // DMs: store in incoming buffer (flushed to dmMessages during buildContext)
+      incoming.push(message)
+    }
 
     if (message.senderId === agentId) return
     if (message.type === 'system' || message.type === 'leave') return
@@ -425,6 +545,7 @@ Tool results will be provided, then you respond normally.`
 
   const join = async (room: Room): Promise<void> => {
     roomProfiles.set(room.profile.id, room.profile)
+    roomIds.add(room.profile.id)
 
     const recent = room.getRecent(historyLimit)
     if (recent.length === 0) return
@@ -464,7 +585,8 @@ Tool results will be provided, then you respond normally.`
         timestamp: Date.now(),
         type: 'room_summary',
       }
-      addMessage(summaryMessage)
+      // Store summary in incoming so it appears in next context build
+      incoming.push(summaryMessage)
     } catch (err) {
       console.error(`[${config.name}] Failed to generate join summary for ${room.profile.name}:`, err)
     }
@@ -485,7 +607,7 @@ Tool results will be provided, then you respond normally.`
       const response = await llmProvider.chat({
         model: config.model,
         messages: [
-          { role: 'system', content: config.systemPrompt },
+          { role: 'system', content: currentSystemPrompt },
           { role: 'user', content: `[${name}] asks: ${question}` },
         ],
         temperature: config.temperature,
@@ -503,13 +625,12 @@ Tool results will be provided, then you respond normally.`
     kind: 'ai',
     metadata: { model: config.model },
     state,
-    getMessages,
     receive,
     join,
-    getRoomIds,
-    getMessagesForRoom,
-    getMessagesForPeer,
+    getRoomIds: () => [...roomIds],
     whenIdle,
     query,
+    updateSystemPrompt: (prompt: string) => { currentSystemPrompt = prompt },
+    getSystemPrompt: () => currentSystemPrompt,
   }
 }

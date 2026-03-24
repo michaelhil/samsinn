@@ -10,7 +10,7 @@ export type {
   RoomProfile,
   AgentProfile,
   PostParams,
-  PostResult,
+  DeliverFn,
   CreateResult,
   Room,
   House,
@@ -54,7 +54,7 @@ export type { HumanAgent, HumanAgentConfig, TransportSend } from './agents/human
 
 // Agent wiring
 export { spawnAIAgent, spawnHumanAgent } from './agents/spawn.ts'
-export { executeActions } from './agents/actions.ts'
+export { addAgentToRoom, executeActions } from './agents/actions.ts'
 export { extractAgentProfile, makeJoinMetadata } from './agents/shared.ts'
 export { validateName, ensureUniqueName } from './core/names.ts'
 export { createToolRegistry } from './core/tool-registry.ts'

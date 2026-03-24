@@ -31,8 +31,10 @@ export interface System {
 }
 
 export const createSystem = (ollamaUrl?: string): System => {
-  const house = createHouse()
   const team = createTeam()
+  const house = createHouse((agentId, message, history) => {
+    team.getAgent(agentId)?.receive(message, history)
+  })
   const postAndDeliver = createPostAndDeliver(house, team)
   const ollama = createOllamaProvider(ollamaUrl ?? DEFAULTS.ollamaBaseUrl)
   const toolRegistry = createToolRegistry()

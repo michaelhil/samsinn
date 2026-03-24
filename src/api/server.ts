@@ -12,6 +12,7 @@
 import type { System } from '../main.ts'
 import type { HumanAgent } from '../agents/human-agent.ts'
 import type {
+  AIAgent,
   Message,
   MessageTarget,
   StateValue,
@@ -131,7 +132,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
     type: 'snapshot',
     rooms: system.house.listAllRooms(),
     agents: system.team.listAgents().map(a => ({
-      id: a.id, name: a.name, description: a.description, kind: a.kind,
+      id: a.id, name: a.name, description: a.description, kind: a.kind, state: a.state.get(),
     })),
     agentId,
     ...(sessionToken ? { sessionToken } : {}),
@@ -237,10 +238,27 @@ export const createServer = (system: System, config?: ServerConfig) => {
       if (agentName) {
         const agent = system.team.getAgent(agentName)
         if (!agent) return notFound(`Agent "${agentName}"`)
-        return json({
+        const detail: Record<string, unknown> = {
           id: agent.id, name: agent.name, description: agent.description,
           kind: agent.kind, state: agent.state.get(), rooms: agent.getRoomIds(),
-        })
+        }
+        if (agent.kind === 'ai' && 'getSystemPrompt' in agent) {
+          detail.systemPrompt = (agent as AIAgent).getSystemPrompt()
+        }
+        return json(detail)
+      }
+    }
+
+    // PATCH /api/agents/:name — update system prompt
+    if (method === 'PATCH') {
+      const agentName = extractParam(pathname, '/api/agents/:name')
+      if (agentName) {
+        const agent = system.team.getAgent(agentName)
+        if (!agent) return notFound(`Agent "${agentName}"`)
+        if (agent.kind !== 'ai') return errorResponse('Only AI agents can be updated')
+        const body = await parseBody(req)
+        if (body.systemPrompt) (agent as AIAgent).updateSystemPrompt(body.systemPrompt as string)
+        return json({ updated: true, name: agent.name })
       }
     }
 
@@ -257,7 +275,6 @@ export const createServer = (system: System, config?: ServerConfig) => {
           model: body.model as string,
           systemPrompt: body.systemPrompt as string,
           temperature: body.temperature as number | undefined,
-          cooldownMs: (body.cooldownMs as number) ?? DEFAULTS.cooldownMs,
           historyLimit: body.historyLimit as number | undefined,
         })
         subscribeAgentState(agent.id, agent.name)
@@ -347,11 +364,15 @@ export const createServer = (system: System, config?: ServerConfig) => {
       switch (msg.type) {
         case 'post_message': {
           const resolved = msg.target ?? {}
-          system.postAndDeliver(resolved, {
+          const delivered = system.postAndDeliver(resolved, {
             senderId: session.agent.id,
             content: msg.content,
             type: 'chat',
           })
+          // Echo posted messages back to sender (sender is excluded from room recipients)
+          for (const m of delivered) {
+            ws.send(JSON.stringify({ type: 'message', message: m } satisfies WSOutbound))
+          }
           break
         }
         case 'create_room': {
@@ -388,6 +409,13 @@ export const createServer = (system: System, config?: ServerConfig) => {
             unsubscribeAgentState(agent.id)
             system.removeAgent(agent.id)
             broadcast({ type: 'agent_removed', agentName: msg.name })
+          }
+          break
+        }
+        case 'update_agent': {
+          const agent = system.team.getAgent(msg.name)
+          if (agent && agent.kind === 'ai' && 'updateSystemPrompt' in agent) {
+            (agent as AIAgent).updateSystemPrompt(msg.systemPrompt)
           }
           break
         }
