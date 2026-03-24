@@ -10,8 +10,25 @@ import type { CreateResult, DeliverFn, House, Room, RoomConfig, RoomProfile } fr
 import { createRoom } from './room.ts'
 import { ensureUniqueName, validateName } from './names.ts'
 
+const DEFAULT_HOUSE_PROMPT = `You are part of Talking Agents, a collaborative multi-agent system. Be respectful and constructive. When uncertain, say so rather than guessing. Prioritise responding to new messages and direct questions. Use ::PASS:: only when the conversation genuinely does not need your input.`
+
+const DEFAULT_RESPONSE_FORMAT = `- By default, just write your message as natural text. Your response IS the message other participants will read.
+- To stay silent, start your response with exactly ::PASS:: followed by a brief reason.
+  Example: ::PASS:: This question was already answered by someone else
+- Never wrap your response in JSON, code blocks, or data structures.`
+
+const DEFAULT_RESPONSE_FORMAT_TOOLS = `\n- To use a tool, write ONLY ::TOOL:: followed by the tool name on its own line. Do not write anything else — just the tool call. Add JSON arguments after the name if needed.
+  Example: ::TOOL:: get_time
+  Example: ::TOOL:: query_agent {"target": "Alice", "question": "status?"}
+  You may call multiple tools, one ::TOOL:: per line. After tools run you will receive results and should then write a normal response.
+- IMPORTANT: You do NOT have access to real-time information like the current time or date. When asked about these, you MUST use the appropriate tool. Never guess or make up values for information a tool can provide.`
+
+export { DEFAULT_RESPONSE_FORMAT_TOOLS }
+
 export const createHouse = (deliver?: DeliverFn): House => {
   const rooms = new Map<string, Room>()
+  let housePrompt = DEFAULT_HOUSE_PROMPT
+  let responseFormat = DEFAULT_RESPONSE_FORMAT
 
   const getExistingNames = (): ReadonlyArray<string> =>
     [...rooms.values()].map(r => r.profile.name)
@@ -81,5 +98,9 @@ export const createHouse = (deliver?: DeliverFn): House => {
     listPublicRooms,
     listAllRooms,
     removeRoom,
+    getHousePrompt: () => housePrompt,
+    setHousePrompt: (prompt: string) => { housePrompt = prompt },
+    getResponseFormat: () => responseFormat,
+    setResponseFormat: (format: string) => { responseFormat = format },
   }
 }

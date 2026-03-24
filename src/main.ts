@@ -87,6 +87,8 @@ export const createSystem = (ollamaUrl?: string): System => {
 
 if (import.meta.main) {
   const { createServer } = await import('./api/server.ts')
+  const { registerAllMCPServers } = await import('./integrations/mcp/client.ts')
+  const { existsSync } = await import('node:fs')
 
   const ollamaUrl = process.env.OLLAMA_URL ?? DEFAULTS.ollamaBaseUrl
   const system = createSystem(ollamaUrl)
@@ -94,6 +96,14 @@ if (import.meta.main) {
   const pkg = await Bun.file(`${import.meta.dir}/../package.json`).json() as { version: string }
   console.log(`Talking Agents v${pkg.version}`)
   console.log(`Ollama: ${ollamaUrl}`)
+
+  // Register MCP servers from config
+  const mcpConfigPath = `${import.meta.dir}/../mcp-servers.json`
+  if (existsSync(mcpConfigPath)) {
+    const mcpConfig = await Bun.file(mcpConfigPath).json()
+    await registerAllMCPServers(system.toolRegistry, mcpConfig)
+  }
+
   console.log(`Tools: ${system.toolRegistry.list().map(t => t.name).join(', ')}`)
 
   try {

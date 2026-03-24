@@ -59,6 +59,25 @@ export const handleAPI = async (
     })
   }
 
+  // GET /api/house/prompts — all editable prompts
+  if (method === 'GET' && pathname === '/api/house/prompts') {
+    return json({
+      housePrompt: system.house.getHousePrompt(),
+      responseFormat: system.house.getResponseFormat(),
+    })
+  }
+
+  // PUT /api/house/prompts — update house prompt and/or response format
+  if (method === 'PUT' && pathname === '/api/house/prompts') {
+    const body = await parseBody(req)
+    if (typeof body.housePrompt === 'string') system.house.setHousePrompt(body.housePrompt)
+    if (typeof body.responseFormat === 'string') system.house.setResponseFormat(body.responseFormat)
+    return json({
+      housePrompt: system.house.getHousePrompt(),
+      responseFormat: system.house.getResponseFormat(),
+    })
+  }
+
   // GET /api/rooms
   if (method === 'GET' && pathname === '/api/rooms') {
     const vis = new URL(req.url).searchParams.get('visibility')
@@ -103,6 +122,19 @@ export const handleAPI = async (
       if (!room) return notFound(`Room "${name}"`)
       system.house.removeRoom(room.profile.id)
       return json({ removed: true })
+    }
+  }
+
+  // PUT /api/rooms/:name/prompt — update room prompt
+  if (method === 'PUT') {
+    const name = extractParam(pathname, '/api/rooms/:name/prompt')
+    if (name) {
+      const room = system.house.getRoom(name)
+      if (!room) return notFound(`Room "${name}"`)
+      const body = await parseBody(req)
+      if (typeof body.roomPrompt !== 'string') return errorResponse('roomPrompt is required')
+      room.setRoomPrompt(body.roomPrompt)
+      return json({ roomPrompt: room.profile.roomPrompt })
     }
   }
 

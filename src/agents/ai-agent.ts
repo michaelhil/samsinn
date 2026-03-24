@@ -43,6 +43,8 @@ export type { Decision, OnDecision } from './evaluation.ts'
 export interface AIAgentOptions {
   readonly toolExecutor?: ToolExecutor
   readonly toolDescriptions?: string
+  readonly getHousePrompt?: () => string
+  readonly getResponseFormat?: () => string
 }
 
 // === Factory ===
@@ -77,6 +79,8 @@ export const createAIAgent = (
   const maxToolIterations = config.maxToolIterations ?? 5
   const toolExecutor = options?.toolExecutor
   const toolDescriptions = options?.toolDescriptions
+  const getHousePrompt = options?.getHousePrompt
+  const getResponseFormat = options?.getResponseFormat
 
   // --- State observability ---
 
@@ -160,6 +164,8 @@ export const createAIAgent = (
   const contextDeps = (): BuildContextDeps => ({
     agentId,
     systemPrompt: currentSystemPrompt,
+    housePrompt: getHousePrompt?.(),
+    responseFormat: getResponseFormat?.(),
     incoming,
     roomHistory,
     roomProfiles,

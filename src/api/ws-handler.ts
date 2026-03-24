@@ -1,7 +1,7 @@
 // ============================================================================
 // WebSocket Handler — WS protocol, session management, and broadcasting.
 //
-// Handles upgrade, message dispatch, reconnection, and session TTL cleanup.
+// Handles upgrade, message dispatch, reconnection, and inactive agent reclaim.
 // Commands mirror REST endpoints but use a simpler JSON message protocol.
 // ============================================================================
 
@@ -39,7 +39,7 @@ export interface WSManager {
   readonly buildSnapshot: (agentId: string, sessionToken?: string) => Record<string, unknown>
 }
 
-export const createWSManager = (system: System, sessionTtlMs: number): WSManager => {
+export const createWSManager = (system: System): WSManager => {
   const sessions = new Map<string, ClientSession>()
   const wsConnections = new Map<string, { send: (data: string) => void }>()
   const stateUnsubs = new Map<string, () => void>()
@@ -73,23 +73,14 @@ export const createWSManager = (system: System, sessionTtlMs: number): WSManager
     if (agent.kind === 'ai') subscribeAgentState(agent.id, agent.name)
   }
 
-  // Session cleanup: remove disconnected sessions after TTL
-  void setInterval(() => {
-    const now = Date.now()
-    for (const [token, session] of sessions) {
-      if (!wsConnections.has(token) && now - session.lastActivity > sessionTtlMs) {
-        system.removeAgent(session.agent.id)
-        sessions.delete(token)
-      }
-    }
-  }, 60_000)
-
   const buildSnapshot = (agentId: string, sessionToken?: string): Record<string, unknown> => ({
     type: 'snapshot',
     rooms: system.house.listAllRooms(),
-    agents: system.team.listAgents().map(a => ({
-      id: a.id, name: a.name, description: a.description, kind: a.kind, state: a.state.get(),
-    })),
+    agents: system.team.listAgents()
+      .filter(a => !a.inactive)
+      .map(a => ({
+        id: a.id, name: a.name, description: a.description, kind: a.kind, state: a.state.get(),
+      })),
     agentId,
     ...(sessionToken ? { sessionToken } : {}),
   })

@@ -70,6 +70,7 @@ export interface Room {
   readonly removeMember: (id: string) => void
   readonly hasMember: (id: string) => boolean
   readonly getMessageCount: () => number
+  readonly setRoomPrompt: (prompt: string) => void
 }
 
 // === CreateResult — returned when name uniqueness is enforced ===
@@ -90,6 +91,10 @@ export interface House {
   readonly listPublicRooms: () => ReadonlyArray<RoomProfile>
   readonly listAllRooms: () => ReadonlyArray<RoomProfile>
   readonly removeRoom: (id: string) => boolean
+  readonly getHousePrompt: () => string
+  readonly setHousePrompt: (prompt: string) => void
+  readonly getResponseFormat: () => string
+  readonly setResponseFormat: (format: string) => void
 }
 
 export interface RoomConfig {
@@ -122,6 +127,8 @@ export interface Agent {
   readonly state: AgentState
   readonly receive: (message: Message, history?: ReadonlyArray<Message>) => void
   readonly join: (room: Room) => Promise<void>
+  readonly inactive?: boolean
+  readonly setInactive?: (value: boolean) => void
 }
 
 // === AIAgent — extended Agent with query + observability ===

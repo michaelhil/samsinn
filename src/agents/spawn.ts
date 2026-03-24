@@ -136,7 +136,12 @@ export const spawnAIAgent = async (
     }
   }
 
-  const agent = createAIAgent(config, llmProvider, onDecision, { toolExecutor, toolDescriptions })
+  const agent = createAIAgent(config, llmProvider, onDecision, {
+    toolExecutor,
+    toolDescriptions,
+    getHousePrompt: () => house.getHousePrompt(),
+    getResponseFormat: () => house.getResponseFormat(),
+  })
   team.addAgent(agent)
 
   const publicRooms = house.listPublicRooms()

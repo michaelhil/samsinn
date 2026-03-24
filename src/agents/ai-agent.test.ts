@@ -393,13 +393,18 @@ describe('[NEW] message tagging', () => {
       models: async () => [],
     }
 
-    const agent = createAIAgent(makeConfig(), provider, () => {})
+    const agent = createAIAgent(makeConfig(), provider, () => {}, {
+      getHousePrompt: () => 'Be helpful. Prioritise new messages.',
+      getResponseFormat: () => '- Just write natural text.',
+    })
     agent.receive(makeMessage({ senderId: 'alice', roomId: 'room-1' }))
     await agent.whenIdle()
 
     const systemMsg = capturedMessages.find(m => m.role === 'system')
     expect(systemMsg?.content).toContain('[NEW]')
     expect(systemMsg?.content).toContain('Prioritise')
+    expect(systemMsg?.content).toContain('=== HOUSE RULES ===')
+    expect(systemMsg?.content).toContain('=== RESPONSE FORMAT ===')
   })
 
   test('buffered messages during generation are all tagged [NEW]', async () => {
@@ -672,7 +677,10 @@ describe('Tool use (ReAct loop)', () => {
       makeConfig(),
       provider,
       () => {},
-      { toolDescriptions: 'Available tools:\n- get_time: Returns the current time.' },
+      {
+        toolDescriptions: 'Available tools:\n- get_time: Returns the current time.',
+        getResponseFormat: () => '- Just write natural text.',
+      },
     )
 
     agent.receive(makeMessage({ senderId: 'alice', roomId: 'room-1' }))

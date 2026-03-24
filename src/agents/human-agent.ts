@@ -31,6 +31,7 @@ export const createHumanAgent = (
 ): HumanAgent => {
   const agentId = crypto.randomUUID()
   let send = initialSend
+  let isInactive = false
   const historyLimit = DEFAULTS.historyLimit
 
   // Human agents are always 'idle' — state changes come from UI interaction, not LLM
@@ -72,5 +73,7 @@ export const createHumanAgent = (
     receive,
     join,
     setTransport: (newSend: TransportSend) => { send = newSend },
+    get inactive() { return isInactive },
+    setInactive: (value: boolean) => { isInactive = value },
   }
 }

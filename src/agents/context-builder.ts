@@ -13,6 +13,7 @@ import type {
   RoomProfile,
 } from '../core/types.ts'
 import { SYSTEM_SENDER_ID } from '../core/types.ts'
+import { DEFAULT_RESPONSE_FORMAT_TOOLS } from '../core/house.ts'
 
 // === Flush info — describes which incoming messages were consumed ===
 
@@ -109,6 +110,8 @@ export const getParticipantsForRoom = (
 export interface BuildContextDeps {
   readonly agentId: string
   readonly systemPrompt: string
+  readonly housePrompt?: string
+  readonly responseFormat?: string
   readonly incoming: Message[]
   readonly roomHistory: Map<string, ReadonlyArray<Message>>
   readonly roomProfiles: Map<string, RoomProfile>
@@ -126,15 +129,31 @@ export const buildContext = (
 ): ContextResult => {
   const flushIds = new Set<string>()
   const flushDMs: Message[] = []
-  let systemContent = deps.systemPrompt
+  const sections: string[] = []
 
-  // Current conversation context
+  // === HOUSE RULES === (global behavioral guidance)
+  if (deps.housePrompt) {
+    sections.push(`=== HOUSE RULES ===\n${deps.housePrompt}`)
+  }
+
+  // === ROOM === (contextual instructions)
+  if (triggerRoomId) {
+    const roomProfile = deps.roomProfiles.get(triggerRoomId)
+    if (roomProfile?.roomPrompt) {
+      sections.push(`=== ROOM: ${roomProfile.name} ===\n${roomProfile.roomPrompt}`)
+    }
+  }
+
+  // === YOUR IDENTITY === (agent-specific personality/expertise)
+  sections.push(`=== YOUR IDENTITY ===\n${deps.systemPrompt}`)
+
+  // === CONTEXT === (auto-generated, not editable)
+  const contextLines: string[] = []
+
   if (triggerRoomId) {
     const roomProfile = deps.roomProfiles.get(triggerRoomId)
     if (roomProfile) {
-      systemContent += `\n\nYou are in room "${roomProfile.name}".`
-      if (roomProfile.description) systemContent += ` ${roomProfile.description}`
-      if (roomProfile.roomPrompt) systemContent += `\n\nRoom instructions: ${roomProfile.roomPrompt}`
+      contextLines.push(`You are in room "${roomProfile.name}".${roomProfile.description ? ` ${roomProfile.description}` : ''}`)
     }
 
     const participants = getParticipantsForRoom(
@@ -144,49 +163,43 @@ export const buildContext = (
       const lines = participants.map(p =>
         typeof p === 'string' ? `- ${p}` : `- ${p.name} (${p.kind})`,
       )
-      systemContent += `\n\nOther participants:\n${lines.join('\n')}`
+      contextLines.push(`Other participants:\n${lines.join('\n')}`)
     }
   } else if (triggerPeerId) {
     const peerProfile = deps.agentProfiles.get(triggerPeerId)
     const peerName = peerProfile?.name ?? triggerPeerId
-    systemContent += `\n\nThis is a direct conversation with ${peerName}.`
-    if (peerProfile?.description) systemContent += ` ${peerProfile.description}`
+    contextLines.push(`This is a direct conversation with ${peerName}.`)
   }
 
-  // Available rooms
   if (deps.roomProfiles.size > 0) {
     const roomNames = [...deps.roomProfiles.values()].map(p => `"${p.name}"`)
-    systemContent += `\n\nYour rooms: ${roomNames.join(', ')}`
+    contextLines.push(`Your rooms: ${roomNames.join(', ')}`)
   }
 
-  // Known agents
   const knownAgents = [...deps.agentProfiles.values()].filter(a => a.id !== deps.agentId)
   if (knownAgents.length > 0) {
     const agentNames = knownAgents.map(a => `"${a.name}" (${a.kind})`)
-    systemContent += `\nKnown agents: ${agentNames.join(', ')}`
+    contextLines.push(`Known agents: ${agentNames.join(', ')}`)
   }
-
-  // Tool descriptions
-  if (deps.toolDescriptions) {
-    systemContent += `\n\n${deps.toolDescriptions}`
-  }
-
-  // Response format — plain text protocol
-  systemContent += `\n\nResponse format:
-- By default, just write your message as natural text. Your response IS the message others will read.
-- To stay silent, start your response with exactly ::PASS:: followed by a brief reason.
-  Example: ::PASS:: This question was already answered by someone else
-- Never wrap your response in JSON, code blocks, or data structures.`
 
   if (deps.toolDescriptions) {
-    systemContent += `\n- To use a tool, write ONLY ::TOOL:: followed by the tool name on its own line. Do not write anything else — just the tool call. Add JSON arguments after the name if needed.
-  Example: ::TOOL:: get_time
-  Example: ::TOOL:: query_agent {"target": "Alice", "question": "status?"}
-  You may call multiple tools, one ::TOOL:: per line. After tools run you will receive results and should then write a normal response.
-- IMPORTANT: You do NOT have access to real-time information like the current time or date. When asked about these, you MUST use the appropriate tool. Never guess or make up values for information a tool can provide.`
+    contextLines.push(deps.toolDescriptions)
   }
 
-  systemContent += `\n\nMessages marked [NEW] have arrived since you last responded. Prioritise responding to these. Always respond to direct questions or messages addressed to you. Use ::PASS:: only when the conversation genuinely does not need your input.`
+  contextLines.push('Messages marked [NEW] have arrived since you last responded.')
+
+  sections.push(`=== CONTEXT ===\n${contextLines.join('\n\n')}`)
+
+  // === RESPONSE FORMAT === (editable protocol conventions)
+  if (deps.responseFormat) {
+    let format = deps.responseFormat
+    if (deps.toolDescriptions) {
+      format += DEFAULT_RESPONSE_FORMAT_TOOLS
+    }
+    sections.push(`=== RESPONSE FORMAT ===\n${format}`)
+  }
+
+  const systemContent = sections.join('\n\n')
 
   // Build message array
   const chatMessages: ChatRequest['messages'][number][] = [

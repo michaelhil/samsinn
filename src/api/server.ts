@@ -18,7 +18,6 @@ import { resolve, normalize } from 'node:path'
 interface ServerConfig {
   readonly port?: number
   readonly uiPath?: string
-  readonly sessionTtlMs?: number
 }
 
 // === Static file serving (path traversal protected) ===
@@ -58,9 +57,8 @@ export const createServer = (system: System, config?: ServerConfig) => {
   const port = config?.port ?? DEFAULTS.port
   const uiPath = resolve(config?.uiPath ?? `${import.meta.dir}/../ui`)
   const transpiler = new Bun.Transpiler({ loader: 'ts' })
-  const sessionTtlMs = config?.sessionTtlMs ?? 60 * 60 * 1000
 
-  const wsManager = createWSManager(system, sessionTtlMs)
+  const wsManager = createWSManager(system)
 
   const server = Bun.serve<WSData>({
     port,
@@ -76,13 +74,33 @@ export const createServer = (system: System, config?: ServerConfig) => {
 
         const sessionToken = url.searchParams.get('session') ?? crypto.randomUUID()
 
+        // Session token reconnect (same browser tab, brief disconnect)
         if (wsManager.sessions.has(sessionToken)) {
           const upgraded = server.upgrade(req, { data: { sessionToken, reconnect: true } })
           return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
         }
 
-        const existingNames = [...system.team.listAgents().map(a => a.name)]
-        const assignedName = system.team.getAgent(name) ? ensureUniqueName(name, existingNames) : name
+        // Name-based reclaim: find inactive human agent with same name
+        const existingAgent = system.team.listAgents().find(a =>
+          a.kind === 'human' && a.name === name && a.inactive,
+        )
+        if (existingAgent) {
+          // Find and reuse the old session for this agent
+          let reclaimedToken: string | undefined
+          for (const [token, session] of wsManager.sessions) {
+            if (session.agent.id === existingAgent.id) {
+              reclaimedToken = token
+              break
+            }
+          }
+          const useToken = reclaimedToken ?? sessionToken
+          const upgraded = server.upgrade(req, { data: { sessionToken: useToken, reconnect: true, name } })
+          return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
+        }
+
+        // New connection — create fresh agent (auto-rename on collision with active agents)
+        const activeNames = system.team.listAgents().filter(a => !a.inactive).map(a => a.name)
+        const assignedName = activeNames.includes(name) ? ensureUniqueName(name, activeNames) : name
 
         const upgraded = server.upgrade(req, { data: { sessionToken, name: assignedName } })
         return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
@@ -104,9 +122,18 @@ export const createServer = (system: System, config?: ServerConfig) => {
         if (ws.data.reconnect) {
           const session = wsManager.sessions.get(ws.data.sessionToken)
           if (!session) return
-          session.agent.setTransport((msg: Message) => {
+          const newTransport = (msg: Message) => {
             ws.send(JSON.stringify({ type: 'message', message: msg } satisfies WSOutbound))
-          })
+          }
+          session.agent.setTransport(newTransport)
+          // Reactivate if was inactive (name-based reclaim)
+          if (session.agent.inactive) {
+            session.agent.setInactive?.(false)
+            wsManager.broadcast({ type: 'agent_joined', agent: {
+              id: session.agent.id, name: session.agent.name,
+              description: session.agent.description, kind: session.agent.kind,
+            }})
+          }
           session.lastActivity = Date.now()
           wsManager.wsConnections.set(ws.data.sessionToken, ws)
           ws.send(JSON.stringify(wsManager.buildSnapshot(session.agent.id)))
@@ -135,6 +162,11 @@ export const createServer = (system: System, config?: ServerConfig) => {
       },
 
       close(ws) {
+        const session = wsManager.sessions.get(ws.data.sessionToken)
+        if (session?.agent.kind === 'human') {
+          session.agent.setInactive?.(true)
+          wsManager.broadcast({ type: 'agent_removed', agentName: session.agent.name })
+        }
         wsManager.wsConnections.delete(ws.data.sessionToken)
       },
     },

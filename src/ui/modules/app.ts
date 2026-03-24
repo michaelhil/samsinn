@@ -229,6 +229,97 @@ agentForm.onsubmit = (e) => {
   agentForm.reset()
 }
 
+// === Prompt editing — house, room, response format ===
+
+const openTextEditor = (
+  title: string,
+  fetchUrl: string,
+  fieldName: string,
+  saveUrl: string,
+  method = 'PUT',
+  extractValue?: (data: Record<string, unknown>) => string,
+): void => {
+  fetch(fetchUrl)
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      if (!data) return
+      const currentValue = extractValue
+        ? extractValue(data as Record<string, unknown>)
+        : ((data[fieldName] ?? '') as string)
+
+      const overlay = document.createElement('div')
+      overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'
+      overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
+
+      const modal = document.createElement('div')
+      modal.className = 'bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4'
+
+      const heading = document.createElement('h3')
+      heading.className = 'text-lg font-semibold mb-3'
+      heading.textContent = title
+
+      const textarea = document.createElement('textarea')
+      textarea.className = 'w-full h-48 border rounded p-3 text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-blue-300'
+      textarea.value = currentValue
+
+      const btnRow = document.createElement('div')
+      btnRow.className = 'flex justify-end gap-2 mt-3'
+
+      const cancelBtn = document.createElement('button')
+      cancelBtn.className = 'px-4 py-2 text-sm text-gray-600 hover:text-gray-800'
+      cancelBtn.textContent = 'Cancel'
+      cancelBtn.onclick = () => overlay.remove()
+
+      const saveBtn = document.createElement('button')
+      saveBtn.className = 'px-4 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600'
+      saveBtn.textContent = 'Save'
+      saveBtn.onclick = () => {
+        fetch(saveUrl, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [fieldName]: textarea.value }),
+        }).catch(() => {})
+        overlay.remove()
+      }
+
+      btnRow.appendChild(cancelBtn)
+      btnRow.appendChild(saveBtn)
+      modal.appendChild(heading)
+      modal.appendChild(textarea)
+      modal.appendChild(btnRow)
+      overlay.appendChild(modal)
+      document.body.appendChild(overlay)
+      textarea.focus()
+    })
+    .catch(() => {})
+}
+
+const btnHousePrompt = $('#btn-house-prompt') as HTMLButtonElement
+btnHousePrompt.onclick = () => openTextEditor(
+  'House Rules',
+  '/api/house/prompts', 'housePrompt', '/api/house/prompts',
+)
+
+const btnResponseFormat = $('#btn-response-format') as HTMLButtonElement
+btnResponseFormat.onclick = () => openTextEditor(
+  'Response Format',
+  '/api/house/prompts', 'responseFormat', '/api/house/prompts',
+)
+
+const btnRoomPrompt = $('#btn-room-prompt') as HTMLButtonElement
+btnRoomPrompt.onclick = () => {
+  const room = rooms.get(selectedRoomId)
+  if (!room) return
+  openTextEditor(
+    `Room Prompt — ${room.name}`,
+    `/api/rooms/${encodeURIComponent(room.name)}`,
+    'roomPrompt',
+    `/api/rooms/${encodeURIComponent(room.name)}/prompt`,
+    'PUT',
+    (data) => ((data.profile as Record<string, unknown>)?.roomPrompt as string) ?? '',
+  )
+}
+
 // === Startup ===
 
 const savedName = localStorage.getItem('ta_name')

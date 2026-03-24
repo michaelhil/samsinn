@@ -13,7 +13,8 @@
 import type { DeliverFn, Message, PostParams, Room, RoomProfile } from './types.ts'
 import { DEFAULTS, SYSTEM_SENDER_ID } from './types.ts'
 
-export const createRoom = (profile: RoomProfile, deliver?: DeliverFn, maxMessages?: number): Room => {
+export const createRoom = (initialProfile: RoomProfile, deliver?: DeliverFn, maxMessages?: number): Room => {
+  let profile = initialProfile
   const messages: Message[] = []
   const members = new Set<string>()
   const messageLimit = maxMessages ?? DEFAULTS.roomMessageLimit
@@ -79,7 +80,7 @@ export const createRoom = (profile: RoomProfile, deliver?: DeliverFn, maxMessage
   const getMessageCount = (): number => messages.length
 
   return {
-    profile,
+    get profile() { return profile },
     post,
     getRecent,
     getParticipantIds,
@@ -87,5 +88,8 @@ export const createRoom = (profile: RoomProfile, deliver?: DeliverFn, maxMessage
     removeMember,
     hasMember,
     getMessageCount,
+    setRoomPrompt: (prompt: string) => {
+      profile = { ...profile, roomPrompt: prompt }
+    },
   }
 }
