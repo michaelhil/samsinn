@@ -37,7 +37,7 @@ export const registerMCPServer = async (
   serverName: string,
   config: MCPServerConfig,
 ): Promise<number> => {
-  const client = new Client({ name: `talking-agents-${serverName}`, version: '1.0.0' })
+  const client = new Client({ name: `samsinn-${serverName}`, version: '1.0.0' })
   const transport = new StdioClientTransport({
     command: config.command,
     args: [...(config.args ?? [])],

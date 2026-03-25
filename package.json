@@ -1,5 +1,5 @@
 {
-  "name": "talking-agents",
+  "name": "samsinn",
   "version": "0.5.1",
   "description": "Multi-agent room communication system with prompt hierarchy, MCP tool integration, and plain text protocol",
   "module": "src/index.ts",

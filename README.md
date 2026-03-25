@@ -161,10 +161,10 @@ src/
 
 ```bash
 # Build
-docker build -t talking-agents .
+docker build -t samsinn .
 
 # Run (requires Ollama accessible from container)
-docker run -p 3000:3000 -e OLLAMA_URL=http://host.docker.internal:11434 talking-agents
+docker run -p 3000:3000 -e OLLAMA_URL=http://host.docker.internal:11434 samsinn
 ```
 
 GitHub Actions automatically builds and pushes a Docker image to `ghcr.io` on every push to `main`.
