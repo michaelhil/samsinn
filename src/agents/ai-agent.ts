@@ -54,8 +54,9 @@ export const createAIAgent = (
   llmProvider: LLMProvider,
   onDecision: OnDecision,
   options?: AIAgentOptions,
+  overrideId?: string,
 ): AIAgent => {
-  const agentId = crypto.randomUUID()
+  const agentId = overrideId ?? crypto.randomUUID()
 
   // Room message context: history snapshot from Room + incoming buffer
   const roomHistory = new Map<string, ReadonlyArray<Message>>()

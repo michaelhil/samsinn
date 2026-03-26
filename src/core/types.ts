@@ -161,6 +161,18 @@ export interface Room {
   readonly startFlow: (flowId: string) => void
   readonly cancelFlow: () => void
   readonly flowExecution: FlowExecution | undefined
+
+  // Snapshot restore — bypass delivery, populate state directly
+  readonly injectMessages: (msgs: ReadonlyArray<Message>) => void
+  readonly restoreState: (state: {
+    readonly members: ReadonlyArray<string>
+    readonly muted: ReadonlyArray<string>
+    readonly mode: DeliveryMode
+    readonly paused: boolean
+    readonly stalenessPaused: boolean
+    readonly stalenessParticipating: ReadonlyArray<string>
+    readonly flows: ReadonlyArray<Flow>
+  }) => void
 }
 
 // === CreateResult — returned when name uniqueness is enforced ===
@@ -185,6 +197,7 @@ export interface House {
   readonly setHousePrompt: (prompt: string) => void
   readonly getResponseFormat: () => string
   readonly setResponseFormat: (format: string) => void
+  readonly restoreRoom: (profile: RoomProfile) => Room
 }
 
 export interface RoomConfig {

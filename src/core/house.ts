@@ -106,5 +106,13 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
     setHousePrompt: (prompt: string) => { housePrompt = prompt },
     getResponseFormat: () => responseFormat,
     setResponseFormat: (format: string) => { responseFormat = format },
+
+    // Snapshot restore — create room with preserved profile (existing ID)
+    restoreRoom: (existingProfile: RoomProfile): Room => {
+      const roomCallbacks: RoomCallbacks = { deliver, resolveAgentName, onMessagePosted, onTurnChanged, onDeliveryModeChanged, onFlowEvent }
+      const room = createRoom(existingProfile, roomCallbacks)
+      rooms.set(existingProfile.id, room)
+      return room
+    },
   }
 }

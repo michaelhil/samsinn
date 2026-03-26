@@ -498,5 +498,34 @@ export const createRoom = (
     startFlow,
     cancelFlow,
     get flowExecution() { return flowExecution },
+
+    // Snapshot restore — bypass delivery pipeline entirely
+    injectMessages: (msgs: ReadonlyArray<Message>): void => {
+      for (const msg of msgs) {
+        messages.push(msg)
+      }
+    },
+
+    restoreState: (state: {
+      readonly members: ReadonlyArray<string>
+      readonly muted: ReadonlyArray<string>
+      readonly mode: DeliveryMode
+      readonly paused: boolean
+      readonly stalenessPaused: boolean
+      readonly stalenessParticipating: ReadonlyArray<string>
+      readonly flows: ReadonlyArray<Flow>
+    }): void => {
+      members.clear()
+      for (const id of state.members) members.add(id)
+      muted.clear()
+      for (const id of state.muted) muted.add(id)
+      mode = state.mode
+      paused = state.paused
+      stalenessPaused = state.stalenessPaused
+      stalenessParticipating.clear()
+      for (const id of state.stalenessParticipating) stalenessParticipating.add(id)
+      flows.clear()
+      for (const flow of state.flows) flows.set(flow.id, flow)
+    },
   }
 }

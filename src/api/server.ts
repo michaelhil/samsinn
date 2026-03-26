@@ -18,6 +18,7 @@ import { resolve, normalize } from 'node:path'
 interface ServerConfig {
   readonly port?: number
   readonly uiPath?: string
+  readonly onAutoSave?: () => void
 }
 
 // === Static file serving (path traversal protected) ===
@@ -60,10 +61,13 @@ export const createServer = (system: System, config?: ServerConfig) => {
 
   const wsManager = createWSManager(system)
 
+  const triggerAutoSave = config?.onAutoSave ?? (() => {})
+
   // Wire room event callbacks to WebSocket broadcast
   // All messages posted to any room are broadcast to all WS clients (UI always sees everything)
   system.setOnMessagePosted((_roomId, message) => {
     wsManager.broadcast({ type: 'message', message })
+    triggerAutoSave()
   })
 
   system.setOnTurnChanged((roomId, agentId, waitingForHuman) => {
@@ -85,6 +89,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
       mode,
       paused: room?.paused ?? false,
     })
+    triggerAutoSave()
   })
 
   system.setOnFlowEvent((roomId, event, detail) => {
@@ -95,6 +100,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
       event,
       detail,
     })
+    triggerAutoSave()
   })
 
   const server = Bun.serve<WSData>({

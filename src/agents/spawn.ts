@@ -77,6 +77,11 @@ const createToolExecutor = (
 
 // --- Spawn AI Agent ---
 
+export interface SpawnOptions {
+  readonly overrideId?: string
+  readonly skipAutoJoin?: boolean
+}
+
 export const spawnAIAgent = async (
   config: AIAgentConfig,
   llmProvider: LLMProvider,
@@ -84,6 +89,7 @@ export const spawnAIAgent = async (
   team: Team,
   routeMessage: RouteMessage,
   toolRegistry?: ToolRegistry,
+  spawnOptions?: SpawnOptions,
 ): Promise<AIAgent> => {
 
   // Resolve target: respond where the trigger came from
@@ -143,12 +149,14 @@ export const spawnAIAgent = async (
     toolDescriptions,
     getHousePrompt: () => house.getHousePrompt(),
     getResponseFormat: () => house.getResponseFormat(),
-  })
+  }, spawnOptions?.overrideId)
   team.addAgent(agent)
 
-  const publicRooms = house.listPublicRooms()
-  for (const roomProfile of publicRooms) {
-    await addAgentToRoom(agent.id, agent.name, roomProfile.id, undefined, team, routeMessage, house)
+  if (!spawnOptions?.skipAutoJoin) {
+    const publicRooms = house.listPublicRooms()
+    for (const roomProfile of publicRooms) {
+      await addAgentToRoom(agent.id, agent.name, roomProfile.id, undefined, team, routeMessage, house)
+    }
   }
 
   return agent
