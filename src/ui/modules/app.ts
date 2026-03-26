@@ -58,6 +58,8 @@ const roomFlows = new Map<string, FlowInfo[]>()  // roomName → flows
 const $ = (sel: string) => document.querySelector(sel)!
 const roomList = $('#room-list') as HTMLElement
 const agentList = $('#agent-list') as HTMLElement
+const noRoomState = $('#no-room-state') as HTMLElement
+const roomHeader = $('#room-header') as HTMLElement
 const messagesDiv = $('#messages') as HTMLElement
 const chatForm = $('#chat-form') as HTMLFormElement
 const chatInput = $('#chat-input') as HTMLInputElement
@@ -178,6 +180,12 @@ const selectRoom = (roomId: string) => {
   const room = rooms.get(roomId)
   if (!room) return
 
+  // Show chat UI, hide empty state
+  noRoomState.classList.add('hidden')
+  roomHeader.classList.remove('hidden')
+  messagesDiv.classList.remove('hidden')
+  chatForm.classList.remove('hidden')
+
   roomName.textContent = room.name
   refreshRooms()
   updateModeUI()
@@ -281,6 +289,10 @@ const handleMessage = (raw: unknown) => {
     case 'room_created': {
       rooms.set(msg.profile.id, msg.profile)
       refreshRooms()
+      // Auto-select if no room is currently selected
+      if (!selectedRoomId) {
+        selectRoom(msg.profile.id)
+      }
       break
     }
     case 'agent_joined': {

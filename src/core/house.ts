@@ -31,6 +31,7 @@ export { DEFAULT_RESPONSE_FORMAT_TOOLS }
 
 export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgentName, onMessagePosted?: OnMessagePosted, onTurnChanged?: OnTurnChanged, onDeliveryModeChanged?: OnDeliveryModeChanged, onFlowEvent?: OnFlowEvent): House => {
   const rooms = new Map<string, Room>()
+  const nameIndex = new Map<string, string>()  // lowercase name → room ID
   let housePrompt = DEFAULT_HOUSE_PROMPT
   let responseFormat = DEFAULT_RESPONSE_FORMAT
 
@@ -38,7 +39,7 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
     [...rooms.values()].map(r => r.profile.name)
 
   const isNameTaken = (name: string): boolean =>
-    getExistingNames().some(n => n.toLowerCase() === name.toLowerCase())
+    nameIndex.has(name.toLowerCase())
 
   // Internal: creates room without uniqueness check (caller guarantees).
   const storeRoom = (config: RoomConfig, name: string): Room => {
@@ -55,6 +56,7 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
     const roomCallbacks: RoomCallbacks = { deliver, resolveAgentName, onMessagePosted, onTurnChanged, onDeliveryModeChanged, onFlowEvent }
     const room = createRoom(profile, roomCallbacks)
     rooms.set(id, room)
+    nameIndex.set(name.toLowerCase(), id)
     return room
   }
 
@@ -74,11 +76,9 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
   const getRoom = (idOrName: string): Room | undefined => {
     const byId = rooms.get(idOrName)
     if (byId) return byId
-    const lower = idOrName.toLowerCase()
-    for (const room of rooms.values()) {
-      if (room.profile.name.toLowerCase() === lower) return room
-    }
-    return undefined
+    // O(1) name lookup via index
+    const idByName = nameIndex.get(idOrName.toLowerCase())
+    return idByName ? rooms.get(idByName) : undefined
   }
 
   const listPublicRooms = (): ReadonlyArray<RoomProfile> =>
@@ -92,7 +92,11 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
   const getRoomsForAgent = (agentId: string): ReadonlyArray<Room> =>
     [...rooms.values()].filter(r => r.hasMember(agentId))
 
-  const removeRoom = (id: string): boolean => rooms.delete(id)
+  const removeRoom = (id: string): boolean => {
+    const room = rooms.get(id)
+    if (room) nameIndex.delete(room.profile.name.toLowerCase())
+    return rooms.delete(id)
+  }
 
   return {
     createRoom: createRoomInHouse,
@@ -112,6 +116,7 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
       const roomCallbacks: RoomCallbacks = { deliver, resolveAgentName, onMessagePosted, onTurnChanged, onDeliveryModeChanged, onFlowEvent }
       const room = createRoom(existingProfile, roomCallbacks)
       rooms.set(existingProfile.id, room)
+      nameIndex.set(existingProfile.name.toLowerCase(), existingProfile.id)
       return room
     },
   }

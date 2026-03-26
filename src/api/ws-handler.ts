@@ -8,12 +8,12 @@
 import type { System } from '../main.ts'
 import type { HumanAgent } from '../agents/human-agent.ts'
 import type {
-  AIAgent,
   Message,
   StateValue,
   WSInbound,
   WSOutbound,
 } from '../core/types.ts'
+import { addAgentToRoom, asAIAgent } from '../agents/shared.ts'
 
 // === Types ===
 
@@ -162,12 +162,9 @@ export const handleWSMessage = async (
         break
       }
       case 'add_to_room': {
-        const room = system.house.getRoom(msg.roomName)
-        const agent = system.team.getAgent(msg.agentName)
-        if (room && agent) {
-          room.addMember(agent.id)
-          await agent.join(room)
-        }
+        const room = requireRoom(ws, system, msg.roomName)
+        const agent = requireAgent(ws, system, msg.agentName)
+        if (room && agent) await addAgentToRoom(agent, room)
         break
       }
       case 'create_agent': {
@@ -187,8 +184,8 @@ export const handleWSMessage = async (
       }
       case 'update_agent': {
         const agent = system.team.getAgent(msg.name)
-        if (agent && agent.kind === 'ai') {
-          const aiAgent = agent as AIAgent
+        const aiAgent = agent ? asAIAgent(agent) : undefined
+        if (aiAgent) {
           if (msg.systemPrompt) aiAgent.updateSystemPrompt(msg.systemPrompt)
           if (msg.model) aiAgent.updateModel(msg.model)
         }
@@ -196,9 +193,8 @@ export const handleWSMessage = async (
       }
       case 'cancel_generation': {
         const agent = system.team.getAgent(msg.name)
-        if (agent && agent.kind === 'ai') {
-          (agent as AIAgent).cancelGeneration()
-        }
+        const aiAgent = agent ? asAIAgent(agent) : undefined
+        aiAgent?.cancelGeneration()
         break
       }
       case 'set_delivery_mode': {

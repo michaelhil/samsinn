@@ -6,8 +6,9 @@
 // ============================================================================
 
 import type { System } from '../main.ts'
-import type { AIAgent, MessageTarget, WSOutbound } from '../core/types.ts'
+import type { MessageTarget, WSOutbound } from '../core/types.ts'
 import { SYSTEM_SENDER_ID } from '../core/types.ts'
+import { addAgentToRoom, asAIAgent } from '../agents/shared.ts'
 
 // === Helpers ===
 
@@ -164,8 +165,7 @@ export const handleAPI = async (
       if (!agentName) return errorResponse('agentName is required')
       const agent = system.team.getAgent(agentName)
       if (!agent) return notFound(`Agent "${agentName}"`)
-      room.addMember(agent.id)
-      await agent.join(room)
+      await addAgentToRoom(agent, room)
       return json({ added: true, agentName: agent.name, roomName: room.profile.name })
     }
   }
@@ -194,8 +194,8 @@ export const handleAPI = async (
         id: agent.id, name: agent.name,
         kind: agent.kind, state: agent.state.get(), rooms: system.house.getRoomsForAgent(agent.id).map(r => r.profile.id),
       }
-      if (agent.kind === 'ai' && 'getSystemPrompt' in agent) {
-        const aiAgent = agent as AIAgent
+      const aiAgent = asAIAgent(agent)
+      if (aiAgent) {
         detail.systemPrompt = aiAgent.getSystemPrompt()
         detail.model = aiAgent.getModel()
       }
@@ -209,9 +209,9 @@ export const handleAPI = async (
     if (agentName) {
       const agent = system.team.getAgent(agentName)
       if (!agent) return notFound(`Agent "${agentName}"`)
-      if (agent.kind !== 'ai') return errorResponse('Only AI agents can be updated')
+      const aiAgent = asAIAgent(agent)
+      if (!aiAgent) return errorResponse('Only AI agents can be updated')
       const body = await parseBody(req)
-      const aiAgent = agent as AIAgent
       if (body.systemPrompt) aiAgent.updateSystemPrompt(body.systemPrompt as string)
       if (body.model) aiAgent.updateModel(body.model as string)
       return json({ updated: true, name: agent.name })
@@ -225,8 +225,9 @@ export const handleAPI = async (
     if (cancelName) {
       const agent = system.team.getAgent(cancelName)
       if (!agent) return notFound(`Agent "${cancelName}"`)
-      if (agent.kind !== 'ai') return errorResponse('Only AI agents can be cancelled')
-      ;(agent as AIAgent).cancelGeneration()
+      const aiAgent = asAIAgent(agent)
+      if (!aiAgent) return errorResponse('Only AI agents can be cancelled')
+      aiAgent.cancelGeneration()
       return json({ cancelled: true, name: agent.name })
     }
   }

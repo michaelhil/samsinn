@@ -62,8 +62,8 @@ export const createAIAgent = (
   const roomHistory = new Map<string, ReadonlyArray<Message>>()
   const incoming: Message[] = []
 
-  // DM messages: stored locally (no Room source of truth)
-  const dmMessages: Message[] = []
+  // DM messages: indexed by peer ID for O(1) lookup
+  const dmByPeer = new Map<string, Message[]>()
 
   // Agent knowledge
   const roomProfiles = new Map<string, RoomProfile>()
@@ -110,34 +110,22 @@ export const createAIAgent = (
   // --- DM message management ---
 
   const addDMMessage = (message: Message): void => {
-    dmMessages.push(message)
     const peerId = message.senderId === agentId ? message.recipientId : message.senderId
     if (!peerId) return
-    const peerMsgs = dmMessages.filter(m =>
-      m.roomId === undefined && (
-        (m.senderId === peerId && m.recipientId === agentId) ||
-        (m.senderId === agentId && m.recipientId === peerId)
-      ),
-    )
+    let peerMsgs = dmByPeer.get(peerId)
+    if (!peerMsgs) {
+      peerMsgs = []
+      dmByPeer.set(peerId, peerMsgs)
+    }
+    peerMsgs.push(message)
+    // Truncate oldest if over limit
     if (peerMsgs.length > historyLimit) {
-      const excess = peerMsgs.length - historyLimit
-      const toRemove = new Set(peerMsgs.slice(0, excess).map(m => m.id))
-      const kept = dmMessages.filter(m => !toRemove.has(m.id))
-      dmMessages.length = 0
-      dmMessages.push(...kept)
+      peerMsgs.splice(0, peerMsgs.length - historyLimit)
     }
   }
 
-  const getDMMessagesForPeer = (peerId: string): ReadonlyArray<Message> => {
-    const peerMsgs = dmMessages.filter(m =>
-      m.roomId === undefined && (
-        (m.senderId === peerId && m.recipientId === agentId) ||
-        (m.senderId === agentId && m.recipientId === peerId)
-      ),
-    )
-    if (peerMsgs.length <= historyLimit) return peerMsgs
-    return peerMsgs.slice(-historyLimit)
-  }
+  const getDMMessagesForPeer = (peerId: string): ReadonlyArray<Message> =>
+    dmByPeer.get(peerId) ?? []
 
   // --- Idle detection ---
 
