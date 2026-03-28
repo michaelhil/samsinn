@@ -9,30 +9,27 @@ import type { Agent, Team } from '../core/types.ts'
 import { validateName } from '../core/names.ts'
 
 export const createTeam = (): Team => {
-  const agents = new Map<string, Agent>()
+  const agents = new Map<string, Agent>()       // id → agent
+  const nameIndex = new Map<string, string>()   // lowercase name → id
 
   const addAgent = (agent: Agent): void => {
     validateName(agent.name, 'Agent')
-    const nameTaken = [...agents.values()].some(
-      a => a.name.toLowerCase() === agent.name.toLowerCase(),
-    )
-    if (nameTaken) {
+    const lower = agent.name.toLowerCase()
+    if (nameIndex.has(lower)) {
       throw new Error(`Agent name "${agent.name}" is already taken`)
     }
     agents.set(agent.id, agent)
+    nameIndex.set(lower, agent.id)
   }
 
-  const getAgent = (idOrName: string): Agent | undefined => {
-    const byId = agents.get(idOrName)
-    if (byId) return byId
-    const lower = idOrName.toLowerCase()
-    for (const agent of agents.values()) {
-      if (agent.name.toLowerCase() === lower) return agent
-    }
-    return undefined
-  }
+  const getAgent = (idOrName: string): Agent | undefined =>
+    agents.get(idOrName) ?? agents.get(nameIndex.get(idOrName.toLowerCase()) ?? '')
 
-  const removeAgent = (id: string): boolean => agents.delete(id)
+  const removeAgent = (id: string): boolean => {
+    const agent = agents.get(id)
+    if (agent) nameIndex.delete(agent.name.toLowerCase())
+    return agents.delete(id)
+  }
 
   const listAgents = (): ReadonlyArray<Agent> => [...agents.values()]
 

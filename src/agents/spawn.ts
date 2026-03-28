@@ -159,9 +159,9 @@ export const spawnAIAgent = async (
 
   if (!spawnOptions?.skipAutoJoin) {
     const publicRooms = house.listPublicRooms()
-    for (const roomProfile of publicRooms) {
-      await addAgentToRoom(agent.id, agent.name, roomProfile.id, undefined, team, routeMessage, house)
-    }
+    await Promise.all(publicRooms.map(roomProfile =>
+      addAgentToRoom(agent.id, agent.name, roomProfile.id, undefined, team, routeMessage, house),
+    ))
   }
 
   return agent
@@ -180,9 +180,9 @@ export const spawnHumanAgent = async (
     profile => house.getRoom(profile.id),
   ).filter((r): r is Room => r !== undefined)
 
-  for (const room of rooms) {
-    await addAgentToRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
-  }
+  await Promise.all(rooms.map(room =>
+    addAgentToRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house),
+  ))
 
   return agent
 }

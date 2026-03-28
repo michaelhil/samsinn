@@ -20,9 +20,10 @@ export const deliverToAgent = (
   allMessages: ReadonlyArray<Message>,
   deliver: DeliverFn,
 ): void => {
-  // History = all messages before the current one
+  // History = all messages before the current one.
+  // indexOf returns -1 if not found (shouldn't happen, but guard anyway).
   const msgIndex = allMessages.indexOf(message)
-  const history = msgIndex > 0 ? allMessages.slice(0, msgIndex) : allMessages.slice(0, -1)
+  const history = msgIndex > 0 ? allMessages.slice(0, msgIndex) : []
   deliver(agentId, message, history)
 }
 

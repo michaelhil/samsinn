@@ -231,33 +231,46 @@ export const createAutoSaver = (
 ): AutoSaver => {
   let timer: Timer | undefined
   let saving = false
+  let pendingSave = false  // tracks if a save was requested while one was in-flight
+
+  const doSave = async (): Promise<void> => {
+    saving = true
+    pendingSave = false
+    try {
+      const snapshot = serializeSystem(system)
+      await saveSnapshot(snapshot, path)
+    } catch (err) {
+      console.error('Auto-save failed:', err)
+    } finally {
+      saving = false
+      // If more changes arrived while we were saving, schedule another pass
+      if (pendingSave) {
+        timer = setTimeout(doSave, debounceMs)
+      }
+    }
+  }
 
   const scheduleSave = (): void => {
+    if (saving) {
+      // Save in-flight — mark dirty; doSave's finally block will reschedule
+      pendingSave = true
+      return
+    }
     if (timer) clearTimeout(timer)
-    timer = setTimeout(async () => {
-      if (saving) return
-      saving = true
-      try {
-        const snapshot = serializeSystem(system)
-        await saveSnapshot(snapshot, path)
-      } catch (err) {
-        console.error('Auto-save failed:', err)
-      } finally {
-        saving = false
-      }
-    }, debounceMs)
+    timer = setTimeout(doSave, debounceMs)
   }
 
   const flush = async (): Promise<void> => {
     if (timer) clearTimeout(timer)
     timer = undefined
-    const snapshot = serializeSystem(system)
-    await saveSnapshot(snapshot, path)
+    pendingSave = false
+    await doSave()
   }
 
   const dispose = (): void => {
     if (timer) clearTimeout(timer)
     timer = undefined
+    pendingSave = false
   }
 
   return { scheduleSave, flush, dispose }

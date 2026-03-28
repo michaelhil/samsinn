@@ -305,6 +305,7 @@ export const createAIAgent = (
 
   // --- Query — synchronous side-channel for tool-based inter-agent communication ---
 
+  const QUERY_TIMEOUT_MS = 30_000
   let queryActive = false
 
   const query = async (question: string, askerId: string, askerName?: string): Promise<string> => {
@@ -313,14 +314,20 @@ export const createAIAgent = (
 
     try {
       const name = askerName ?? agentProfiles.get(askerId)?.name ?? askerId
-      const response = await llmProvider.chat({
-        model: config.model,
-        messages: [
-          { role: 'system', content: currentSystemPrompt },
-          { role: 'user', content: `[${name}] asks: ${question}` },
-        ],
-        temperature: config.temperature,
-      })
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Query to ${config.name} timed out after ${QUERY_TIMEOUT_MS}ms`)), QUERY_TIMEOUT_MS),
+      )
+      const response = await Promise.race([
+        llmProvider.chat({
+          model: config.model,
+          messages: [
+            { role: 'system', content: currentSystemPrompt },
+            { role: 'user', content: `[${name}] asks: ${question}` },
+          ],
+          temperature: config.temperature,
+        }),
+        timeout,
+      ])
       return response.content
     } finally {
       queryActive = false
