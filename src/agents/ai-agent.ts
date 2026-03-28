@@ -344,6 +344,9 @@ export const createAIAgent = (
     state,
     receive,
     join,
+    leave: (roomId: string): void => {
+      roomProfiles.delete(roomId)
+    },
     whenIdle,
     query,
     updateSystemPrompt: (prompt: string) => { currentSystemPrompt = prompt },

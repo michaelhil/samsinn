@@ -57,11 +57,10 @@ export const createMCPServer = (system: System): McpServer => {
     {
       name: z.string().describe('Room name'),
       roomPrompt: z.string().optional().describe('Instructions for agents in this room'),
-      visibility: z.enum(['public', 'private']).default('public').describe('Room visibility'),
     },
-    async ({ name, roomPrompt, visibility }) => {
+    async ({ name, roomPrompt }) => {
       try {
-        const result = system.house.createRoomSafe({ name, roomPrompt, visibility, createdBy: 'mcp-client' })
+        const result = system.house.createRoomSafe({ name, roomPrompt, createdBy: 'mcp-client' })
         return textResult(result.value.profile)
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to create room')
@@ -72,10 +71,9 @@ export const createMCPServer = (system: System): McpServer => {
   mcpServer.tool(
     'list_rooms',
     'List all rooms in the system',
-    { visibility: z.enum(['public', 'all']).default('all').describe('Filter by visibility') },
-    async ({ visibility }) => {
-      const rooms = visibility === 'public' ? system.house.listPublicRooms() : system.house.listAllRooms()
-      return textResult(rooms)
+    {},
+    async () => {
+      return textResult(system.house.listAllRooms())
     },
   )
 
@@ -103,7 +101,7 @@ export const createMCPServer = (system: System): McpServer => {
     async ({ name }) => {
       try {
         const room = resolveRoom(system, name)
-        system.house.removeRoom(room.profile.id)
+        system.removeRoom(room.profile.id)
         return textResult({ removed: true })
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to delete room')
@@ -129,11 +127,53 @@ export const createMCPServer = (system: System): McpServer => {
     },
   )
 
+  mcpServer.tool(
+    'add_to_room',
+    'Add an agent to a room',
+    {
+      agentName: z.string().describe('Name of the agent to add'),
+      roomName: z.string().describe('Name of the room'),
+    },
+    async ({ agentName, roomName }) => {
+      try {
+        const agent = system.team.getAgent(agentName)
+        if (!agent) return errorResult(`Agent "${agentName}" not found`)
+        const room = system.house.getRoom(roomName)
+        if (!room) return errorResult(`Room "${roomName}" not found`)
+        await system.addAgentToRoom(agent.id, room.profile.id)
+        return textResult({ agentName: agent.name, roomName: room.profile.name })
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to add to room')
+      }
+    },
+  )
+
+  mcpServer.tool(
+    'remove_from_room',
+    'Remove an agent from a room',
+    {
+      agentName: z.string().describe('Name of the agent to remove'),
+      roomName: z.string().describe('Name of the room'),
+    },
+    async ({ agentName, roomName }) => {
+      try {
+        const agent = system.team.getAgent(agentName)
+        if (!agent) return errorResult(`Agent "${agentName}" not found`)
+        const room = system.house.getRoom(roomName)
+        if (!room) return errorResult(`Room "${roomName}" not found`)
+        system.removeAgentFromRoom(agent.id, room.profile.id)
+        return textResult({ agentName: agent.name, roomName: room.profile.name })
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to remove from room')
+      }
+    },
+  )
+
   // --- Agent management tools ---
 
   mcpServer.tool(
     'create_agent',
-    'Create a new AI agent and join it to public rooms',
+    'Create a new AI agent (not added to any room by default)',
     {
       name: z.string().describe('Agent name'),
       model: z.string().describe('Ollama model name (e.g. llama3.2, qwen2.5:14b)'),

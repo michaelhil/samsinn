@@ -25,7 +25,7 @@ const makeLLMProvider = (): LLMProvider => ({
 const makeSystem = (): System => {
   const house = createHouse(noopDeliver)
   const team = createTeam()
-  house.createRoom({ name: 'TestRoom', visibility: 'public', createdBy: 'system' })
+  house.createRoom({ name: 'TestRoom', createdBy: 'system' })
 
   const routeMessage: RouteMessage = (target, params) => {
     const posted: Message[] = []
@@ -42,6 +42,9 @@ const makeSystem = (): System => {
     ollama: makeLLMProvider(),
     toolRegistry: { register: () => {}, get: () => undefined, list: () => [] },
     removeAgent: (id: string) => team.removeAgent(id),
+    removeRoom: (id: string) => house.removeRoom(id),
+    addAgentToRoom: async () => {},
+    removeAgentFromRoom: () => {},
     spawnAIAgent: async () => { throw new Error('Not mocked') },
     spawnHumanAgent: async () => { throw new Error('Not mocked') },
     setOnMessagePosted: () => {},
@@ -49,6 +52,9 @@ const makeSystem = (): System => {
     setOnDeliveryModeChanged: () => {},
     setOnFlowEvent: () => {},
     setOnTodoChanged: () => {},
+    setOnRoomCreated: () => {},
+    setOnRoomDeleted: () => {},
+    setOnMembershipChanged: () => {},
   } as unknown as System
 }
 
@@ -221,5 +227,61 @@ describe('WS Handler', () => {
     expect(room.getTodos()).toHaveLength(0)
     const event = broadcasts.find(b => b.type === 'todo_changed') as (WSOutbound & { type: 'todo_changed' }) | undefined
     expect(event?.action).toBe('removed')
+  })
+
+  // --- add_to_room / remove_from_room ---
+
+  test('add_to_room with unknown room sends error', async () => {
+    const { ws, errors } = makeWS()
+    await dispatch(ws, session, system, wsManager, { type: 'add_to_room', roomName: 'NoRoom', agentName: 'Human' })
+    expect(errors()).toHaveLength(1)
+  })
+
+  test('add_to_room with unknown agent sends error', async () => {
+    const { ws, errors } = makeWS()
+    await dispatch(ws, session, system, wsManager, { type: 'add_to_room', roomName: 'TestRoom', agentName: 'Ghost' })
+    expect(errors()).toHaveLength(1)
+  })
+
+  test('add_to_room with valid room and agent calls system.addAgentToRoom', async () => {
+    let called = false
+    system.addAgentToRoom = async () => { called = true }
+    const { ws, errors } = makeWS()
+    await dispatch(ws, session, system, wsManager, { type: 'add_to_room', roomName: 'TestRoom', agentName: 'Human' })
+    expect(errors()).toHaveLength(0)
+    expect(called).toBe(true)
+  })
+
+  test('remove_from_room with unknown room sends error', async () => {
+    const { ws, errors } = makeWS()
+    await dispatch(ws, session, system, wsManager, { type: 'remove_from_room', roomName: 'NoRoom', agentName: 'Human' })
+    expect(errors()).toHaveLength(1)
+  })
+
+  test('remove_from_room with unknown agent sends error', async () => {
+    const { ws, errors } = makeWS()
+    await dispatch(ws, session, system, wsManager, { type: 'remove_from_room', roomName: 'TestRoom', agentName: 'Ghost' })
+    expect(errors()).toHaveLength(1)
+  })
+
+  test('remove_from_room with valid room and agent calls system.removeAgentFromRoom', async () => {
+    let called = false
+    system.removeAgentFromRoom = () => { called = true }
+    const { ws, errors } = makeWS()
+    await dispatch(ws, session, system, wsManager, { type: 'remove_from_room', roomName: 'TestRoom', agentName: 'Human' })
+    expect(errors()).toHaveLength(0)
+    expect(called).toBe(true)
+  })
+
+  // --- create_room ---
+
+  test('create_room with duplicate name still calls addAgentToRoom', async () => {
+    let addCalled = false
+    system.addAgentToRoom = async () => { addCalled = true }
+    const { ws, errors } = makeWS()
+    await dispatch(ws, session, system, wsManager, { type: 'create_room', name: 'TestRoom' })
+    // Duplicate names are allowed (createRoomSafe returns sanitised name) — no error expected
+    expect(errors()).toHaveLength(0)
+    expect(addCalled).toBe(true)
   })
 })

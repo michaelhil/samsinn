@@ -6,7 +6,7 @@
 // createRoomSafe auto-renames on collision and returns CreateResult.
 // ============================================================================
 
-import type { CreateResult, DeliverFn, House, OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted, OnTodoChanged, OnTurnChanged, ResolveAgentName, Room, RoomConfig, RoomProfile } from './types.ts'
+import type { CreateResult, DeliverFn, House, OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted, OnRoomCreated, OnRoomDeleted, OnTodoChanged, OnTurnChanged, ResolveAgentName, Room, RoomConfig, RoomProfile } from './types.ts'
 import { createRoom, type RoomCallbacks } from './room.ts'
 import { ensureUniqueName, validateName } from './names.ts'
 
@@ -29,7 +29,7 @@ const DEFAULT_RESPONSE_FORMAT_TOOLS = `\n- To use a tool, write ONLY ::TOOL:: fo
 
 export { DEFAULT_RESPONSE_FORMAT_TOOLS }
 
-export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgentName, onMessagePosted?: OnMessagePosted, onTurnChanged?: OnTurnChanged, onDeliveryModeChanged?: OnDeliveryModeChanged, onFlowEvent?: OnFlowEvent, onTodoChanged?: OnTodoChanged): House => {
+export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgentName, onMessagePosted?: OnMessagePosted, onTurnChanged?: OnTurnChanged, onDeliveryModeChanged?: OnDeliveryModeChanged, onFlowEvent?: OnFlowEvent, onTodoChanged?: OnTodoChanged, onRoomCreated?: OnRoomCreated, onRoomDeleted?: OnRoomDeleted): House => {
   const rooms = new Map<string, Room>()
   const nameIndex = new Map<string, string>()  // lowercase name → room ID
   let housePrompt = DEFAULT_HOUSE_PROMPT
@@ -49,7 +49,6 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
       id,
       name,
       roomPrompt: config.roomPrompt,
-      visibility: config.visibility,
       createdBy: config.createdBy,
       createdAt: Date.now(),
     }
@@ -57,6 +56,7 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
     const room = createRoom(profile, roomCallbacks)
     rooms.set(id, room)
     nameIndex.set(name.toLowerCase(), id)
+    onRoomCreated?.(profile)
     return room
   }
 
@@ -81,11 +81,6 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
     return idByName ? rooms.get(idByName) : undefined
   }
 
-  const listPublicRooms = (): ReadonlyArray<RoomProfile> =>
-    [...rooms.values()]
-      .filter(r => r.profile.visibility === 'public')
-      .map(r => r.profile)
-
   const listAllRooms = (): ReadonlyArray<RoomProfile> =>
     [...rooms.values()].map(r => r.profile)
 
@@ -94,8 +89,12 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
 
   const removeRoom = (id: string): boolean => {
     const room = rooms.get(id)
-    if (room) nameIndex.delete(room.profile.name.toLowerCase())
-    return rooms.delete(id)
+    if (!room) return false
+    const { name } = room.profile
+    nameIndex.delete(name.toLowerCase())
+    rooms.delete(id)
+    onRoomDeleted?.(id, name)
+    return true
   }
 
   return {
@@ -103,7 +102,6 @@ export const createHouse = (deliver?: DeliverFn, resolveAgentName?: ResolveAgent
     createRoomSafe,
     getRoom,
     getRoomsForAgent,
-    listPublicRooms,
     listAllRooms,
     removeRoom,
     getHousePrompt: () => housePrompt,

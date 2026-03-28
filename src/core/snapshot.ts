@@ -146,9 +146,9 @@ interface RestorableSystem {
     readonly setHousePrompt: (prompt: string) => void
     readonly setResponseFormat: (format: string) => void
   }
-  readonly spawnAIAgent: (config: AIAgentConfig, options?: { overrideId?: string; skipAutoJoin?: boolean }) => Promise<unknown>
+  readonly spawnAIAgent: (config: AIAgentConfig, options?: { overrideId?: string }) => Promise<unknown>
   readonly team?: {
-    readonly getAgent: (idOrName: string) => { readonly id: string } | undefined
+    readonly getAgent: (idOrName: string) => { readonly id: string; readonly join: (room: Room) => Promise<void> } | undefined
   }
 }
 
@@ -178,18 +178,17 @@ export const restoreFromSnapshot = async (
     roomMap.set(room.profile.id, room)
   }
 
-  // 3. Restore AI agents (with preserved IDs, skip auto-join)
+  // 3. Restore AI agents (with preserved IDs, no auto-join)
   for (const agentSnap of snapshot.agents) {
-    await system.spawnAIAgent(agentSnap.config, {
-      overrideId: agentSnap.id,
-      skipAutoJoin: true,
-    })
+    await system.spawnAIAgent(agentSnap.config, { overrideId: agentSnap.id })
 
-    // 4. Silently add agent to their rooms (no join message, no summary)
+    // 4. Silently add agent to their rooms (no join message); call join() for history summary
+    const agent = system.team?.getAgent(agentSnap.id)
     for (const roomId of agentSnap.roomIds) {
       const room = roomMap.get(roomId)
       if (room) {
         room.addMember(agentSnap.id)
+        if (agent) await agent.join(room)
       }
     }
   }

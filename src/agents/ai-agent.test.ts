@@ -26,7 +26,7 @@ const makeLLMProvider = (responseContent: string = '::PASS:: test'): LLMProvider
 
 const makeRoom = (id: string = 'room-1', name: string = 'Test Room'): Room => {
   const profile: RoomProfile = {
-    id, name, visibility: 'public', createdBy: 'system', createdAt: Date.now(),
+    id, name, createdBy: 'system', createdAt: Date.now(),
   }
   return createRoom(profile)
 }

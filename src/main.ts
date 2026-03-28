@@ -5,7 +5,7 @@
 // When run directly (bun run src/main.ts), starts up and prints diagnostics.
 // ============================================================================
 
-import type { Agent, AIAgentConfig, DeliverFn, House, LLMProvider, Message, OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted, OnTodoChanged, OnTurnChanged, ResolveAgentName, RouteMessage, Room, Team, ToolRegistry } from './core/types.ts'
+import type { Agent, AIAgentConfig, DeliverFn, House, LLMProvider, Message, OnDeliveryModeChanged, OnFlowEvent, OnMembershipChanged, OnMessagePosted, OnRoomCreated, OnRoomDeleted, OnTodoChanged, OnTurnChanged, ResolveAgentName, RouteMessage, Room, Team, ToolRegistry } from './core/types.ts'
 import { DEFAULTS } from './core/types.ts'
 import { createHouse } from './core/house.ts'
 import { createTeam } from './agents/team.ts'
@@ -16,7 +16,8 @@ import { spawnAIAgent, spawnHumanAgent, type SpawnOptions } from './agents/spawn
 import { createHumanAgent } from './agents/human-agent.ts'
 import type { HumanAgentConfig, TransportSend } from './agents/human-agent.ts'
 import type { HumanAgent } from './agents/human-agent.ts'
-import { createListRoomsTool, createGetTimeTool, createQueryAgentTool, createListTodosTool, createAddTodoTool, createUpdateTodoTool } from './tools/built-in.ts'
+import { addAgentToRoom, removeAgentFromRoom } from './agents/actions.ts'
+import { createListRoomsTool, createGetTimeTool, createQueryAgentTool, createListTodosTool, createAddTodoTool, createUpdateTodoTool, createCreateRoomTool, createDeleteRoomTool, createAddToRoomTool, createRemoveFromRoomTool } from './tools/built-in.ts'
 import { createToolCapabilityCache } from './llm/tool-capability.ts'
 
 export interface System {
@@ -26,6 +27,9 @@ export interface System {
   readonly ollama: LLMProvider
   readonly toolRegistry: ToolRegistry
   readonly removeAgent: (id: string) => boolean
+  readonly removeRoom: (roomId: string) => boolean
+  readonly addAgentToRoom: (agentId: string, roomId: string, invitedBy?: string) => Promise<void>
+  readonly removeAgentFromRoom: (agentId: string, roomId: string, removedBy?: string) => void
   readonly spawnAIAgent: (config: AIAgentConfig, options?: SpawnOptions) => Promise<Agent>
   readonly spawnHumanAgent: (config: HumanAgentConfig, send: TransportSend) => Promise<HumanAgent>
   readonly setOnMessagePosted: (callback: OnMessagePosted) => void
@@ -33,6 +37,9 @@ export interface System {
   readonly setOnDeliveryModeChanged: (callback: OnDeliveryModeChanged) => void
   readonly setOnFlowEvent: (callback: OnFlowEvent) => void
   readonly setOnTodoChanged: (callback: OnTodoChanged) => void
+  readonly setOnRoomCreated: (callback: OnRoomCreated) => void
+  readonly setOnRoomDeleted: (callback: OnRoomDeleted) => void
+  readonly setOnMembershipChanged: (callback: OnMembershipChanged) => void
 }
 
 export const createSystem = (ollamaUrl?: string): System => {
@@ -56,39 +63,73 @@ export const createSystem = (ollamaUrl?: string): System => {
   const deliveryModeChanged = lateBinding<OnDeliveryModeChanged>()
   const flowEvent = lateBinding<OnFlowEvent>()
   const todoChanged = lateBinding<OnTodoChanged>()
+  const roomCreated = lateBinding<OnRoomCreated>()
+  const roomDeleted = lateBinding<OnRoomDeleted>()
+  const membershipChanged = lateBinding<OnMembershipChanged>()
 
   // Agent name → ID resolver for [[AgentName]] addressing in rooms
   const resolveAgentName: ResolveAgentName = (name) => team.getAgent(name)?.id
 
-  const house = createHouse(deliver, resolveAgentName, messagePosted.proxy, turnChanged.proxy, deliveryModeChanged.proxy, flowEvent.proxy, todoChanged.proxy)
+  const house = createHouse(deliver, resolveAgentName, messagePosted.proxy, turnChanged.proxy, deliveryModeChanged.proxy, flowEvent.proxy, todoChanged.proxy, roomCreated.proxy, roomDeleted.proxy)
   const routeMessage = createMessageRouter(house, team, deliver)
   const resolvedOllamaUrl = ollamaUrl ?? DEFAULTS.ollamaBaseUrl
   const ollama = createOllamaProvider(resolvedOllamaUrl)
   const toolCapabilityCache = createToolCapabilityCache(resolvedOllamaUrl)
   const toolRegistry = createToolRegistry()
 
-  // Register built-in tools
+  // System-level membership operations — single implementation used by WS, HTTP, tools
+  const systemAddAgentToRoom = async (agentId: string, roomId: string, invitedBy?: string): Promise<void> => {
+    const agent = team.getAgent(agentId)
+    const room = house.getRoom(roomId)
+    if (!agent || !room) return
+    await addAgentToRoom(agentId, agent.name, roomId, invitedBy, team, routeMessage, house)
+    membershipChanged.proxy(roomId, room.profile.name, agentId, agent.name, 'added')
+  }
+
+  const systemRemoveAgentFromRoom = (agentId: string, roomId: string, removedBy?: string): void => {
+    const agent = team.getAgent(agentId)
+    const room = house.getRoom(roomId)
+    if (!agent || !room) return
+    removeAgentFromRoom(agentId, agent.name, roomId, removedBy, team, routeMessage, house)
+    membershipChanged.proxy(roomId, room.profile.name, agentId, agent.name, 'removed')
+  }
+
+  // Remove room: cascade agent.leave for all current members, then delete
+  const systemRemoveRoom = (roomId: string): boolean => {
+    const room = house.getRoom(roomId)
+    if (!room) return false
+    for (const agentId of room.getParticipantIds()) {
+      team.getAgent(agentId)?.leave(roomId)
+    }
+    return house.removeRoom(roomId)
+    // onRoomDeleted is fired inside house.removeRoom
+  }
+
+  // Remove agent from team AND all rooms (prevents ghost member delivery)
+  const removeAgent = (id: string): boolean => {
+    const agent = team.getAgent(id)
+    if (!agent) return false
+    for (const profile of house.listAllRooms()) {
+      const room = house.getRoom(profile.id)
+      if (room?.hasMember(id)) {
+        room.removeMember(id)
+        agent.leave(profile.id)
+      }
+    }
+    return team.removeAgent(id)
+  }
+
+  // Register built-in tools — pass system methods so tools use the single implementation
   toolRegistry.register(createListRoomsTool(house))
   toolRegistry.register(createGetTimeTool())
   toolRegistry.register(createQueryAgentTool(team))
   toolRegistry.register(createListTodosTool(house))
   toolRegistry.register(createAddTodoTool(house))
   toolRegistry.register(createUpdateTodoTool(house))
-
-  // Default intro room — created only when no snapshot is being restored.
-  // Callers that restore from snapshot should NOT rely on this field.
-  // No default room — start empty or restore from snapshot
-
-  // Remove agent from team AND all rooms (prevents ghost member delivery)
-  const removeAgent = (id: string): boolean => {
-    const removed = team.removeAgent(id)
-    if (removed) {
-      for (const profile of house.listAllRooms()) {
-        house.getRoom(profile.id)?.removeMember(id)
-      }
-    }
-    return removed
-  }
+  toolRegistry.register(createCreateRoomTool(house, systemAddAgentToRoom))
+  toolRegistry.register(createDeleteRoomTool(systemRemoveRoom, house))
+  toolRegistry.register(createAddToRoomTool(team, house, systemAddAgentToRoom))
+  toolRegistry.register(createRemoveFromRoomTool(team, house, systemRemoveAgentFromRoom))
 
   // Bound spawn methods — close over system dependencies
   const boundSpawnAIAgent = (config: AIAgentConfig, options?: SpawnOptions) =>
@@ -106,6 +147,9 @@ export const createSystem = (ollamaUrl?: string): System => {
   return {
     house, team, routeMessage, ollama, toolRegistry,
     removeAgent,
+    removeRoom: systemRemoveRoom,
+    addAgentToRoom: systemAddAgentToRoom,
+    removeAgentFromRoom: systemRemoveAgentFromRoom,
     spawnAIAgent: boundSpawnAIAgent,
     spawnHumanAgent: boundSpawnHumanAgent,
     setOnMessagePosted: messagePosted.set,
@@ -113,6 +157,9 @@ export const createSystem = (ollamaUrl?: string): System => {
     setOnDeliveryModeChanged: deliveryModeChanged.set,
     setOnFlowEvent: flowEvent.set,
     setOnTodoChanged: todoChanged.set,
+    setOnRoomCreated: roomCreated.set,
+    setOnRoomDeleted: roomDeleted.set,
+    setOnMembershipChanged: membershipChanged.set,
   }
 }
 

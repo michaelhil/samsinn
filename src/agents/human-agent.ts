@@ -70,6 +70,7 @@ export const createHumanAgent = (
     state,
     receive,
     join,
+    leave: (_roomId: string): void => { /* no internal room state to clean up */ },
     setTransport: (newSend: TransportSend) => { send = newSend },
     get inactive() { return isInactive },
     setInactive: (value: boolean) => { isInactive = value },

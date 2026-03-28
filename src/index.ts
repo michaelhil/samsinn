@@ -21,7 +21,6 @@ export type {
   RouteMessage,
   AIAgentConfig,
   AgentResponse,
-  AgentAction,
   AgentState,
   StateValue,
   StateSubscriber,
@@ -60,7 +59,7 @@ export type { EvalResult } from './agents/evaluation.ts'
 
 // Agent wiring
 export { spawnAIAgent, spawnHumanAgent } from './agents/spawn.ts'
-export { addAgentToRoom, executeActions } from './agents/actions.ts'
+export { addAgentToRoom, removeAgentFromRoom } from './agents/actions.ts'
 export { extractAgentProfile, makeJoinMetadata } from './agents/shared.ts'
 export { validateName, ensureUniqueName } from './core/names.ts'
 export { createToolRegistry } from './core/tool-registry.ts'

@@ -6,7 +6,6 @@ import { SYSTEM_SENDER_ID } from './types.ts'
 const makeProfile = (overrides?: Partial<RoomProfile>): RoomProfile => ({
   id: 'test-room',
   name: 'Test Room',
-  visibility: 'public',
   createdBy: 'creator-1',
   createdAt: Date.now(),
   ...overrides,
@@ -143,13 +142,13 @@ describe('Room — self-contained component', () => {
     expect(room.profile.id).toBe('test-room')
     expect(room.profile.name).toBe('Test Room')
     expect(room.profile.roomPrompt).toBe('Be nice')
-    expect(room.profile.visibility).toBe('public')
   })
 
-  test('join messages make the joiner a participant', () => {
+  test('join messages do NOT implicitly add membership (use addMember explicitly)', () => {
     const room = createRoom(makeProfile())
     room.post({ senderId: 'alice', content: '[alice] has joined', type: 'join' })
-    expect(room.getParticipantIds()).toContain('alice')
+    // join/leave messages don't trigger implicit membership — use room.addMember()
+    expect(room.getParticipantIds()).not.toContain('alice')
   })
 
   test('preserves generationMs when provided', () => {

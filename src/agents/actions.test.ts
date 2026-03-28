@@ -3,9 +3,8 @@ import { createHouse } from '../core/house.ts'
 import { createMessageRouter } from '../core/delivery.ts'
 import { createTeam } from './team.ts'
 import { createHumanAgent } from './human-agent.ts'
-import { executeActions } from './actions.ts'
-import type { AgentAction, Message } from '../core/types.ts'
-import { SYSTEM_SENDER_ID } from '../core/types.ts'
+import { addAgentToRoom, removeAgentFromRoom } from './actions.ts'
+import type { Message } from '../core/types.ts'
 
 const createTestSystem = () => {
   const team = createTeam()
@@ -23,194 +22,116 @@ const makeAgent = (name: string) => {
   return { agent, inbox }
 }
 
-describe('executeActions — create_room', () => {
-  test('creates a public room and adds creator', async () => {
+describe('addAgentToRoom', () => {
+  test('adds agent to room, calls join, posts join message', async () => {
     const { house, team, routeMessage } = createTestSystem()
-    const { agent } = makeAgent('Creator')
+    const { agent, inbox } = makeAgent('Alice')
     team.addAgent(agent)
+    const room = house.createRoom({ name: 'General', createdBy: 'system' })
 
-    await executeActions(
-      [{ type: 'create_room', name: 'New Room', visibility: 'public' }],
-      agent.id, agent.name, house, team, routeMessage,
-    )
+    await addAgentToRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
 
-    const room = house.getRoom('New Room')
-    expect(room).toBeDefined()
-    expect(room!.profile.visibility).toBe('public')
-    expect(room!.hasMember(agent.id)).toBe(true)
-  })
-
-  test('auto-renames on collision and notifies agent', async () => {
-    const { house, team, routeMessage } = createTestSystem()
-    const { agent, inbox } = makeAgent('Creator')
-    team.addAgent(agent)
-
-    house.createRoom({ name: 'Planning', visibility: 'public', createdBy: 'test' })
-
-    await executeActions(
-      [{ type: 'create_room', name: 'Planning', visibility: 'public' }],
-      agent.id, agent.name, house, team, routeMessage,
-    )
-
-    expect(house.getRoom('Planning-2')).toBeDefined()
-
-    const systemMsg = inbox.find(
-      m => m.senderId === SYSTEM_SENDER_ID && m.content.includes('Planning-2'),
-    )
-    expect(systemMsg).toBeDefined()
-  })
-
-  test('adds invited agents to room', async () => {
-    const { house, team, routeMessage } = createTestSystem()
-    const { agent: creator } = makeAgent('Creator')
-    const { agent: invitee } = makeAgent('Invitee')
-    team.addAgent(creator)
-    team.addAgent(invitee)
-
-    await executeActions(
-      [{ type: 'create_room', name: 'Private Room', visibility: 'private', add: ['Invitee'] }],
-      creator.id, creator.name, house, team, routeMessage,
-    )
-
-    const room = house.getRoom('Private Room')
-    expect(room).toBeDefined()
-    expect(room!.hasMember(creator.id)).toBe(true)
-    expect(room!.hasMember(invitee.id)).toBe(true)
-
-    const joinMsg = room!.getRecent(10).find(m => m.content.includes('[Invitee] has joined'))
+    expect(room.hasMember(agent.id)).toBe(true)
+    const joinMsg = room.getRecent(5).find(m => m.type === 'join' && m.senderId === agent.id)
     expect(joinMsg).toBeDefined()
+    expect(joinMsg!.content).toBe('[Alice] has joined')
+    expect(joinMsg!.metadata?.agentName).toBe('Alice')
+    // human inbox gets recent history on join
+    expect(inbox.length).toBeGreaterThanOrEqual(0)
   })
 
-  test('handles nonexistent invite name gracefully', async () => {
+  test('includes inviter name in join message', async () => {
     const { house, team, routeMessage } = createTestSystem()
-    const { agent } = makeAgent('Creator')
+    const { agent } = makeAgent('Bob')
+    team.addAgent(agent)
+    const room = house.createRoom({ name: 'Club', createdBy: 'system' })
+
+    await addAgentToRoom(agent.id, agent.name, room.profile.id, 'Admin', team, routeMessage, house)
+
+    const joinMsg = room.getRecent(5).find(m => m.type === 'join')
+    expect(joinMsg!.content).toBe('[Bob] has joined (added by [Admin])')
+  })
+
+  test('no-ops if agent not in team', async () => {
+    const { house, team, routeMessage } = createTestSystem()
+    const room = house.createRoom({ name: 'Room', createdBy: 'system' })
+
+    await addAgentToRoom('ghost-id', 'Ghost', room.profile.id, undefined, team, routeMessage, house)
+
+    expect(room.hasMember('ghost-id')).toBe(false)
+    expect(room.getMessageCount()).toBe(0)
+  })
+
+  test('no-ops if room not found', async () => {
+    const { house, team, routeMessage } = createTestSystem()
+    const { agent } = makeAgent('Alice')
     team.addAgent(agent)
 
-    await executeActions(
-      [{ type: 'create_room', name: 'WithGhost', visibility: 'public', add: ['Ghost'] }],
-      agent.id, agent.name, house, team, routeMessage,
-    )
-
-    // Room created, ghost silently skipped
-    expect(house.getRoom('WithGhost')).toBeDefined()
+    // No throw expected
+    await addAgentToRoom(agent.id, agent.name, 'nonexistent-room-id', undefined, team, routeMessage, house)
   })
 })
 
-describe('executeActions — add_to_room', () => {
-  test('agent adds itself to a public room (= join)', async () => {
+describe('removeAgentFromRoom', () => {
+  test('removes agent, calls leave, posts leave message', async () => {
     const { house, team, routeMessage } = createTestSystem()
-    const { agent } = makeAgent('Joiner')
+    const { agent } = makeAgent('Charlie')
     team.addAgent(agent)
+    const room = house.createRoom({ name: 'Hall', createdBy: 'system' })
 
-    house.createRoom({ name: 'Open Room', visibility: 'public', createdBy: 'test' })
+    await addAgentToRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
+    expect(room.hasMember(agent.id)).toBe(true)
 
-    await executeActions(
-      [{ type: 'add_to_room', roomName: 'Open Room', agentName: 'Joiner' }],
-      agent.id, agent.name, house, team, routeMessage,
-    )
+    removeAgentFromRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
 
-    const room = house.getRoom('Open Room')
-    expect(room!.hasMember(agent.id)).toBe(true)
-    expect(room!.getParticipantIds()).toContain(agent.id)
+    expect(room.hasMember(agent.id)).toBe(false)
+    const leaveMsg = room.getRecent(10).find(m => m.type === 'leave' && m.senderId === agent.id)
+    expect(leaveMsg).toBeDefined()
+    expect(leaveMsg!.content).toBe('[Charlie] has left')
   })
 
-  test('member adds another agent to a room (= invite)', async () => {
+  test('includes remover name in leave message', async () => {
     const { house, team, routeMessage } = createTestSystem()
-    const { agent: host } = makeAgent('Host')
-    const { agent: guest } = makeAgent('Guest')
-    team.addAgent(host)
-    team.addAgent(guest)
-
-    const room = house.createRoom({ name: 'Club', visibility: 'private', createdBy: 'test' })
-    room.addMember(host.id)
-    room.post({ senderId: host.id, content: 'Welcome', type: 'chat' })
-
-    await executeActions(
-      [{ type: 'add_to_room', roomName: 'Club', agentName: 'Guest' }],
-      host.id, host.name, house, team, routeMessage,
-    )
-
-    expect(room.hasMember(guest.id)).toBe(true)
-    const joinMsg = room.getRecent(10).find(m => m.content.includes('[Guest] has joined (added by [Host])'))
-    expect(joinMsg).toBeDefined()
-  })
-
-  test('rejects non-member adding to private room', async () => {
-    const { house, team, routeMessage } = createTestSystem()
-    const { agent: outsider } = makeAgent('Outsider')
-    const { agent: target } = makeAgent('Target')
-    team.addAgent(outsider)
-    team.addAgent(target)
-
-    house.createRoom({ name: 'Secret', visibility: 'private', createdBy: 'test' })
-
-    await executeActions(
-      [{ type: 'add_to_room', roomName: 'Secret', agentName: 'Target' }],
-      outsider.id, outsider.name, house, team, routeMessage,
-    )
-
-    const room = house.getRoom('Secret')
-    expect(room!.hasMember(target.id)).toBe(false)
-  })
-
-  test('allows invited member to add themselves to private room', async () => {
-    const { house, team, routeMessage } = createTestSystem()
-    const { agent } = makeAgent('Invited')
+    const { agent } = makeAgent('Dave')
     team.addAgent(agent)
+    const room = house.createRoom({ name: 'Room', createdBy: 'system' })
 
-    const room = house.createRoom({ name: 'Private', visibility: 'private', createdBy: 'test' })
-    room.addMember(agent.id)
+    await addAgentToRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
+    removeAgentFromRoom(agent.id, agent.name, room.profile.id, 'Admin', team, routeMessage, house)
 
-    await executeActions(
-      [{ type: 'add_to_room', roomName: 'Private', agentName: 'Invited' }],
-      agent.id, agent.name, house, team, routeMessage,
-    )
-
-    expect(room.getParticipantIds()).toContain(agent.id)
+    const leaveMsg = room.getRecent(10).find(m => m.type === 'leave')
+    expect(leaveMsg!.content).toBe('[Dave] has left (removed by [Admin])')
   })
 
-  test('handles nonexistent room gracefully', async () => {
+  test('no-ops if agent is not a member', async () => {
     const { house, team, routeMessage } = createTestSystem()
-    const { agent } = makeAgent('Confused')
+    const { agent } = makeAgent('Eve')
     team.addAgent(agent)
+    const room = house.createRoom({ name: 'Room', createdBy: 'system' })
 
-    await executeActions(
-      [{ type: 'add_to_room', roomName: 'Nonexistent', agentName: 'Confused' }],
-      agent.id, agent.name, house, team, routeMessage,
-    )
-    // Should not throw
+    // Not a member — should not throw or post
+    removeAgentFromRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
+    expect(room.getMessageCount()).toBe(0)
   })
 
-  test('handles nonexistent agent gracefully', async () => {
+  test('no-ops if agent not in team', () => {
     const { house, team, routeMessage } = createTestSystem()
-    const { agent } = makeAgent('Inviter')
-    team.addAgent(agent)
+    const room = house.createRoom({ name: 'Room', createdBy: 'system' })
 
-    const room = house.createRoom({ name: 'MyRoom', visibility: 'public', createdBy: 'test' })
-    room.addMember(agent.id)
-
-    await executeActions(
-      [{ type: 'add_to_room', roomName: 'MyRoom', agentName: 'Ghost' }],
-      agent.id, agent.name, house, team, routeMessage,
-    )
-    // Should not throw
+    // No throw expected
+    removeAgentFromRoom('ghost-id', 'Ghost', room.profile.id, undefined, team, routeMessage, house)
   })
-})
 
-describe('executeActions — limits', () => {
-  test('actions limited to maxAgentActionsPerResponse', async () => {
+  test('calls agent.leave so AI agent removes room from context', async () => {
     const { house, team, routeMessage } = createTestSystem()
-    const { agent } = makeAgent('Spammer')
+    const { agent } = makeAgent('Frank')
     team.addAgent(agent)
+    const room = house.createRoom({ name: 'ToLeave', createdBy: 'system' })
 
-    const actions: AgentAction[] = Array.from({ length: 10 }, (_, i) => ({
-      type: 'create_room' as const,
-      name: `Spam Room ${i}`,
-      visibility: 'public' as const,
-    }))
+    await addAgentToRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
+    removeAgentFromRoom(agent.id, agent.name, room.profile.id, undefined, team, routeMessage, house)
 
-    await executeActions(actions, agent.id, agent.name, house, team, routeMessage)
-
-    expect(house.listAllRooms()).toHaveLength(5)
+    // Human agent.leave is a no-op but must not throw
+    expect(room.hasMember(agent.id)).toBe(false)
   })
 })

@@ -37,6 +37,8 @@ type WSOutbound =
   | { type: 'turn_changed'; roomName: string; agentName?: string; waitingForHuman?: boolean }
   | { type: 'flow_event'; roomName: string; event: string; detail?: Record<string, unknown> }
   | { type: 'todo_changed'; roomName: string; action: string; todo: TodoInfo }
+  | { type: 'membership_changed'; roomName: string; agentName: string; action: 'added' | 'removed' }
+  | { type: 'room_deleted'; roomName: string }
 
 // === State ===
 
@@ -59,6 +61,9 @@ const roomFlows = new Map<string, FlowInfo[]>()  // roomName → flows
 
 // Todo state per room
 const roomTodos = new Map<string, TodoInfo[]>()  // roomName → todos
+
+// Membership state per room
+const roomMembers = new Map<string, Set<string>>()  // roomId → Set<agentId>
 
 // === DOM refs ===
 
@@ -99,27 +104,32 @@ const send = (data: unknown) => client?.send(data)
 
 const refreshRooms = () => renderRooms(roomList, rooms, selectedRoomId, pausedRooms, selectRoom)
 
-const refreshAgents = () => renderAgents(
-  agentList, agents, agentStates, mutedAgents,
-  (name) => openPromptEditor(name, send),
-  (id, name) => { send({ type: 'remove_agent', name }); agents.delete(id); refreshAgents() },
-  (name, muted) => {
-    const room = rooms.get(selectedRoomId)
-    if (room) send({ type: 'set_muted', roomName: room.name, agentName: name, muted })
-  },
-  (name) => { send({ type: 'cancel_generation', name }) },
-  (name) => openModelEditor(name, (data) => {
-    send(data)
-    // Update local model after change
-    const updated = (data as { model?: string }).model
-    if (updated) {
-      for (const [id, a] of agents) {
-        if (a.name === name) { agents.set(id, { ...a, model: updated }); break }
+const refreshAgents = () => {
+  const room = rooms.get(selectedRoomId)
+  const memberIds = room ? roomMembers.get(room.id) : undefined
+  renderAgents(
+    agentList, agents, agentStates, mutedAgents,
+    (name) => openPromptEditor(name, send),
+    (id, name) => { send({ type: 'remove_agent', name }); agents.delete(id); refreshAgents() },
+    (name, muted) => {
+      if (room) send({ type: 'set_muted', roomName: room.name, agentName: name, muted })
+    },
+    (name) => { send({ type: 'cancel_generation', name }) },
+    (name) => openModelEditor(name, (data) => {
+      send(data)
+      const updated = (data as { model?: string }).model
+      if (updated) {
+        for (const [id, a] of agents) {
+          if (a.name === name) { agents.set(id, { ...a, model: updated }); break }
+        }
+        refreshAgents()
       }
-      refreshAgents()
-    }
-  }),
-)
+    }),
+    memberIds,
+    room ? (agentId, agentName) => send({ type: 'add_to_room', roomName: room.name, agentName }) : undefined,
+    room ? (_agentId, agentName) => send({ type: 'remove_from_room', roomName: room.name, agentName }) : undefined,
+  )
+}
 
 const refreshModeSelector = (): void => {
   modeSelector.innerHTML = ''
@@ -288,6 +298,7 @@ const selectRoom = (roomId: string) => {
   roomName.textContent = room.name
   refreshRooms()
   updateModeUI()
+  refreshTodoPanel(room.name)
   fetchFlowsForRoom(room.name)
   fetchTodosForRoom(room.name)
 
@@ -326,7 +337,7 @@ const handleMessage = (raw: unknown) => {
         localStorage.setItem('ta_session', sessionToken)
       }
       myAgentId = msg.agentId
-      rooms.clear(); agents.clear(); agentStates.clear(); mutedAgents.clear(); pausedRooms.clear()
+      rooms.clear(); agents.clear(); agentStates.clear(); mutedAgents.clear(); pausedRooms.clear(); roomMembers.clear()
       for (const r of msg.rooms) rooms.set(r.id, r)
       for (const a of msg.agents) {
         agents.set(a.id, a)
@@ -334,8 +345,9 @@ const handleMessage = (raw: unknown) => {
       }
       // Restore per-room state from snapshot
       if (msg.roomStates) {
-        for (const [roomId, rs] of Object.entries(msg.roomStates as Record<string, { mode: string; paused: boolean; muted: string[] }>)) {
+        for (const [roomId, rs] of Object.entries(msg.roomStates as Record<string, { mode: string; paused: boolean; muted: string[]; members?: string[] }>)) {
           if (rs.paused) pausedRooms.add(roomId)
+          if (rs.members) roomMembers.set(roomId, new Set(rs.members))
         }
       }
       if (msg.roomStates && selectedRoomId && msg.roomStates[selectedRoomId]) {
@@ -456,20 +468,53 @@ const handleMessage = (raw: unknown) => {
       break
     }
     case 'todo_changed': {
-      // Refresh todos for the affected room
-      const todoRoom = [...rooms.values()].find(r => r.name === msg.roomName)
-      if (todoRoom) {
-        // Update local cache
-        const current = roomTodos.get(msg.roomName) ?? []
-        if (msg.action === 'added') {
-          roomTodos.set(msg.roomName, [...current, msg.todo as TodoInfo])
-        } else if (msg.action === 'updated') {
-          roomTodos.set(msg.roomName, current.map(t => t.id === msg.todo.id ? msg.todo as TodoInfo : t))
-        } else if (msg.action === 'removed') {
-          roomTodos.set(msg.roomName, current.filter(t => t.id !== msg.todo.id))
-        }
-        refreshTodoPanel(msg.roomName)
+      // Update local cache for the affected room
+      const current = roomTodos.get(msg.roomName) ?? []
+      if (msg.action === 'added') {
+        roomTodos.set(msg.roomName, [...current, msg.todo as TodoInfo])
+      } else if (msg.action === 'updated') {
+        roomTodos.set(msg.roomName, current.map(t => t.id === msg.todo.id ? msg.todo as TodoInfo : t))
+      } else if (msg.action === 'removed') {
+        roomTodos.set(msg.roomName, current.filter(t => t.id !== msg.todo.id))
       }
+      // Only refresh panel if this is the currently selected room
+      const selectedRoom = rooms.get(selectedRoomId)
+      if (selectedRoom?.name === msg.roomName) refreshTodoPanel(msg.roomName)
+      break
+    }
+    case 'membership_changed': {
+      const changedRoom = [...rooms.values()].find(r => r.name === msg.roomName)
+      if (changedRoom) {
+        if (!roomMembers.has(changedRoom.id)) roomMembers.set(changedRoom.id, new Set())
+        const memberSet = roomMembers.get(changedRoom.id)!
+        // Find agent by name to get their ID
+        for (const [agentId, agent] of agents) {
+          if (agent.name === msg.agentName) {
+            if (msg.action === 'added') memberSet.add(agentId)
+            else memberSet.delete(agentId)
+            break
+          }
+        }
+        if (changedRoom.id === selectedRoomId) refreshAgents()
+      }
+      break
+    }
+    case 'room_deleted': {
+      const deletedRoom = [...rooms.values()].find(r => r.name === msg.roomName)
+      if (deletedRoom) {
+        rooms.delete(deletedRoom.id)
+        roomMembers.delete(deletedRoom.id)
+        roomMessages.delete(deletedRoom.id)
+        if (selectedRoomId === deletedRoom.id) {
+          selectedRoomId = ''
+          noRoomState.classList.remove('hidden')
+          roomHeader.classList.add('hidden')
+          messagesDiv.classList.add('hidden')
+          chatForm.classList.add('hidden')
+          todoPanel.classList.add('hidden')
+        }
+      }
+      refreshRooms()
       break
     }
     case 'error': {
@@ -599,7 +644,6 @@ roomForm.onsubmit = (e) => {
   send({
     type: 'create_room',
     name: data.get('name') as string,
-    visibility: data.get('visibility') as string,
   })
   roomModal.close()
   roomForm.reset()

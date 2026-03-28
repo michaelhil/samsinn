@@ -19,7 +19,7 @@ const createTestSystem = () => {
   const team = createTeam()
   const house = createHouse(noopDeliver)
   // Create default room (main.ts does this in createSystem, but we're testing standalone)
-  house.createRoom({ name: 'Introductions', visibility: 'public', createdBy: 'system' })
+  house.createRoom({ name: 'Introductions', createdBy: 'system' })
   return { house, team }
 }
 

@@ -2,15 +2,15 @@
 // Built-in Tools — shipped with the system for validation and basic utility.
 // ============================================================================
 
-import type { AIAgent, House, Team, Tool, ToolContext, TodoStatus } from '../core/types.ts'
+import type { AIAgent, House, RoomConfig, Team, Tool, ToolContext, TodoStatus } from '../core/types.ts'
 
 export const createListRoomsTool = (house: House): Tool => ({
   name: 'list_rooms',
-  description: 'Lists all available rooms with their names and visibility.',
+  description: 'Lists all rooms with their names.',
   parameters: {},
   execute: async () => ({
     success: true,
-    data: house.listAllRooms().map(r => ({ name: r.name, visibility: r.visibility })),
+    data: house.listAllRooms().map(r => ({ name: r.name })),
   }),
 })
 
@@ -140,5 +140,113 @@ export const createUpdateTodoTool = (house: House): Tool => ({
     const updated = room.updateTodo(params.todoId as string, updates)
     if (!updated) return { success: false, error: `Todo "${params.todoId}" not found` }
     return { success: true, data: { id: updated.id, content: updated.content, status: updated.status, result: updated.result } }
+  },
+})
+
+// --- Room management tools ---
+
+type AddToRoomFn = (agentId: string, roomId: string, invitedBy?: string) => Promise<void>
+type RemoveFromRoomFn = (agentId: string, roomId: string, removedBy?: string) => void
+type RemoveRoomFn = (roomId: string) => boolean
+
+export const createCreateRoomTool = (house: House, addAgentToRoom: AddToRoomFn): Tool => ({
+  name: 'create_room',
+  description: 'Creates a new room and adds the calling agent to it.',
+  parameters: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'Name for the new room' },
+      roomPrompt: { type: 'string', description: 'Optional system prompt for the room' },
+    },
+    required: ['name'],
+  },
+  execute: async (params: Record<string, unknown>, context: ToolContext) => {
+    const name = params.name as string | undefined
+    if (!name) return { success: false, error: 'name is required' }
+    try {
+      const config: RoomConfig = {
+        name,
+        roomPrompt: params.roomPrompt as string | undefined,
+        createdBy: context.callerId,
+      }
+      const result = house.createRoomSafe(config)
+      await addAgentToRoom(context.callerId, result.value.profile.id)
+      return {
+        success: true,
+        data: { name: result.assignedName, id: result.value.profile.id, renamed: result.assignedName !== result.requestedName },
+      }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to create room' }
+    }
+  },
+})
+
+export const createDeleteRoomTool = (removeRoom: RemoveRoomFn, house: House): Tool => ({
+  name: 'delete_room',
+  description: 'Deletes a room by name.',
+  parameters: {
+    type: 'object',
+    properties: {
+      roomName: { type: 'string', description: 'Name of the room to delete' },
+    },
+    required: ['roomName'],
+  },
+  execute: async (params: Record<string, unknown>) => {
+    const roomName = params.roomName as string | undefined
+    if (!roomName) return { success: false, error: 'roomName is required' }
+    const room = house.getRoom(roomName)
+    if (!room) return { success: false, error: `Room "${roomName}" not found` }
+    removeRoom(room.profile.id)
+    return { success: true, data: { removed: roomName } }
+  },
+})
+
+export const createAddToRoomTool = (team: Team, house: House, addAgentToRoom: AddToRoomFn): Tool => ({
+  name: 'add_to_room',
+  description: 'Adds an agent (self or another) to a room.',
+  parameters: {
+    type: 'object',
+    properties: {
+      agentName: { type: 'string', description: 'Name of the agent to add (use own name to join)' },
+      roomName: { type: 'string', description: 'Name of the room to join' },
+    },
+    required: ['agentName', 'roomName'],
+  },
+  execute: async (params: Record<string, unknown>, context: ToolContext) => {
+    const agentName = params.agentName as string | undefined
+    const roomName = params.roomName as string | undefined
+    if (!agentName || !roomName) return { success: false, error: 'agentName and roomName are required' }
+    const agent = team.getAgent(agentName)
+    if (!agent) return { success: false, error: `Agent "${agentName}" not found` }
+    const room = house.getRoom(roomName)
+    if (!room) return { success: false, error: `Room "${roomName}" not found` }
+    const isSelf = agent.id === context.callerId
+    await addAgentToRoom(agent.id, room.profile.id, isSelf ? undefined : context.callerName)
+    return { success: true, data: { agentName: agent.name, roomName: room.profile.name } }
+  },
+})
+
+export const createRemoveFromRoomTool = (team: Team, house: House, removeAgentFromRoom: RemoveFromRoomFn): Tool => ({
+  name: 'remove_from_room',
+  description: 'Removes an agent (self or another) from a room.',
+  parameters: {
+    type: 'object',
+    properties: {
+      agentName: { type: 'string', description: 'Name of the agent to remove (use own name to leave)' },
+      roomName: { type: 'string', description: 'Name of the room' },
+    },
+    required: ['agentName', 'roomName'],
+  },
+  execute: async (params: Record<string, unknown>, context: ToolContext) => {
+    const agentName = params.agentName as string | undefined
+    const roomName = params.roomName as string | undefined
+    if (!agentName || !roomName) return { success: false, error: 'agentName and roomName are required' }
+    const agent = team.getAgent(agentName)
+    if (!agent) return { success: false, error: `Agent "${agentName}" not found` }
+    const room = house.getRoom(roomName)
+    if (!room) return { success: false, error: `Room "${roomName}" not found` }
+    const isSelf = agent.id === context.callerId
+    removeAgentFromRoom(agent.id, room.profile.id, isSelf ? undefined : context.callerName)
+    return { success: true, data: { agentName: agent.name, roomName: room.profile.name } }
   },
 })

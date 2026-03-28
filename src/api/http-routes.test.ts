@@ -29,6 +29,9 @@ const makeSystem = (): System => {
     house, team, toolRegistry, ollama,
     routeMessage: () => [],
     removeAgent: (id: string) => team.removeAgent(id),
+    removeRoom: (id: string) => house.removeRoom(id),
+    addAgentToRoom: async () => {},
+    removeAgentFromRoom: () => {},
     spawnAIAgent: async () => { throw new Error('Not implemented') },
     spawnHumanAgent: async () => { throw new Error('Not implemented') },
     setOnMessagePosted: () => {},
@@ -36,6 +39,9 @@ const makeSystem = (): System => {
     setOnDeliveryModeChanged: () => {},
     setOnFlowEvent: () => {},
     setOnTodoChanged: () => {},
+    setOnRoomCreated: () => {},
+    setOnRoomDeleted: () => {},
+    setOnMembershipChanged: () => {},
   } as unknown as System
 }
 
@@ -59,7 +65,7 @@ describe('HTTP Routes', () => {
 
   beforeEach(() => {
     system = makeSystem()
-    system.house.createRoom({ name: 'TestRoom', visibility: 'public', createdBy: 'system' })
+    system.house.createRoom({ name: 'TestRoom', createdBy: 'system' })
   })
 
   // --- Health ---
@@ -84,14 +90,14 @@ describe('HTTP Routes', () => {
   })
 
   test('POST /api/rooms creates room with 201', async () => {
-    const res = await call(system, req('POST', '/api/rooms', { name: 'NewRoom', visibility: 'public' }), '/api/rooms')
+    const res = await call(system, req('POST', '/api/rooms', { name: 'NewRoom' }), '/api/rooms')
     expect(res?.status).toBe(201)
     const data = await res!.json()
     expect(data.value.profile.name).toBe('NewRoom')
   })
 
   test('POST /api/rooms missing name returns 400', async () => {
-    const res = await call(system, req('POST', '/api/rooms', { visibility: 'public' }), '/api/rooms')
+    const res = await call(system, req('POST', '/api/rooms', {}), '/api/rooms')
     expect(res?.status).toBe(400)
   })
 
@@ -239,6 +245,73 @@ describe('HTTP Routes', () => {
     const data = await res!.json()
     expect(data).toHaveLength(1)
     expect(data[0].name).toBe('F1')
+  })
+
+  // --- Members ---
+
+  test('GET /api/rooms/:name/members returns empty list', async () => {
+    const res = await call(system, req('GET', '/api/rooms/TestRoom/members'), '/api/rooms/TestRoom/members')
+    expect(res?.status).toBe(200)
+    expect(await res!.json()).toHaveLength(0)
+  })
+
+  test('GET /api/rooms/:name/members returns members with agent info', async () => {
+    const room = system.house.getRoom('TestRoom')!
+    const { createHumanAgent } = await import('../agents/human-agent.ts')
+    const agent = createHumanAgent({ name: 'Alice' }, () => {})
+    system.team.addAgent(agent)
+    room.addMember(agent.id)
+    const res = await call(system, req('GET', '/api/rooms/TestRoom/members'), '/api/rooms/TestRoom/members')
+    expect(res?.status).toBe(200)
+    const data = await res!.json() as Array<{ id: string; name: string }>
+    expect(data).toHaveLength(1)
+    expect(data[0].name).toBe('Alice')
+  })
+
+  test('GET /api/rooms/:name/members unknown room returns 404', async () => {
+    const res = await call(system, req('GET', '/api/rooms/Ghost/members'), '/api/rooms/Ghost/members')
+    expect(res?.status).toBe(404)
+  })
+
+  test('POST /api/rooms/:name/members adds agent to room', async () => {
+    const { createHumanAgent } = await import('../agents/human-agent.ts')
+    const agent = createHumanAgent({ name: 'Bob' }, () => {})
+    system.team.addAgent(agent)
+    const res = await call(system, req('POST', '/api/rooms/TestRoom/members', { agentName: 'Bob' }), '/api/rooms/TestRoom/members')
+    expect(res?.status).toBe(200)
+    const data = await res!.json() as { added: boolean; agentName: string }
+    expect(data.added).toBe(true)
+    expect(data.agentName).toBe('Bob')
+  })
+
+  test('POST /api/rooms/:name/members missing agentName returns 400', async () => {
+    const res = await call(system, req('POST', '/api/rooms/TestRoom/members', {}), '/api/rooms/TestRoom/members')
+    expect(res?.status).toBe(400)
+  })
+
+  test('POST /api/rooms/:name/members unknown agent returns 404', async () => {
+    const res = await call(system, req('POST', '/api/rooms/TestRoom/members', { agentName: 'Ghost' }), '/api/rooms/TestRoom/members')
+    expect(res?.status).toBe(404)
+  })
+
+  test('DELETE /api/rooms/:name/members/:agentName removes agent from room', async () => {
+    const { createHumanAgent } = await import('../agents/human-agent.ts')
+    const agent = createHumanAgent({ name: 'Carol' }, () => {})
+    system.team.addAgent(agent)
+    const res = await call(system, req('DELETE', '/api/rooms/TestRoom/members/Carol'), '/api/rooms/TestRoom/members/Carol')
+    expect(res?.status).toBe(200)
+    const data = await res!.json() as { removed: boolean }
+    expect(data.removed).toBe(true)
+  })
+
+  test('DELETE /api/rooms/:name/members/:agentName unknown agent returns 404', async () => {
+    const res = await call(system, req('DELETE', '/api/rooms/TestRoom/members/Ghost'), '/api/rooms/TestRoom/members/Ghost')
+    expect(res?.status).toBe(404)
+  })
+
+  test('DELETE /api/rooms/:name/members/:agentName unknown room returns 404', async () => {
+    const res = await call(system, req('DELETE', '/api/rooms/Ghost/members/Alice'), '/api/rooms/Ghost/members/Alice')
+    expect(res?.status).toBe(404)
   })
 
   // --- Unknown route returns null ---

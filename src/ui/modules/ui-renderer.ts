@@ -20,7 +20,6 @@ export interface UIMessage {
 export interface RoomProfile {
   id: string
   name: string
-  visibility: string
 }
 
 export interface AgentInfo {
@@ -61,7 +60,7 @@ export const renderRooms = (
     dot.title = isPaused ? 'Paused' : 'Active'
 
     const nameSpan = document.createElement('span')
-    nameSpan.textContent = `${room.visibility === 'private' ? '🔒 ' : ''}${room.name}`
+    nameSpan.textContent = room.name
 
     div.appendChild(dot)
     div.appendChild(nameSpan)
@@ -153,6 +152,137 @@ export const renderTodos = (
   }
 }
 
+const renderAgentRow = (
+  agent: AgentInfo,
+  agentStates: Map<string, { state: string; context?: string }>,
+  mutedAgents: Set<string>,
+  onEditPrompt: (agentName: string) => void,
+  onRemove: (agentId: string, agentName: string) => void,
+  onToggleMute: (agentName: string, muted: boolean) => void,
+  onCancelGeneration: (agentName: string) => void,
+  onEditModel: (agentName: string) => void,
+  roomAction?: { inRoom: boolean; onAddToRoom?: (id: string, name: string) => void; onRemoveFromRoom?: (id: string, name: string) => void },
+): HTMLElement => {
+  const stateInfo = agentStates.get(agent.name)
+  const isGenerating = stateInfo?.state === 'generating'
+  const isMuted = mutedAgents.has(agent.name)
+
+  const div = document.createElement('div')
+  div.className = `px-3 py-2 border-b border-gray-100 relative ${isMuted ? 'agent-muted' : ''}`
+
+  // Top-right action button: remove-from-room (in room) or add-to-room (available) or delete-agent (no room context)
+  if (roomAction) {
+    if (roomAction.inRoom && roomAction.onRemoveFromRoom) {
+      const leaveBtn = document.createElement('button')
+      leaveBtn.className = 'absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-orange-300 hover:text-orange-600 text-xs leading-none rounded-full hover:bg-orange-50'
+      leaveBtn.textContent = '✕'
+      leaveBtn.title = `Remove ${agent.name} from room`
+      leaveBtn.onclick = (e) => { e.stopPropagation(); roomAction.onRemoveFromRoom!(agent.id, agent.name) }
+      div.appendChild(leaveBtn)
+    } else if (!roomAction.inRoom && roomAction.onAddToRoom) {
+      const addBtn = document.createElement('button')
+      addBtn.className = 'absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-green-400 hover:text-green-700 text-xs leading-none rounded-full hover:bg-green-50'
+      addBtn.textContent = '+'
+      addBtn.title = `Add ${agent.name} to room`
+      addBtn.onclick = (e) => { e.stopPropagation(); roomAction.onAddToRoom!(agent.id, agent.name) }
+      div.appendChild(addBtn)
+    }
+  } else if (agent.kind === 'ai') {
+    const closeBtn = document.createElement('button')
+    closeBtn.className = 'absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-red-300 hover:text-red-600 text-xs leading-none rounded-full hover:bg-red-50'
+    closeBtn.textContent = '✕'
+    closeBtn.title = `Remove ${agent.name}`
+    closeBtn.onclick = (e) => {
+      e.stopPropagation()
+      if (confirm(`Remove agent "${agent.name}"? This cannot be undone.`)) {
+        onRemove(agent.id, agent.name)
+      }
+    }
+    div.appendChild(closeBtn)
+  }
+
+  const nameRow = document.createElement('div')
+  nameRow.className = 'text-sm font-medium text-gray-800 flex items-center gap-1'
+  const dot = document.createElement('span')
+  const dotColor = isMuted ? 'bg-gray-300' : isGenerating ? 'bg-yellow-400 typing-indicator' : 'bg-green-400'
+  dot.className = `inline-block w-2.5 h-2.5 rounded-full ${dotColor}`
+  if (agent.kind !== 'human') {
+    dot.style.cursor = 'pointer'
+    dot.title = isMuted ? `Unmute ${agent.name}` : `Mute ${agent.name}`
+    dot.onclick = (e) => { e.stopPropagation(); onToggleMute(agent.name, !isMuted) }
+  }
+  nameRow.appendChild(dot)
+  const nameText = document.createElement('span')
+  nameText.textContent = ` ${agent.name}`
+  if (isMuted) nameText.style.textDecoration = 'line-through'
+  nameRow.appendChild(nameText)
+
+  if (agent.kind === 'ai') {
+    const promptWrapper = document.createElement('span')
+    promptWrapper.style.position = 'relative'
+    promptWrapper.style.display = 'inline-flex'
+
+    const promptIcon = document.createElement('span')
+    promptIcon.className = 'prompt-icon'
+    promptIcon.textContent = '?'
+    promptIcon.title = ''
+    promptIcon.onclick = (e) => { e.stopPropagation(); onEditPrompt(agent.name) }
+
+    const tooltip = document.createElement('div')
+    tooltip.className = 'prompt-tooltip'
+    tooltip.textContent = agent.kind
+    promptIcon.onmouseenter = () => {
+      fetch(`/api/agents/${encodeURIComponent(agent.name)}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data?.systemPrompt) {
+            const text = data.systemPrompt as string
+            tooltip.textContent = text.length > 200 ? text.slice(0, 200) + '…' : text
+          }
+        })
+        .catch(() => {})
+    }
+
+    promptWrapper.appendChild(promptIcon)
+    promptWrapper.appendChild(tooltip)
+    nameRow.appendChild(promptWrapper)
+  }
+
+  const kindRow = document.createElement('div')
+  kindRow.className = 'text-xs text-gray-400 flex items-center gap-1'
+
+  if (agent.kind === 'ai') {
+    const kindLabel = document.createElement('span')
+    kindLabel.textContent = isGenerating ? 'ai — thinking...' : 'ai'
+    kindRow.appendChild(kindLabel)
+
+    if (agent.model) {
+      const modelLabel = document.createElement('span')
+      modelLabel.className = 'text-gray-300 cursor-pointer hover:text-purple-400 hover:underline ml-1 truncate max-w-[90px]'
+      modelLabel.textContent = `· ${agent.model}`
+      modelLabel.title = `Model: ${agent.model} (click to change)`
+      modelLabel.onclick = (e) => { e.stopPropagation(); onEditModel(agent.name) }
+      kindRow.appendChild(modelLabel)
+    }
+
+    if (isGenerating) {
+      const stopBtn = document.createElement('button')
+      stopBtn.className = 'text-red-400 hover:text-red-600 text-xs font-medium ml-1'
+      stopBtn.textContent = '■ stop'
+      stopBtn.title = `Cancel ${agent.name}'s generation`
+      stopBtn.onclick = (e) => { e.stopPropagation(); onCancelGeneration(agent.name) }
+      kindRow.appendChild(stopBtn)
+    }
+  } else {
+    kindRow.textContent = agent.kind
+  }
+
+  div.appendChild(nameRow)
+  div.appendChild(kindRow)
+
+  return div
+}
+
 export const renderAgents = (
   container: HTMLElement,
   agents: Map<string, AgentInfo>,
@@ -163,114 +293,48 @@ export const renderAgents = (
   onToggleMute: (agentName: string, muted: boolean) => void,
   onCancelGeneration: (agentName: string) => void,
   onEditModel: (agentName: string) => void,
+  roomMemberIds?: Set<string>,
+  onAddToRoom?: (agentId: string, agentName: string) => void,
+  onRemoveFromRoom?: (agentId: string, agentName: string) => void,
 ): void => {
   container.innerHTML = ''
-  for (const agent of agents.values()) {
-    const stateInfo = agentStates.get(agent.name)
-    const isGenerating = stateInfo?.state === 'generating'
-    const isMuted = mutedAgents.has(agent.name)
 
-    const div = document.createElement('div')
-    div.className = `px-3 py-2 border-b border-gray-100 relative ${isMuted ? 'agent-muted' : ''}`
+  if (roomMemberIds) {
+    // Room-aware mode: split into two sections
+    const inRoom = [...agents.values()].filter(a => roomMemberIds.has(a.id))
+    const available = [...agents.values()].filter(a => !roomMemberIds.has(a.id))
 
-    if (agent.kind === 'ai') {
-      const closeBtn = document.createElement('button')
-      closeBtn.className = 'absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-red-300 hover:text-red-600 text-xs leading-none rounded-full hover:bg-red-50'
-      closeBtn.textContent = '✕'
-      closeBtn.title = `Remove ${agent.name}`
-      closeBtn.onclick = (e) => {
-        e.stopPropagation()
-        if (confirm(`Remove agent "${agent.name}"? This cannot be undone.`)) {
-          onRemove(agent.id, agent.name)
-        }
-      }
-      div.appendChild(closeBtn)
+    const makeHeader = (text: string): HTMLElement => {
+      const h = document.createElement('div')
+      h.className = 'px-3 py-1 text-xs font-semibold text-gray-400 uppercase tracking-wide bg-gray-50 border-b border-gray-100'
+      h.textContent = text
+      return h
     }
 
-    const nameRow = document.createElement('div')
-    nameRow.className = 'text-sm font-medium text-gray-800 flex items-center gap-1'
-    const dot = document.createElement('span')
-    const dotColor = isMuted ? 'bg-gray-300' : isGenerating ? 'bg-yellow-400 typing-indicator' : 'bg-green-400'
-    dot.className = `inline-block w-2.5 h-2.5 rounded-full ${dotColor}`
-    if (agent.kind !== 'human') {
-      dot.style.cursor = 'pointer'
-      dot.title = isMuted ? `Unmute ${agent.name}` : `Mute ${agent.name}`
-      dot.onclick = (e) => { e.stopPropagation(); onToggleMute(agent.name, !isMuted) }
-    }
-    nameRow.appendChild(dot)
-    const nameText = document.createElement('span')
-    nameText.textContent = ` ${agent.name}`
-    if (isMuted) nameText.style.textDecoration = 'line-through'
-    nameRow.appendChild(nameText)
-
-    if (agent.kind === 'ai') {
-      // ? icon with hover tooltip showing system prompt, click opens editor
-      const promptWrapper = document.createElement('span')
-      promptWrapper.style.position = 'relative'
-      promptWrapper.style.display = 'inline-flex'
-
-      const promptIcon = document.createElement('span')
-      promptIcon.className = 'prompt-icon'
-      promptIcon.textContent = '?'
-      promptIcon.title = ''
-      promptIcon.onclick = (e) => { e.stopPropagation(); onEditPrompt(agent.name) }
-
-      const tooltip = document.createElement('div')
-      tooltip.className = 'prompt-tooltip'
-      tooltip.textContent = agent.kind
-      // Fetch actual system prompt for tooltip on hover
-      promptIcon.onmouseenter = () => {
-        fetch(`/api/agents/${encodeURIComponent(agent.name)}`)
-          .then(res => res.ok ? res.json() : null)
-          .then(data => {
-            if (data?.systemPrompt) {
-              const text = data.systemPrompt as string
-              tooltip.textContent = text.length > 200 ? text.slice(0, 200) + '…' : text
-            }
-          })
-          .catch(() => {})
-      }
-
-      promptWrapper.appendChild(promptIcon)
-      promptWrapper.appendChild(tooltip)
-      nameRow.appendChild(promptWrapper)
+    container.appendChild(makeHeader(`In room (${inRoom.length})`))
+    for (const agent of inRoom) {
+      container.appendChild(renderAgentRow(
+        agent, agentStates, mutedAgents,
+        onEditPrompt, onRemove, onToggleMute, onCancelGeneration, onEditModel,
+        { inRoom: true, onRemoveFromRoom },
+      ))
     }
 
-    const kindRow = document.createElement('div')
-    kindRow.className = 'text-xs text-gray-400 flex items-center gap-1'
-
-    if (agent.kind === 'ai') {
-      const kindLabel = document.createElement('span')
-      kindLabel.textContent = isGenerating ? 'ai — thinking...' : 'ai'
-      kindRow.appendChild(kindLabel)
-
-      if (agent.model) {
-        const modelLabel = document.createElement('span')
-        modelLabel.className = 'text-gray-300 cursor-pointer hover:text-purple-400 hover:underline ml-1 truncate max-w-[90px]'
-        modelLabel.textContent = `· ${agent.model}`
-        modelLabel.title = `Model: ${agent.model} (click to change)`
-        modelLabel.onclick = (e) => { e.stopPropagation(); onEditModel(agent.name) }
-        kindRow.appendChild(modelLabel)
-      }
-
-      if (isGenerating) {
-        const stopBtn = document.createElement('button')
-        stopBtn.className = 'text-red-400 hover:text-red-600 text-xs font-medium ml-1'
-        stopBtn.textContent = '■ stop'
-        stopBtn.title = `Cancel ${agent.name}'s generation`
-        stopBtn.onclick = (e) => { e.stopPropagation(); onCancelGeneration(agent.name) }
-        kindRow.appendChild(stopBtn)
-      }
-    } else {
-      kindRow.textContent = agent.kind
+    container.appendChild(makeHeader(`Available (${available.length})`))
+    for (const agent of available) {
+      container.appendChild(renderAgentRow(
+        agent, agentStates, mutedAgents,
+        onEditPrompt, onRemove, onToggleMute, onCancelGeneration, onEditModel,
+        { inRoom: false, onAddToRoom },
+      ))
     }
-
-    div.appendChild(nameRow)
-    div.appendChild(kindRow)
-
-    // Mute toggle is handled via the status dot — no separate button needed
-
-    container.appendChild(div)
+  } else {
+    for (const agent of agents.values()) {
+      container.appendChild(renderAgentRow(
+        agent, agentStates, mutedAgents,
+        onEditPrompt, onRemove, onToggleMute, onCancelGeneration, onEditModel,
+      ))
+    }
   }
 }
 

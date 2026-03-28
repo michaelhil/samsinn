@@ -31,7 +31,6 @@ export interface RoomProfile {
   readonly id: string
   readonly name: string
   readonly roomPrompt?: string
-  readonly visibility: 'public' | 'private'
   readonly createdBy: string
   readonly createdAt: number
 }
@@ -123,6 +122,7 @@ export interface RoomState {
   readonly mode: DeliveryMode
   readonly paused: boolean
   readonly muted: ReadonlyArray<string>
+  readonly members: ReadonlyArray<string>
   readonly flowExecution?: {
     readonly flowId: string
     readonly stepIndex: number
@@ -142,6 +142,9 @@ export type OnMessagePosted = (roomId: string, message: Message) => void
 export type OnDeliveryModeChanged = (roomId: string, mode: DeliveryMode) => void
 export type OnTurnChanged = (roomId: string, agentId?: string, waitingForHuman?: boolean) => void
 export type OnFlowEvent = (roomId: string, event: 'started' | 'step' | 'completed' | 'cancelled', detail?: Record<string, unknown>) => void
+export type OnRoomCreated = (profile: RoomProfile) => void
+export type OnRoomDeleted = (roomId: string, roomName: string) => void
+export type OnMembershipChanged = (roomId: string, roomName: string, agentId: string, agentName: string, action: 'added' | 'removed') => void
 
 // === Room — self-contained component: stores messages and delivers to members ===
 
@@ -213,7 +216,6 @@ export interface House {
   readonly createRoomSafe: (config: RoomConfig) => CreateResult<Room>
   readonly getRoom: (idOrName: string) => Room | undefined
   readonly getRoomsForAgent: (agentId: string) => ReadonlyArray<Room>
-  readonly listPublicRooms: () => ReadonlyArray<RoomProfile>
   readonly listAllRooms: () => ReadonlyArray<RoomProfile>
   readonly removeRoom: (id: string) => boolean
   readonly getHousePrompt: () => string
@@ -226,7 +228,6 @@ export interface House {
 export interface RoomConfig {
   readonly name: string
   readonly roomPrompt?: string
-  readonly visibility: 'public' | 'private'
   readonly createdBy: string
 }
 
@@ -251,6 +252,7 @@ export interface Agent {
   readonly state: AgentState
   readonly receive: (message: Message, history?: ReadonlyArray<Message>) => void
   readonly join: (room: Room) => Promise<void>
+  readonly leave: (roomId: string) => void
   readonly inactive?: boolean
   readonly setInactive?: (value: boolean) => void
 }
@@ -340,21 +342,6 @@ export type AgentResponse =
       readonly reason?: string
     }
 
-// Agent actions use names, not IDs. Resolved to UUIDs in actions.ts.
-export type AgentAction =
-  | {
-      readonly type: 'create_room'
-      readonly name: string
-      readonly roomPrompt?: string
-      readonly visibility: 'public' | 'private'
-      readonly add?: ReadonlyArray<string>  // agent names to add after creation
-    }
-  | {
-      readonly type: 'add_to_room'
-      readonly roomName: string
-      readonly agentName: string  // self = join, other = invite
-    }
-
 // === LLM Provider ===
 
 // OpenAI/Ollama-compatible tool definition (used in native tool calling)
@@ -407,8 +394,9 @@ export interface LLMProvider {
 
 export type WSInbound =
   | { readonly type: 'post_message'; readonly target: MessageTarget; readonly content: string }
-  | { readonly type: 'create_room'; readonly name: string; readonly roomPrompt?: string; readonly visibility: 'public' | 'private' }
+  | { readonly type: 'create_room'; readonly name: string; readonly roomPrompt?: string }
   | { readonly type: 'add_to_room'; readonly roomName: string; readonly agentName: string }
+  | { readonly type: 'remove_from_room'; readonly roomName: string; readonly agentName: string }
   | { readonly type: 'create_agent'; readonly config: AIAgentConfig }
   | { readonly type: 'remove_agent'; readonly name: string }
   | { readonly type: 'update_agent'; readonly name: string; readonly systemPrompt?: string; readonly model?: string }
@@ -442,6 +430,8 @@ export type WSOutbound =
   | { readonly type: 'turn_changed'; readonly roomName: string; readonly agentName?: string; readonly waitingForHuman?: boolean }
   | { readonly type: 'flow_event'; readonly roomName: string; readonly event: 'started' | 'step' | 'completed' | 'cancelled'; readonly detail?: Record<string, unknown> }
   | { readonly type: 'todo_changed'; readonly roomName: string; readonly action: 'added' | 'updated' | 'removed'; readonly todo: TodoItem }
+  | { readonly type: 'membership_changed'; readonly roomName: string; readonly agentName: string; readonly action: 'added' | 'removed' }
+  | { readonly type: 'room_deleted'; readonly roomName: string }
 
 // === System Constants ===
 
@@ -452,5 +442,4 @@ export const DEFAULTS = {
   ollamaBaseUrl: 'http://localhost:11434',
   historyLimit: 50,
   roomMessageLimit: 500,
-  maxAgentActionsPerResponse: 5,
 } as const

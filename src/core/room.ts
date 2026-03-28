@@ -126,8 +126,9 @@ export const createRoom = (
     // Notify observers (e.g. WS broadcast to UI) — always, regardless of delivery mode
     callbacks?.onMessagePosted?.(profile.id, message)
 
-    // Sender becomes a member implicitly
-    if (params.senderId !== SYSTEM_SENDER_ID) {
+    // Sender becomes a member implicitly for chat messages.
+    // Join/leave messages use explicit addMember/removeMember — implicit add would undo removals.
+    if (params.senderId !== SYSTEM_SENDER_ID && params.type !== 'join' && params.type !== 'leave') {
       members.add(params.senderId)
     }
 
@@ -428,6 +429,7 @@ export const createRoom = (
       mode,
       paused,
       muted: [...muted],
+      members: [...members],
       ...(flowExecution ? {
         flowExecution: {
           flowId: flowExecution.flow.id,

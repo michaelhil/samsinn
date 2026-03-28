@@ -83,7 +83,6 @@ const createToolExecutor = (
 
 export interface SpawnOptions {
   readonly overrideId?: string
-  readonly skipAutoJoin?: boolean
   readonly toolCapabilityCache?: ToolCapabilityCache
 }
 
@@ -176,13 +175,6 @@ export const spawnAIAgent = async (
   }, spawnOptions?.overrideId)
   team.addAgent(agent)
 
-  if (!spawnOptions?.skipAutoJoin) {
-    const publicRooms = house.listPublicRooms()
-    await Promise.all(publicRooms.map(roomProfile =>
-      addAgentToRoom(agent.id, agent.name, roomProfile.id, undefined, team, routeMessage, house),
-    ))
-  }
-
   return agent
 }
 
@@ -195,7 +187,7 @@ export const spawnHumanAgent = async (
 ): Promise<Agent> => {
   team.addAgent(agent)
 
-  const rooms = roomsToJoin ?? house.listPublicRooms().map(
+  const rooms = roomsToJoin ?? house.listAllRooms().map(
     profile => house.getRoom(profile.id),
   ).filter((r): r is Room => r !== undefined)
 

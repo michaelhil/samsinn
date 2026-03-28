@@ -13,7 +13,7 @@ import type {
   WSInbound,
   WSOutbound,
 } from '../core/types.ts'
-import { addAgentToRoom, asAIAgent } from '../agents/shared.ts'
+import { asAIAgent } from '../agents/shared.ts'
 
 // === Types ===
 
@@ -50,6 +50,17 @@ export const createWSManager = (system: System): WSManager => {
       try { ws.send(data) } catch { /* client gone */ }
     }
   }
+
+  // Wire system callbacks → WS broadcasts
+  system.setOnRoomCreated((profile) => {
+    broadcast({ type: 'room_created', profile })
+  })
+  system.setOnRoomDeleted((_roomId, roomName) => {
+    broadcast({ type: 'room_deleted', roomName })
+  })
+  system.setOnMembershipChanged((_roomId, roomName, _agentId, agentName, action) => {
+    broadcast({ type: 'membership_changed', roomName, agentName, action })
+  })
 
   const subscribeAgentState = (agentId: string, agentName: string): void => {
     const agent = system.team.getAgent(agentId)
@@ -154,18 +165,23 @@ export const handleWSMessage = async (
         const result = system.house.createRoomSafe({
           name: msg.name,
           roomPrompt: msg.roomPrompt,
-          visibility: msg.visibility ?? 'public',
           createdBy: session.agent.id,
         })
-        result.value.addMember(session.agent.id)
-        await session.agent.join(result.value)
-        wsManager.broadcast({ type: 'room_created', profile: result.value.profile })
+        // Add the creator; system.addAgentToRoom fires membership_changed + join message
+        // room_created fired via onRoomCreated callback
+        await system.addAgentToRoom(session.agent.id, result.value.profile.id)
         break
       }
       case 'add_to_room': {
         const room = requireRoom(ws, system, msg.roomName)
         const agent = requireAgent(ws, system, msg.agentName)
-        if (room && agent) await addAgentToRoom(agent, room)
+        if (room && agent) await system.addAgentToRoom(agent.id, room.profile.id, session.agent.name)
+        break
+      }
+      case 'remove_from_room': {
+        const room = requireRoom(ws, system, msg.roomName)
+        const agent = requireAgent(ws, system, msg.agentName)
+        if (room && agent) system.removeAgentFromRoom(agent.id, room.profile.id, session.agent.name)
         break
       }
       case 'create_agent': {

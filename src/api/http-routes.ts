@@ -8,7 +8,7 @@
 import type { System } from '../main.ts'
 import type { MessageTarget, WSOutbound } from '../core/types.ts'
 import { SYSTEM_SENDER_ID } from '../core/types.ts'
-import { addAgentToRoom, asAIAgent } from '../agents/shared.ts'
+import { asAIAgent } from '../agents/shared.ts'
 
 // === Helpers ===
 
@@ -97,8 +97,7 @@ export const handleAPI = async (
 
   // GET /api/rooms
   if (method === 'GET' && pathname === '/api/rooms') {
-    const vis = new URL(req.url).searchParams.get('visibility')
-    return json(vis === 'public' ? system.house.listPublicRooms() : system.house.listAllRooms())
+    return json(system.house.listAllRooms())
   }
 
   // GET /api/rooms/:name
@@ -120,10 +119,9 @@ export const handleAPI = async (
       const result = system.house.createRoomSafe({
         name: body.name,
         roomPrompt: body.roomPrompt as string | undefined,
-        visibility: (body.visibility as 'public' | 'private') ?? 'public',
         createdBy: (body.createdBy as string) ?? SYSTEM_SENDER_ID,
       })
-      broadcast({ type: 'room_created', profile: result.value.profile })
+      // room_created broadcast handled via onRoomCreated callback in system
       return json(result, 201)
     } catch (err) {
       return errorResponse(err instanceof Error ? err.message : 'Failed to create room')
@@ -136,7 +134,8 @@ export const handleAPI = async (
     if (name) {
       const room = system.house.getRoom(name)
       if (!room) return notFound(`Room "${name}"`)
-      system.house.removeRoom(room.profile.id)
+      system.removeRoom(room.profile.id)
+      // room_deleted broadcast handled via onRoomDeleted callback in system
       return json({ removed: true })
     }
   }
@@ -154,6 +153,20 @@ export const handleAPI = async (
     }
   }
 
+  // GET /api/rooms/:name/members
+  if (method === 'GET') {
+    const name = extractParam(pathname, '/api/rooms/:name/members')
+    if (name) {
+      const room = system.house.getRoom(name)
+      if (!room) return notFound(`Room "${name}"`)
+      const members = room.getParticipantIds().map(id => {
+        const agent = system.team.getAgent(id)
+        return agent ? { id: agent.id, name: agent.name, kind: agent.kind } : { id }
+      })
+      return json(members)
+    }
+  }
+
   // POST /api/rooms/:name/members
   if (method === 'POST') {
     const name = extractParam(pathname, '/api/rooms/:name/members')
@@ -165,8 +178,27 @@ export const handleAPI = async (
       if (!agentName) return errorResponse('agentName is required')
       const agent = system.team.getAgent(agentName)
       if (!agent) return notFound(`Agent "${agentName}"`)
-      await addAgentToRoom(agent, room)
+      await system.addAgentToRoom(agent.id, room.profile.id)
       return json({ added: true, agentName: agent.name, roomName: room.profile.name })
+    }
+  }
+
+  // DELETE /api/rooms/:name/members/:agentName
+  if (method === 'DELETE') {
+    const roomName = extractParam(pathname, '/api/rooms/:name/members')
+    if (!roomName) {
+      // Try the members/:agentName pattern
+      const match = pathname.match(/^\/api\/rooms\/([^/]+)\/members\/([^/]+)$/)
+      if (match) {
+        const rName = decodeURIComponent(match[1]!)
+        const aName = decodeURIComponent(match[2]!)
+        const room = system.house.getRoom(rName)
+        if (!room) return notFound(`Room "${rName}"`)
+        const agent = system.team.getAgent(aName)
+        if (!agent) return notFound(`Agent "${aName}"`)
+        system.removeAgentFromRoom(agent.id, room.profile.id)
+        return json({ removed: true, agentName: agent.name, roomName: room.profile.name })
+      }
     }
   }
 
