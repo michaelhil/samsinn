@@ -305,7 +305,8 @@ export const handleAPI = async (
     const room = system.house.getRoom(pauseRoomName)
     if (!room) return notFound('Room')
     const body = await parseBody(req)
-    room.setPaused(body.paused as boolean)
+    if (typeof body.paused !== 'boolean') return errorResponse('paused must be a boolean')
+    room.setPaused(body.paused)
     broadcast({ type: 'delivery_mode_changed', roomName: room.profile.name, mode: room.deliveryMode, paused: room.paused })
     return json({ paused: room.paused })
   }
@@ -316,10 +317,12 @@ export const handleAPI = async (
     const room = system.house.getRoom(muteRoomName)
     if (!room) return notFound('Room')
     const body = await parseBody(req)
-    const agent = system.team.getAgent(body.agentName as string)
+    if (typeof body.agentName !== 'string') return errorResponse('agentName is required')
+    if (typeof body.muted !== 'boolean') return errorResponse('muted must be a boolean')
+    const agent = system.team.getAgent(body.agentName)
     if (!agent) return notFound('Agent')
-    room.setMuted(agent.id, body.muted as boolean)
-    broadcast({ type: 'mute_changed', roomName: room.profile.name, agentName: agent.name, muted: body.muted as boolean })
+    room.setMuted(agent.id, body.muted)
+    broadcast({ type: 'mute_changed', roomName: room.profile.name, agentName: agent.name, muted: body.muted })
     return json({ muted: room.isMuted(agent.id) })
   }
 
@@ -329,11 +332,13 @@ export const handleAPI = async (
     const room = system.house.getRoom(flowsRoom)
     if (!room) return notFound('Room')
     const body = await parseBody(req)
-    if (!body.name || !body.steps) return errorResponse('name and steps are required')
+    if (typeof body.name !== 'string') return errorResponse('name is required')
+    if (!Array.isArray(body.steps)) return errorResponse('steps must be an array')
+    if (body.loop !== undefined && typeof body.loop !== 'boolean') return errorResponse('loop must be a boolean')
     const flow = room.addFlow({
-      name: body.name as string,
-      steps: body.steps as Array<{ agentName: string; stepPrompt?: string }>,
-      loop: (body.loop as boolean) ?? false,
+      name: body.name,
+      steps: body.steps as Array<{ agentId: string; agentName: string; stepPrompt?: string }>,
+      loop: (body.loop as boolean | undefined) ?? false,
     })
     return json(flow, 201)
   }
@@ -351,7 +356,7 @@ export const handleAPI = async (
     const room = system.house.getRoom(flowStartRoom)
     if (!room) return notFound('Room')
     const body = await parseBody(req)
-    if (!body.flowId) return errorResponse('flowId is required')
+    if (typeof body.flowId !== 'string') return errorResponse('flowId is required')
     if (body.content && body.senderId) {
       room.setPaused(true)
       room.post({
@@ -361,7 +366,7 @@ export const handleAPI = async (
         type: 'chat',
       })
     }
-    room.startFlow(body.flowId as string)
+    room.startFlow(body.flowId)
     return json({ started: true, mode: room.deliveryMode })
   }
 

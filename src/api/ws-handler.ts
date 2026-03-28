@@ -194,9 +194,11 @@ export const handleWSMessage = async (
         break
       }
       case 'cancel_generation': {
-        const agent = system.team.getAgent(msg.name)
-        const aiAgent = agent ? asAIAgent(agent) : undefined
-        aiAgent?.cancelGeneration()
+        const agent = requireAgent(ws, system, msg.name)
+        if (!agent) break
+        const aiAgent = asAIAgent(agent)
+        if (!aiAgent) { sendError(ws, `"${msg.name}" is not an AI agent`); break }
+        aiAgent.cancelGeneration()
         break
       }
       case 'set_delivery_mode': {

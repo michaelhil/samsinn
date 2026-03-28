@@ -37,6 +37,7 @@ export interface TodoInfo {
   status: string
   assignee?: string
   result?: string
+  dependencies?: ReadonlyArray<string>
 }
 
 // === Rendering ===
@@ -102,17 +103,28 @@ export const renderTodos = (
       content.appendChild(result)
     }
 
+    row.appendChild(checkbox)
+    row.appendChild(content)
+
     // Assignee badge
     if (todo.assignee) {
       const badge = document.createElement('span')
       badge.className = 'text-xs bg-blue-100 text-blue-600 px-1 rounded flex-shrink-0'
       badge.textContent = todo.assignee
-      row.appendChild(checkbox)
-      row.appendChild(content)
       row.appendChild(badge)
-    } else {
-      row.appendChild(checkbox)
-      row.appendChild(content)
+    }
+
+    // Dependencies badge — shows count, tooltip resolves IDs to content
+    if (todo.dependencies && todo.dependencies.length > 0) {
+      const depContents = todo.dependencies
+        .map(depId => todos.find(t => t.id === depId)?.content ?? depId)
+        .join(', ')
+      const depsEl = document.createElement('span')
+      const n = todo.dependencies.length
+      depsEl.className = 'text-xs text-orange-400 flex-shrink-0 cursor-help'
+      depsEl.title = `Depends on: ${depContents}`
+      depsEl.textContent = `↳ ${n} dep${n > 1 ? 's' : ''}`
+      row.appendChild(depsEl)
     }
 
     // Status indicator for blocked/in_progress

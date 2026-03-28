@@ -423,6 +423,7 @@ export type WSInbound =
   | { readonly type: 'remove_flow'; readonly roomName: string; readonly flowId: string }
   | { readonly type: 'start_flow'; readonly roomName: string; readonly flowId: string; readonly content: string }
   | { readonly type: 'cancel_flow'; readonly roomName: string }
+  | { readonly type: 'cancel_generation'; readonly name: string }
   // Todo management
   | { readonly type: 'add_todo'; readonly roomName: string; readonly content: string; readonly assignee?: string; readonly assigneeId?: string; readonly dependencies?: ReadonlyArray<string> }
   | { readonly type: 'update_todo'; readonly roomName: string; readonly todoId: string; readonly status?: TodoStatus; readonly assignee?: string; readonly assigneeId?: string; readonly content?: string; readonly result?: string }

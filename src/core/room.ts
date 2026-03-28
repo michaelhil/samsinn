@@ -280,8 +280,6 @@ export const createRoom = (
     }
   }
 
-  // --- Staleness controls ---
-
   // --- Flow management ---
 
   const addFlow = (config: Omit<Flow, 'id'>): Flow => {

@@ -28,8 +28,12 @@ export const createQueryAgentTool = (team: Team): Tool => ({
   name: 'query_agent',
   description: 'Ask another AI agent a question and get their response. Use this to consult with specialists.',
   parameters: {
-    agent: 'string — name of the agent to query',
-    question: 'string — the question to ask',
+    type: 'object',
+    properties: {
+      agent: { type: 'string', description: 'Name of the agent to query' },
+      question: { type: 'string', description: 'The question to ask' },
+    },
+    required: ['agent', 'question'],
   },
   execute: async (params: Record<string, unknown>, context: ToolContext) => {
     const agentName = params.agent as string | undefined
