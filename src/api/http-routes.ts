@@ -247,7 +247,8 @@ export const handleAPI = async (
         historyLimit: body.historyLimit as number | undefined,
       })
       subscribeAgentState(agent.id, agent.name)
-      broadcast({ type: 'agent_joined', agent: { id: agent.id, name: agent.name, kind: agent.kind } })
+      const aiA = asAIAgent(agent)
+      broadcast({ type: 'agent_joined', agent: { id: agent.id, name: agent.name, kind: agent.kind, ...(aiA ? { model: aiA.getModel() } : {}) } })
       return json({ id: agent.id, name: agent.name }, 201)
     } catch (err) {
       return errorResponse(err instanceof Error ? err.message : 'Failed to create agent')
@@ -352,6 +353,7 @@ export const handleAPI = async (
     const body = await parseBody(req)
     if (!body.flowId) return errorResponse('flowId is required')
     if (body.content && body.senderId) {
+      room.setPaused(true)
       room.post({
         senderId: body.senderId as string,
         senderName: body.senderName as string | undefined,

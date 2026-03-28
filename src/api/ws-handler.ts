@@ -87,9 +87,10 @@ export const createWSManager = (system: System): WSManager => {
       rooms: system.house.listAllRooms(),
       agents: system.team.listAgents()
         .filter(a => !a.inactive)
-        .map(a => ({
-          id: a.id, name: a.name, kind: a.kind, state: a.state.get(),
-        })),
+        .map(a => {
+          const ai = asAIAgent(a)
+          return { id: a.id, name: a.name, kind: a.kind, state: a.state.get(), ...(ai ? { model: ai.getModel() } : {}) }
+        }),
       agentId,
       roomStates,
       ...(sessionToken ? { sessionToken } : {}),
@@ -170,7 +171,8 @@ export const handleWSMessage = async (
       case 'create_agent': {
         const agent = await system.spawnAIAgent(msg.config)
         wsManager.subscribeAgentState(agent.id, agent.name)
-        wsManager.broadcast({ type: 'agent_joined', agent: { id: agent.id, name: agent.name, kind: agent.kind } })
+        const ai = asAIAgent(agent)
+        wsManager.broadcast({ type: 'agent_joined', agent: { id: agent.id, name: agent.name, kind: agent.kind, ...(ai ? { model: ai.getModel() } : {}) } })
         break
       }
       case 'remove_agent': {
@@ -234,6 +236,9 @@ export const handleWSMessage = async (
       case 'start_flow': {
         const room = requireRoom(ws, system, msg.roomName)
         if (!room) break
+        // Post the trigger message while paused so broadcast doesn't fire —
+        // startFlow() will deliver it to the first step agent and unpause.
+        room.setPaused(true)
         room.post({ senderId: session.agent.id, senderName: session.agent.name, content: msg.content, type: 'chat' })
         room.startFlow(msg.flowId)
         break

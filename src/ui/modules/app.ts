@@ -13,6 +13,7 @@ import {
   renderTodos,
   renderTypingIndicators,
   openPromptEditor,
+  openModelEditor,
   openFlowEditorModal,
   type UIMessage,
   type RoomProfile,
@@ -104,6 +105,17 @@ const refreshAgents = () => renderAgents(
     if (room) send({ type: 'set_muted', roomName: room.name, agentName: name, muted })
   },
   (name) => { send({ type: 'cancel_generation', name }) },
+  (name) => openModelEditor(name, (data) => {
+    send(data)
+    // Update local model after change
+    const updated = (data as { model?: string }).model
+    if (updated) {
+      for (const [id, a] of agents) {
+        if (a.name === name) { agents.set(id, { ...a, model: updated }); break }
+      }
+      refreshAgents()
+    }
+  }),
 )
 
 const refreshModeSelector = (): void => {

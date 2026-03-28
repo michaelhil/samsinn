@@ -166,7 +166,7 @@ export const restoreFromSnapshot = async (
       members: roomSnap.members,
       muted: roomSnap.muted,
       mode: (roomSnap.deliveryMode === 'broadcast' || roomSnap.deliveryMode === 'flow') ? roomSnap.deliveryMode : 'broadcast',
-      paused: true,  // always start paused on restore
+      paused: roomSnap.paused,
       flows: roomSnap.flows,
       todos: roomSnap.todos ?? [],
     })

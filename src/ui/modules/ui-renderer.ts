@@ -28,6 +28,7 @@ export interface AgentInfo {
   name: string
   kind: string
   state?: string
+  model?: string
 }
 
 export interface TodoInfo {
@@ -149,6 +150,7 @@ export const renderAgents = (
   onRemove: (agentId: string, agentName: string) => void,
   onToggleMute: (agentName: string, muted: boolean) => void,
   onCancelGeneration: (agentName: string) => void,
+  onEditModel: (agentName: string) => void,
 ): void => {
   container.innerHTML = ''
   for (const agent of agents.values()) {
@@ -224,15 +226,31 @@ export const renderAgents = (
 
     const kindRow = document.createElement('div')
     kindRow.className = 'text-xs text-gray-400 flex items-center gap-1'
-    kindRow.textContent = `${agent.kind}${isGenerating ? ' — thinking...' : ''}`
 
-    if (isGenerating && agent.kind === 'ai') {
-      const stopBtn = document.createElement('button')
-      stopBtn.className = 'text-red-400 hover:text-red-600 text-xs font-medium ml-1'
-      stopBtn.textContent = '■ stop'
-      stopBtn.title = `Cancel ${agent.name}'s generation`
-      stopBtn.onclick = (e) => { e.stopPropagation(); onCancelGeneration(agent.name) }
-      kindRow.appendChild(stopBtn)
+    if (agent.kind === 'ai') {
+      const kindLabel = document.createElement('span')
+      kindLabel.textContent = isGenerating ? 'ai — thinking...' : 'ai'
+      kindRow.appendChild(kindLabel)
+
+      if (agent.model) {
+        const modelLabel = document.createElement('span')
+        modelLabel.className = 'text-gray-300 cursor-pointer hover:text-purple-400 hover:underline ml-1 truncate max-w-[90px]'
+        modelLabel.textContent = `· ${agent.model}`
+        modelLabel.title = `Model: ${agent.model} (click to change)`
+        modelLabel.onclick = (e) => { e.stopPropagation(); onEditModel(agent.name) }
+        kindRow.appendChild(modelLabel)
+      }
+
+      if (isGenerating) {
+        const stopBtn = document.createElement('button')
+        stopBtn.className = 'text-red-400 hover:text-red-600 text-xs font-medium ml-1'
+        stopBtn.textContent = '■ stop'
+        stopBtn.title = `Cancel ${agent.name}'s generation`
+        stopBtn.onclick = (e) => { e.stopPropagation(); onCancelGeneration(agent.name) }
+        kindRow.appendChild(stopBtn)
+      }
+    } else {
+      kindRow.textContent = agent.kind
     }
 
     div.appendChild(nameRow)
@@ -356,6 +374,67 @@ export const openPromptEditor = (
       document.body.appendChild(modal.overlay)
       textarea.focus()
     })
+}
+
+export const openModelEditor = (
+  agentName: string,
+  send: (data: unknown) => void,
+): void => {
+  const modal = createModal({ title: `Model — ${agentName}` })
+
+  const select = document.createElement('select')
+  select.className = 'w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-300'
+  select.innerHTML = '<option value="">Loading models…</option>'
+  modal.body.appendChild(select)
+
+  const buttons = createButtonRow(
+    modal.close,
+    () => {
+      if (select.value) {
+        send({ type: 'update_agent', name: agentName, model: select.value })
+      }
+      modal.close()
+    },
+    'Change Model',
+  )
+  modal.body.appendChild(buttons)
+  document.body.appendChild(modal.overlay)
+
+  // Fetch current model + available models in parallel
+  Promise.all([
+    fetch(`/api/agents/${encodeURIComponent(agentName)}`).then(r => r.ok ? r.json() : null),
+    fetch('/api/models').then(r => r.ok ? r.json() : { running: [], available: [] }),
+  ]).then(([agentData, modelsData]: [{ model?: string } | null, { running: string[]; available: string[] }]) => {
+    select.innerHTML = ''
+    const { running = [], available = [] } = modelsData
+    if (running.length > 0) {
+      const group = document.createElement('optgroup')
+      group.label = 'Running'
+      for (const m of running) {
+        const opt = document.createElement('option')
+        opt.value = m; opt.textContent = m
+        if (m === agentData?.model) opt.selected = true
+        group.appendChild(opt)
+      }
+      select.appendChild(group)
+    }
+    if (available.length > 0) {
+      const group = document.createElement('optgroup')
+      group.label = 'Available'
+      for (const m of available) {
+        const opt = document.createElement('option')
+        opt.value = m; opt.textContent = m
+        if (m === agentData?.model) opt.selected = true
+        group.appendChild(opt)
+      }
+      select.appendChild(group)
+    }
+    if (running.length === 0 && available.length === 0) {
+      select.innerHTML = '<option value="">No models found</option>'
+    }
+  }).catch(() => {
+    select.innerHTML = '<option value="">Failed to load models</option>'
+  })
 }
 
 // === Flow Editor Modal ===

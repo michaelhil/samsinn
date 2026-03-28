@@ -162,7 +162,7 @@ describe('Snapshot', () => {
       const chatMsgs = msgs.filter(m => m.type === 'chat')
       expect(chatMsgs.some(m => m.content === 'Before restart')).toBe(true)
 
-      expect(restoredRoom!.paused).toBe(true) // always starts paused
+      expect(restoredRoom!.paused).toBe(false) // restores saved paused state (was false)
       expect(restoredRoom!.isMuted('agent-1')).toBe(true)
     })
 

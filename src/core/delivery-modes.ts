@@ -62,8 +62,9 @@ export const deliverFlow = (
     return { advanced: false, completed: true, looped: false, nextStepIndex: execution.stepIndex }
   }
 
-  // Only the expected step agent's response advances the flow
-  if (senderId !== currentStep.agentId) {
+  // Only the expected step agent's chat response advances the flow.
+  // Pass messages do not advance — the step stays open waiting for a real response.
+  if (senderId !== currentStep.agentId || message.type === 'pass') {
     return { advanced: false, completed: false, looped: false, nextStepIndex: execution.stepIndex }
   }
 

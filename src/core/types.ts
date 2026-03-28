@@ -40,6 +40,7 @@ export interface AgentProfile {
   readonly id: string
   readonly name: string
   readonly kind: 'ai' | 'human'
+  readonly model?: string
 }
 
 // === Message Target — where a response should be delivered ===
@@ -379,7 +380,7 @@ export type WSInbound =
   | { readonly type: 'add_to_room'; readonly roomName: string; readonly agentName: string }
   | { readonly type: 'create_agent'; readonly config: AIAgentConfig }
   | { readonly type: 'remove_agent'; readonly name: string }
-  | { readonly type: 'update_agent'; readonly name: string; readonly systemPrompt: string }
+  | { readonly type: 'update_agent'; readonly name: string; readonly systemPrompt?: string; readonly model?: string }
   // Delivery mode
   | { readonly type: 'set_delivery_mode'; readonly roomName: string; readonly mode: 'broadcast' }
   // Pause
