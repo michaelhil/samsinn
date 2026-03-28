@@ -297,6 +297,7 @@ export interface ToolResult {
 export interface ToolContext {
   readonly callerId: string
   readonly callerName: string
+  readonly roomId?: string    // current trigger room ID — available when tool is called from a room context
 }
 
 export interface Tool {
@@ -312,7 +313,7 @@ export interface ToolRegistry {
   readonly list: () => ReadonlyArray<Tool>
 }
 
-export type ToolExecutor = (calls: ReadonlyArray<ToolCall>) => Promise<ReadonlyArray<ToolResult>>
+export type ToolExecutor = (calls: ReadonlyArray<ToolCall>, roomId?: string) => Promise<ReadonlyArray<ToolResult>>
 
 // === AI Agent Configuration ===
 // No ID field — system generates UUID automatically.

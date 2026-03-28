@@ -98,7 +98,11 @@
           <span id="todo-count" class="text-xs text-gray-400"></span>
           <button id="btn-add-todo" class="ml-auto text-xs text-blue-500 hover:text-blue-700">+ Add</button>
         </div>
-        <div id="todo-list" class="px-4 pb-2 space-y-1 hidden"></div>
+        <div id="todo-list" class="px-4 pt-1 pb-1 space-y-1 hidden"></div>
+        <div id="todo-add-row" class="px-4 pb-2 flex gap-2 hidden">
+          <input id="todo-input" type="text" placeholder="New todo..." class="flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300">
+          <button id="btn-todo-submit" type="button" class="text-xs text-blue-500 hover:text-blue-700 font-medium">Add</button>
+        </div>
       </div>
 
       <!-- Messages -->

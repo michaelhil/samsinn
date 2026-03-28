@@ -48,8 +48,9 @@ const createToolExecutor = (
 ): ToolExecutor => {
   const allowed = new Set(allowedTools)
 
-  return async (calls: ReadonlyArray<ToolCall>): Promise<ReadonlyArray<ToolResult>> => {
+  return async (calls: ReadonlyArray<ToolCall>, roomId?: string): Promise<ReadonlyArray<ToolResult>> => {
     const results: ToolResult[] = []
+    const callContext: ToolContext = roomId ? { ...context, roomId } : context
 
     for (const call of calls) {
       if (!allowed.has(call.tool)) {
@@ -64,7 +65,7 @@ const createToolExecutor = (
       }
 
       try {
-        const result = await tool.execute(call.arguments, context)
+        const result = await tool.execute(call.arguments, callContext)
         results.push(result)
       } catch (err) {
         results.push({ success: false, error: err instanceof Error ? err.message : 'Tool execution failed' })

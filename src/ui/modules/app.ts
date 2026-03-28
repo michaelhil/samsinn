@@ -71,6 +71,9 @@ const todoToggle = $('#todo-toggle') as HTMLElement
 const todoHeader = $('#todo-header') as HTMLElement
 const todoCount = $('#todo-count') as HTMLElement
 const todoListEl = $('#todo-list') as HTMLElement
+const todoAddRow = $('#todo-add-row') as HTMLElement
+const todoInput = $('#todo-input') as HTMLInputElement
+const btnTodoSubmit = $('#btn-todo-submit') as HTMLElement
 const btnAddTodo = $('#btn-add-todo') as HTMLElement
 const roomHeader = $('#room-header') as HTMLElement
 const messagesDiv = $('#messages') as HTMLElement
@@ -193,41 +196,66 @@ let todoExpanded = false
 
 const refreshTodoPanel = (roomName: string): void => {
   const todos = roomTodos.get(roomName) ?? []
-  const hasTodos = todos.length > 0
 
   todoPanel.classList.toggle('hidden', !selectedRoomId)
-  todoCount.textContent = hasTodos ? `(${todos.length})` : ''
-  todoListEl.classList.toggle('hidden', !todoExpanded || !hasTodos)
-  todoToggle.textContent = todoExpanded && hasTodos ? '▼' : '▶'
+  todoCount.textContent = todos.length > 0 ? `(${todos.length})` : ''
+  todoToggle.textContent = todoExpanded ? '▼' : '▶'
+  todoListEl.classList.toggle('hidden', !todoExpanded)
+  todoAddRow.classList.toggle('hidden', !todoExpanded)
 
-  if (todoExpanded && hasTodos) {
-    renderTodos(
-      todoListEl,
-      todos,
-      (todoId, currentStatus) => {
-        const newStatus = currentStatus === 'completed' ? 'pending' : 'completed'
-        send({ type: 'update_todo', roomName, todoId, status: newStatus })
-      },
-      (todoId) => {
-        send({ type: 'remove_todo', roomName, todoId })
-      },
-    )
+  if (todoExpanded) {
+    if (todos.length > 0) {
+      renderTodos(
+        todoListEl,
+        todos,
+        (todoId, currentStatus) => {
+          const newStatus = currentStatus === 'completed' ? 'pending' : 'completed'
+          send({ type: 'update_todo', roomName, todoId, status: newStatus })
+        },
+        (todoId) => {
+          send({ type: 'remove_todo', roomName, todoId })
+        },
+      )
+    } else {
+      todoListEl.innerHTML = '<p class="text-xs text-gray-400 italic py-0.5">No todos yet</p>'
+    }
   }
+}
+
+const submitTodo = (): void => {
+  const room = rooms.get(selectedRoomId)
+  if (!room) return
+  const content = todoInput.value.trim()
+  if (!content) return
+  send({ type: 'add_todo', roomName: room.name, content })
+  todoInput.value = ''
 }
 
 todoHeader.onclick = () => {
   todoExpanded = !todoExpanded
   const room = rooms.get(selectedRoomId)
   if (room) refreshTodoPanel(room.name)
+  if (todoExpanded) setTimeout(() => todoInput.focus(), 50)
 }
 
 btnAddTodo.onclick = (e) => {
   e.stopPropagation()
-  const room = rooms.get(selectedRoomId)
-  if (!room) return
-  const content = prompt('New todo:')
-  if (!content?.trim()) return
-  send({ type: 'add_todo', roomName: room.name, content: content.trim() })
+  if (!todoExpanded) {
+    todoExpanded = true
+    const room = rooms.get(selectedRoomId)
+    if (room) refreshTodoPanel(room.name)
+  }
+  setTimeout(() => todoInput.focus(), 50)
+}
+
+btnTodoSubmit.onclick = (e) => {
+  e.stopPropagation()
+  submitTodo()
+}
+
+todoInput.onkeydown = (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); submitTodo() }
+  if (e.key === 'Escape') { todoInput.value = ''; todoInput.blur() }
 }
 
 const updateModeUI = () => {

@@ -53,19 +53,26 @@ export const createQueryAgentTool = (team: Team): Tool => ({
   },
 })
 
+const resolveRoom = (house: House, params: Record<string, unknown>, context: ToolContext) => {
+  const name = params.roomName as string | undefined
+  if (name) return house.getRoom(name)
+  if (context.roomId) return house.getRoom(context.roomId)
+  return undefined
+}
+
 export const createListTodosTool = (house: House): Tool => ({
   name: 'list_todos',
-  description: 'Lists all todo items in a room with their status, assignee, and results.',
+  description: 'Lists all todo items in the current room with their status, assignee, and results.',
   parameters: {
     type: 'object',
     properties: {
-      roomName: { type: 'string', description: 'Name of the room' },
+      roomName: { type: 'string', description: 'Name of the room (omit to use current room)' },
     },
-    required: ['roomName'],
+    required: [],
   },
-  execute: async (params: Record<string, unknown>) => {
-    const room = house.getRoom(params.roomName as string)
-    if (!room) return { success: false, error: `Room "${params.roomName}" not found` }
+  execute: async (params: Record<string, unknown>, context: ToolContext) => {
+    const room = resolveRoom(house, params, context)
+    if (!room) return { success: false, error: 'Room not found — provide roomName or call from a room context' }
     const todos = room.getTodos()
     return {
       success: true,
@@ -83,19 +90,19 @@ export const createListTodosTool = (house: House): Tool => ({
 
 export const createAddTodoTool = (house: House): Tool => ({
   name: 'add_todo',
-  description: 'Adds a new todo item to a room.',
+  description: 'Adds a new todo item to the current room.',
   parameters: {
     type: 'object',
     properties: {
-      roomName: { type: 'string', description: 'Name of the room' },
       content: { type: 'string', description: 'What needs to be done' },
       assignee: { type: 'string', description: 'Agent name to assign to (optional)' },
+      roomName: { type: 'string', description: 'Name of the room (omit to use current room)' },
     },
-    required: ['roomName', 'content'],
+    required: ['content'],
   },
   execute: async (params: Record<string, unknown>, context: ToolContext) => {
-    const room = house.getRoom(params.roomName as string)
-    if (!room) return { success: false, error: `Room "${params.roomName}" not found` }
+    const room = resolveRoom(house, params, context)
+    if (!room) return { success: false, error: 'Room not found — provide roomName or call from a room context' }
     const todo = room.addTodo({
       content: params.content as string,
       assignee: params.assignee as string | undefined,
@@ -111,17 +118,17 @@ export const createUpdateTodoTool = (house: House): Tool => ({
   parameters: {
     type: 'object',
     properties: {
-      roomName: { type: 'string', description: 'Name of the room' },
       todoId: { type: 'string', description: 'ID of the todo to update' },
       status: { type: 'string', description: 'New status: pending, in_progress, completed, blocked' },
       assignee: { type: 'string', description: 'Reassign to agent name' },
       result: { type: 'string', description: 'Result/outcome (typically set when completing)' },
+      roomName: { type: 'string', description: 'Name of the room (omit to use current room)' },
     },
-    required: ['roomName', 'todoId'],
+    required: ['todoId'],
   },
-  execute: async (params: Record<string, unknown>) => {
-    const room = house.getRoom(params.roomName as string)
-    if (!room) return { success: false, error: `Room "${params.roomName}" not found` }
+  execute: async (params: Record<string, unknown>, context: ToolContext) => {
+    const room = resolveRoom(house, params, context)
+    if (!room) return { success: false, error: 'Room not found — provide roomName or call from a room context' }
     const updates: { status?: TodoStatus; assignee?: string; result?: string } = {}
     if (params.status) updates.status = params.status as TodoStatus
     if (params.assignee) updates.assignee = params.assignee as string

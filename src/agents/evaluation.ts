@@ -121,7 +121,7 @@ export const evaluate = async (
 
       // Tool call — execute and continue loop
       if (parsed.action === 'tool_call' && toolExecutor) {
-        const results = await toolExecutor(parsed.toolCalls)
+        const results = await toolExecutor(parsed.toolCalls, triggerRoomId)
 
         context.push({ role: 'assistant' as const, content: chatResponse.content })
 
