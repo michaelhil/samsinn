@@ -37,14 +37,28 @@ type InternalResponse =
   | AgentResponse
   | { readonly action: 'tool_call'; readonly toolCalls: ReadonlyArray<ToolCall> }
 
+// === LLM output sanitization ===
+// Some Ollama models leak their chat-template tokens into the response
+// (e.g. <|im_start|>assistant, <|im_end|>, [/INST], <<SYS>>, etc.).
+// Strip these before any further parsing so they never appear in chat.
+
+const TEMPLATE_TOKEN_RE = /(<\|[^|>]*\|>|\[INST\]|\[\/INST\]|<<SYS>>|<<\/SYS>>|<\|start_header_id\|>.*?<\|end_header_id\|>)/g
+
+const sanitizeResponse = (raw: string): string => {
+  // Remove template tokens
+  let s = raw.replace(TEMPLATE_TOKEN_RE, '')
+  // If the model prefixed with a role label like "Assistant\n" or "assistant:", strip it
+  s = s.replace(/^(assistant|user|system)\s*[:\n]/i, '')
+  return s.trim()
+}
+
 // === Plain text response parsing ===
 
 const PASS_PREFIX = '::PASS::'
-const TOOL_PREFIX = '::TOOL::'
 const TOOL_LINE_RE = /^::TOOL::\s+(\S+)\s*(.*)/
 
 export const parseResponse = (raw: string): InternalResponse => {
-  const trimmed = raw.trim()
+  const trimmed = sanitizeResponse(raw)
 
   // ::PASS:: — agent declines to respond
   if (trimmed.startsWith(PASS_PREFIX)) {
