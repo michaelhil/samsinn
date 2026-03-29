@@ -207,7 +207,9 @@ const refreshArtifactPanel = (room: RoomProfile): void => {
   if (artifactExpanded) {
     if (artifacts.length > 0) {
       renderArtifacts(artifactListEl, artifacts, myAgentId, (action: ArtifactAction) => {
-        if (action.kind === 'complete_task') {
+        if (action.kind === 'add_task') {
+          send({ type: 'update_artifact', artifactId: action.artifactId, body: { op: 'add_task', taskContent: action.content } })
+        } else if (action.kind === 'complete_task') {
           send({ type: 'update_artifact', artifactId: action.artifactId, body: { op: action.completed ? 'complete_task' : 'update_task', taskId: action.taskId, status: action.completed ? 'completed' : 'pending' } })
         } else if (action.kind === 'cast_vote') {
           send({ type: 'cast_vote', artifactId: action.artifactId, optionId: action.optionId })

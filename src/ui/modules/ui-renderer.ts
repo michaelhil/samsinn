@@ -57,6 +57,7 @@ export interface ArtifactInfo {
 }
 
 export type ArtifactAction =
+  | { kind: 'add_task'; artifactId: string; content: string }
   | { kind: 'complete_task'; artifactId: string; taskId: string; completed: boolean }
   | { kind: 'cast_vote'; artifactId: string; optionId: string }
   | { kind: 'remove'; artifactId: string }
@@ -139,7 +140,24 @@ const renderTaskListArtifact = (
     }
     wrap.appendChild(row)
   }
-  if (artifact.resolution) {
+  if (!artifact.resolution) {
+    const addRow = document.createElement('div')
+    addRow.className = 'flex items-center gap-1 pl-2 pt-0.5'
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.placeholder = 'Add task…'
+    input.className = 'flex-1 text-xs border-b border-transparent hover:border-gray-200 focus:border-blue-300 bg-transparent py-0.5 focus:outline-none'
+    const submit = (e: Event): void => {
+      e.stopPropagation()
+      const content = input.value.trim()
+      if (!content) return
+      onAction({ kind: 'add_task', artifactId: artifact.id, content })
+      input.value = ''
+    }
+    input.onkeydown = (e) => { if (e.key === 'Enter') submit(e) }
+    addRow.appendChild(input)
+    wrap.appendChild(addRow)
+  } else {
     const res = document.createElement('div')
     res.className = 'text-xs text-green-600 pl-2 italic'
     res.textContent = `✓ ${artifact.resolution}`
