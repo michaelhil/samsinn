@@ -119,7 +119,6 @@ export interface FlowExecution {
   readonly flow: Flow
   readonly triggerMessageId: string
   stepIndex: number
-  active: boolean
 }
 
 // Carried in message.metadata when delivering in flow mode.
@@ -163,7 +162,6 @@ export interface RoomState {
   readonly flowExecution?: {
     readonly flowId: string
     readonly stepIndex: number
-    readonly active: boolean
   }
 }
 
@@ -228,14 +226,16 @@ export interface Room {
 
   // Snapshot restore — bypass delivery, populate state directly
   readonly injectMessages: (msgs: ReadonlyArray<Message>) => void
-  readonly restoreState: (state: {
-    readonly members: ReadonlyArray<string>
-    readonly muted: ReadonlyArray<string>
-    readonly mode: DeliveryMode
-    readonly paused: boolean
-    readonly flows: ReadonlyArray<Flow>
-    readonly todos: ReadonlyArray<TodoItem>
-  }) => void
+  readonly restoreState: (state: RoomRestoreParams) => void
+}
+
+export interface RoomRestoreParams {
+  readonly members: ReadonlyArray<string>
+  readonly muted: ReadonlyArray<string>
+  readonly mode: DeliveryMode
+  readonly paused: boolean
+  readonly flows: ReadonlyArray<Flow>
+  readonly todos: ReadonlyArray<TodoItem>
 }
 
 // === CreateResult — returned when name uniqueness is enforced ===
@@ -321,6 +321,9 @@ export interface AIAgent extends Agent {
   readonly getTemperature: () => number | undefined
   readonly getHistoryLimit: () => number | undefined
   readonly getTools: () => ReadonlyArray<string> | undefined
+  // Returns a snapshot of the agent's current configuration (mutable fields resolved).
+  // Use this when you need multiple config fields at once (e.g. for serialization).
+  readonly getConfig: () => AIAgentConfig
 }
 
 // === Team — agent collection (AI + human) ===
@@ -490,7 +493,7 @@ export type WSOutbound =
   | { readonly type: 'room_created'; readonly profile: RoomProfile }
   | { readonly type: 'agent_joined'; readonly agent: AgentProfile }
   | { readonly type: 'agent_removed'; readonly agentName: string }
-  | { readonly type: 'snapshot'; readonly rooms: ReadonlyArray<RoomProfile>; readonly agents: ReadonlyArray<AgentProfile>; readonly agentId: string; readonly sessionToken?: string }
+  | { readonly type: 'snapshot'; readonly rooms: ReadonlyArray<RoomProfile>; readonly agents: ReadonlyArray<AgentProfile>; readonly agentId: string; readonly roomStates?: Record<string, RoomState>; readonly sessionToken?: string }
   | { readonly type: 'error'; readonly message: string }
   | { readonly type: 'delivery_mode_changed'; readonly roomName: string; readonly mode: DeliveryMode; readonly paused: boolean }
   | { readonly type: 'mute_changed'; readonly roomName: string; readonly agentName: string; readonly muted: boolean }

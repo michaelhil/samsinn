@@ -96,14 +96,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
     const agentRooms = system.house.getRoomsForAgent(agent.id)
     agents.push({
       id: agent.id,
-      config: {
-        name: aiAgent.name,
-        model: aiAgent.getModel(),
-        systemPrompt: aiAgent.getSystemPrompt(),
-        temperature: aiAgent.getTemperature(),
-        historyLimit: aiAgent.getHistoryLimit(),
-        tools: aiAgent.getTools(),
-      },
+      config: aiAgent.getConfig(),
       roomIds: agentRooms.map(r => r.profile.id),
     })
   }

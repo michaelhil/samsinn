@@ -147,6 +147,10 @@ export const spawnAIAgent = async (
   toolRegistry?: ToolRegistry,
   spawnOptions?: SpawnOptions,
 ): Promise<AIAgent> => {
+  // Validate name before any expensive work — prevents orphaned agent creation on collision
+  if (team.getAgent(config.name)) {
+    throw new Error(`Agent name "${config.name}" is already taken`)
+  }
 
   // Resolve target: respond where the trigger came from
   const resolveTarget = (decision: Decision): MessageTarget | null => {

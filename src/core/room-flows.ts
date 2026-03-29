@@ -12,6 +12,7 @@ export interface FlowStore {
   readonly getExecution: () => FlowExecution | undefined
   readonly setExecution: (exec: FlowExecution | undefined) => void
   readonly clearExecution: () => void
+  readonly advanceStep: (nextStepIndex: number) => void
   readonly notifyFlowEvent: (event: 'started' | 'step' | 'completed' | 'cancelled', detail?: Record<string, unknown>) => void
   readonly restoreFlows: (flowList: ReadonlyArray<Flow>) => void
 }
@@ -51,10 +52,14 @@ export const createFlowStore = (roomId: string, onFlowEvent?: OnFlowEvent): Flow
     flowExecution = undefined
   }
 
+  const advanceStep = (nextStepIndex: number): void => {
+    if (flowExecution) flowExecution.stepIndex = nextStepIndex
+  }
+
   const restoreFlows = (flowList: ReadonlyArray<Flow>): void => {
     flows.clear()
     for (const flow of flowList) flows.set(flow.id, flow)
   }
 
-  return { addFlow, removeFlow, getFlow, getFlows, getExecution, setExecution, clearExecution, notifyFlowEvent, restoreFlows }
+  return { addFlow, removeFlow, getFlow, getFlows, getExecution, setExecution, clearExecution, advanceStep, notifyFlowEvent, restoreFlows }
 }

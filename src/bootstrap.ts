@@ -66,25 +66,19 @@ export const bootstrap = async (): Promise<void> => {
   // Auto-save: debounced save on state changes
   const autoSaver = createAutoSaver(system, snapshotPath)
 
-  // Graceful shutdown: drain in-flight evaluations, then flush snapshot
+  // Graceful shutdown: drain in-flight evaluations in parallel, then flush snapshot, then disconnect MCP
   const shutdown = async () => {
     console.log('Shutting down, saving snapshot...')
-    for (const agent of system.team.listAgents()) {
-      const aiAgent = asAIAgent(agent)
-      if (aiAgent) {
-        await Promise.race([
-          aiAgent.whenIdle(),
-          new Promise<void>(res => setTimeout(res, DRAIN_TIMEOUT_MS)),
-        ])
-      }
-    }
-    await mcpResult.disconnect()
+    const timeout = new Promise<void>(res => setTimeout(res, DRAIN_TIMEOUT_MS))
+    const aiAgents = system.team.listAgents().flatMap(a => { const ai = asAIAgent(a); return ai ? [ai] : [] })
+    await Promise.all(aiAgents.map(a => Promise.race([a.whenIdle(), timeout])))
     try {
       await autoSaver.flush()
       console.log('Snapshot saved.')
     } catch (err) {
       console.error('Failed to save snapshot on shutdown:', err)
     }
+    await mcpResult.disconnect()
     process.exit(0)
   }
   process.on('SIGINT', shutdown)

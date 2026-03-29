@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { System } from '../../../main.ts'
-import type { AIAgent } from '../../../core/types.ts'
+import { asAIAgent } from '../../../agents/shared.ts'
 import { textResult, errorResult, resolveAgent } from './helpers.ts'
 
 export const registerAgentTools = (mcpServer: McpServer, system: System): void => {
@@ -48,8 +48,10 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
           kind: agent.kind, state: agent.state.get(),
           rooms: system.house.getRoomsForAgent(agent.id).map(r => r.profile.name),
         }
-        if (agent.kind === 'ai' && 'getSystemPrompt' in agent) {
-          detail.systemPrompt = (agent as AIAgent).getSystemPrompt()
+        const aiAgent = asAIAgent(agent)
+        if (aiAgent) {
+          detail.systemPrompt = aiAgent.getSystemPrompt()
+          detail.model = aiAgent.getModel()
         }
         return textResult(detail)
       } catch (err) {

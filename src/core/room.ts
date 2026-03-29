@@ -18,13 +18,13 @@
 // ============================================================================
 
 import type {
-  DeliverFn, DeliveryMode, Flow, FlowDeliveryContext, FlowExecution,
+  DeliverFn, DeliveryMode, Flow, FlowDeliveryContext,
   Message, OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted, OnTodoChanged,
-  OnTurnChanged, PostParams, ResolveAgentName, Room, RoomProfile, RoomState, TodoItem, TodoStatus,
+  OnTurnChanged, PostParams, ResolveAgentName, Room, RoomProfile, RoomRestoreParams, RoomState,
 } from './types.ts'
 import { DEFAULTS, SYSTEM_SENDER_ID } from './types.ts'
 import { parseAddressedAgents } from './addressing.ts'
-import { advanceFlowStep, deliverBroadcast, deliverFlow, deliverToAgent } from './delivery-modes.ts'
+import { advanceFlowStep, deliverBroadcast, deliverFlow } from './delivery-modes.ts'
 import { createTodoStore } from './room-todos.ts'
 import { createFlowStore } from './room-flows.ts'
 
@@ -68,8 +68,7 @@ export const createRoom = (
   // --- Internal helpers ---
 
   const deliverToOne = (agentId: string, message: Message): void => {
-    if (!deliver) return
-    deliverToAgent(agentId, message, deliver)
+    deliver?.(agentId, message)
   }
 
   const notifyModeChanged = (): void => {
@@ -156,13 +155,13 @@ export const createRoom = (
 
       case 'flow': {
         const flowExecution = flowStore.getExecution()
-        if (!flowExecution?.active) break
+        if (!flowExecution) break
         const result = deliverFlow(message, flowExecution, eligible, params.senderId, deliver)
         if (result.advanced) {
           if (result.completed) {
             endFlow(flowExecution.flow.id, 'completed')
           } else {
-            flowExecution.stepIndex = result.nextStepIndex
+            flowStore.advanceStep(result.nextStepIndex)
             flowStore.notifyFlowEvent('step', {
               flowId: flowExecution.flow.id,
               stepIndex: result.nextStepIndex,
@@ -181,7 +180,7 @@ export const createRoom = (
 
   const setDeliveryMode = (newMode: Exclude<DeliveryMode, 'flow'>): void => {
     const flowExecution = flowStore.getExecution()
-    if (flowExecution?.active) {
+    if (flowExecution) {
       const flowId = flowExecution.flow.id
       flowStore.clearExecution()
       flowStore.notifyFlowEvent('cancelled', { flowId })
@@ -192,6 +191,32 @@ export const createRoom = (
   }
 
   // --- Muting ---
+
+  // When the current flow step agent is muted, skip to the next eligible agent.
+  const handleFlowOnMute = (agentId: string, lastChatMsg: Message | undefined): void => {
+    const flowExecution = flowStore.getExecution()
+    if (!flowExecution) return
+    const currentStep = flowExecution.flow.steps[flowExecution.stepIndex]
+    if (!currentStep || currentStep.agentId !== agentId) return
+
+    const eligible = computeEligible()
+    const result = advanceFlowStep(flowExecution, eligible)
+    if (result.completed) {
+      endFlow(flowExecution.flow.id, 'completed')
+    } else if (result.nextAgentId && lastChatMsg) {
+      flowStore.advanceStep(result.nextStepIndex)
+      const nextStep = flowExecution.flow.steps[result.nextStepIndex]!
+      const enriched = nextStep.stepPrompt
+        ? { ...lastChatMsg, metadata: { ...lastChatMsg.metadata, stepPrompt: nextStep.stepPrompt } }
+        : lastChatMsg
+      deliverToOne(result.nextAgentId, enriched)
+      flowStore.notifyFlowEvent('step', {
+        flowId: flowExecution.flow.id,
+        stepIndex: result.nextStepIndex,
+        agentName: result.nextAgentName,
+      })
+    }
+  }
 
   const setMuted = (agentId: string, isMuted: boolean): void => {
     const wasMuted = muted.has(agentId)
@@ -212,6 +237,10 @@ export const createRoom = (
     }
     const displayName = agentName ?? agentId
 
+    // Capture last message BEFORE pushing the mute system message — the flow
+    // advancement below needs to re-deliver the conversation message, not the mute notice.
+    const lastChatMsg = messages[messages.length - 1]
+
     const muteMessage: Message = {
       id: crypto.randomUUID(),
       roomId: profile.id,
@@ -222,32 +251,8 @@ export const createRoom = (
     }
     messages.push(muteMessage)
 
-    const flowExecution = flowStore.getExecution()
-    if (mode === 'flow' && flowExecution?.active && isMuted) {
-      const currentStep = flowExecution.flow.steps[flowExecution.stepIndex]
-      if (currentStep && currentStep.agentId === agentId) {
-        const eligible = computeEligible()
-        const result = advanceFlowStep(flowExecution, eligible)
-        if (result.completed) {
-          endFlow(flowExecution.flow.id, 'completed')
-        } else if (result.nextAgentId) {
-          flowExecution.stepIndex = result.nextStepIndex
-          if (deliver) {
-            const nextAgentId = result.nextAgentId
-            const lastMsg = messages[messages.length - 1]!
-            const nextStep = flowExecution.flow.steps[result.nextStepIndex]!
-            const enriched = nextStep.stepPrompt
-              ? { ...lastMsg, metadata: { ...lastMsg.metadata, stepPrompt: nextStep.stepPrompt } }
-              : lastMsg
-            deliverToOne(nextAgentId, enriched)
-          }
-          flowStore.notifyFlowEvent('step', {
-            flowId: flowExecution.flow.id,
-            stepIndex: result.nextStepIndex,
-            agentName: result.nextAgentName,
-          })
-        }
-      }
+    if (mode === 'flow' && isMuted) {
+      handleFlowOnMute(agentId, lastChatMsg)
     }
   }
 
@@ -255,7 +260,7 @@ export const createRoom = (
 
   const cancelFlow = (): void => {
     const flowExecution = flowStore.getExecution()
-    if (!flowExecution?.active) return
+    if (!flowExecution) return
     endFlow(flowExecution.flow.id, 'cancelled')
   }
 
@@ -264,7 +269,7 @@ export const createRoom = (
     if (!flow || flow.steps.length === 0) return
 
     const flowExecution = flowStore.getExecution()
-    if (flowExecution?.active) {
+    if (flowExecution) {
       flowStore.notifyFlowEvent('cancelled', { flowId: flowExecution.flow.id })
     }
 
@@ -276,32 +281,44 @@ export const createRoom = (
       flow,
       triggerMessageId: lastMsg.id,
       stepIndex: 0,
-      active: true,
     })
     mode = 'flow'
     notifyModeChanged()
 
     const eligible = computeEligible()
-    const firstStep = flow.steps[0]!
-    if (eligible.has(firstStep.agentId)) {
-      const flowContext: FlowDeliveryContext = {
-        flowName: flow.name,
-        stepIndex: 0,
-        totalSteps: flow.steps.length,
-        loop: flow.loop,
-        steps: flow.steps.map(s => ({ agentName: s.agentName })),
-      }
-      const enriched = {
-        ...lastMsg,
-        metadata: {
-          ...lastMsg.metadata,
-          ...(firstStep.stepPrompt ? { stepPrompt: firstStep.stepPrompt } : {}),
-          flowContext,
-        },
-      }
-      deliverToOne(firstStep.agentId, enriched)
-      flowStore.notifyFlowEvent('started', { flowId: flow.id, agentName: firstStep.agentName })
+
+    // Find the first eligible step agent — the first step agent may already be muted/absent.
+    // Create a synthetic execution at step -1 so advanceFlowStep searches from the beginning.
+    const syntheticExec = { ...flowStore.getExecution()!, stepIndex: -1 }
+    const firstResult = advanceFlowStep(syntheticExec, eligible)
+
+    if (firstResult.completed) {
+      // No eligible agents at all — cancel immediately
+      endFlow(flow.id, 'completed')
+      return
     }
+
+    const startIndex = firstResult.nextStepIndex
+    flowStore.advanceStep(startIndex)
+
+    const startStep = flow.steps[startIndex]!
+    const flowContext: FlowDeliveryContext = {
+      flowName: flow.name,
+      stepIndex: startIndex,
+      totalSteps: flow.steps.length,
+      loop: flow.loop,
+      steps: flow.steps.map(s => ({ agentName: s.agentName })),
+    }
+    const enriched = {
+      ...lastMsg,
+      metadata: {
+        ...lastMsg.metadata,
+        ...(startStep.stepPrompt ? { stepPrompt: startStep.stepPrompt } : {}),
+        flowContext,
+      },
+    }
+    deliverToOne(startStep.agentId, enriched)
+    flowStore.notifyFlowEvent('started', { flowId: flow.id, agentName: startStep.agentName })
   }
 
   // --- Room interface ---
@@ -336,7 +353,7 @@ export const createRoom = (
         paused,
         muted: [...muted],
         members: [...members],
-        ...(exec ? { flowExecution: { flowId: exec.flow.id, stepIndex: exec.stepIndex, active: exec.active } } : {}),
+        ...(exec ? { flowExecution: { flowId: exec.flow.id, stepIndex: exec.stepIndex } } : {}),
       }
     },
 
@@ -362,14 +379,7 @@ export const createRoom = (
       }
     },
 
-    restoreState: (state: {
-      readonly members: ReadonlyArray<string>
-      readonly muted: ReadonlyArray<string>
-      readonly mode: DeliveryMode
-      readonly paused: boolean
-      readonly flows: ReadonlyArray<Flow>
-      readonly todos: ReadonlyArray<TodoItem>
-    }): void => {
+    restoreState: (state: RoomRestoreParams): void => {
       members.clear()
       for (const id of state.members) members.add(id)
       muted.clear()

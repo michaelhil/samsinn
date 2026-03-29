@@ -24,6 +24,8 @@ export const addAgentToRoom = async (
   const room = house.getRoom(roomId)
   if (!room) return
 
+  if (room.hasMember(targetId)) return
+
   room.addMember(targetId)
   await target.join(room)
 

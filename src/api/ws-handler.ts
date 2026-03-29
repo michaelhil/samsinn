@@ -11,6 +11,8 @@
 import type { System } from '../main.ts'
 import type { HumanAgent } from '../agents/human-agent.ts'
 import type {
+  AgentProfile,
+  RoomState,
   StateValue,
   WSInbound,
   WSOutbound,
@@ -44,7 +46,7 @@ export interface WSManager {
   readonly broadcast: (msg: WSOutbound) => void
   readonly subscribeAgentState: (agentId: string, agentName: string) => void
   readonly unsubscribeAgentState: (agentId: string) => void
-  readonly buildSnapshot: (agentId: string, sessionToken?: string) => Record<string, unknown>
+  readonly buildSnapshot: (agentId: string, sessionToken?: string) => Extract<WSOutbound, { type: 'snapshot' }>
 }
 
 export const createWSManager = (system: System): WSManager => {
@@ -92,24 +94,22 @@ export const createWSManager = (system: System): WSManager => {
     if (agent.kind === 'ai') subscribeAgentState(agent.id, agent.name)
   }
 
-  const buildSnapshot = (agentId: string, sessionToken?: string): Record<string, unknown> => {
-    // Build per-room state for UI sync on connect/reconnect
-    const roomStates: Record<string, unknown> = {}
+  const buildSnapshot = (agentId: string, sessionToken?: string): Extract<WSOutbound, { type: 'snapshot' }> => {
+    const roomStates: Record<string, RoomState> = {}
     for (const profile of system.house.listAllRooms()) {
       const room = system.house.getRoom(profile.id)
-      if (room) {
-        roomStates[profile.id] = room.getRoomState()
-      }
+      if (room) roomStates[profile.id] = room.getRoomState()
     }
+    const agents: AgentProfile[] = system.team.listAgents()
+      .filter(a => !a.inactive)
+      .map(a => {
+        const ai = asAIAgent(a)
+        return { id: a.id, name: a.name, kind: a.kind, state: a.state.get(), ...(ai ? { model: ai.getModel() } : {}) }
+      })
     return {
       type: 'snapshot',
       rooms: system.house.listAllRooms(),
-      agents: system.team.listAgents()
-        .filter(a => !a.inactive)
-        .map(a => {
-          const ai = asAIAgent(a)
-          return { id: a.id, name: a.name, kind: a.kind, state: a.state.get(), ...(ai ? { model: ai.getModel() } : {}) }
-        }),
+      agents,
       agentId,
       roomStates,
       ...(sessionToken ? { sessionToken } : {}),

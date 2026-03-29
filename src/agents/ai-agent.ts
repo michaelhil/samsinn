@@ -244,11 +244,10 @@ export const createAIAgent = (
   // --- Query — synchronous side-channel for tool-based inter-agent communication ---
 
   const QUERY_TIMEOUT_MS = AGENT_TIMEOUT_MS
-  let queryActive = false
 
   const query = async (question: string, askerId: string, askerName?: string): Promise<string> => {
-    if (queryActive) throw new Error(`${config.name} is already processing a query`)
-    queryActive = true
+    if (cm.isQuerying()) throw new Error(`${config.name} is already processing a query`)
+    cm.startQuery()
 
     try {
       const name = askerName ?? agentHistory.agentProfiles.get(askerId)?.name ?? askerId
@@ -268,7 +267,7 @@ export const createAIAgent = (
       ])
       return response.content
     } finally {
-      queryActive = false
+      cm.endQuery()
     }
   }
 
@@ -292,6 +291,7 @@ export const createAIAgent = (
     getTemperature: () => config.temperature,
     getHistoryLimit: () => config.historyLimit,
     getTools: () => config.tools,
+    getConfig: () => ({ ...config, model: currentModel, systemPrompt: currentSystemPrompt }),
     cancelGeneration: cm.cancelAll,
   }
 }

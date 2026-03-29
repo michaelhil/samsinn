@@ -116,15 +116,15 @@ export const createSystem = (ollamaUrl?: string): System => {
     // onRoomDeleted is fired inside house.removeRoom
   }
 
-  // Remove agent from team AND all rooms (prevents ghost member delivery)
+  // Remove agent from team AND all rooms — posts leave messages and fires membership events
+  // per room, consistent with explicit removeAgentFromRoom calls.
   const removeAgent = (id: string): boolean => {
     const agent = team.getAgent(id)
     if (!agent) return false
     for (const profile of house.listAllRooms()) {
       const room = house.getRoom(profile.id)
       if (room?.hasMember(id)) {
-        room.removeMember(id)
-        agent.leave(profile.id)
+        systemRemoveAgentFromRoom(id, profile.id)
       }
     }
     return team.removeAgent(id)

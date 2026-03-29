@@ -12,16 +12,6 @@
 
 import type { DeliverFn, FlowDeliveryContext, FlowExecution, Message } from './types.ts'
 
-// --- Shared delivery helper ---
-
-export const deliverToAgent = (
-  agentId: string,
-  message: Message,
-  deliver: DeliverFn,
-): void => {
-  deliver(agentId, message)
-}
-
 // --- Broadcast mode ---
 
 export const deliverBroadcast = (
@@ -30,7 +20,7 @@ export const deliverBroadcast = (
   deliver: DeliverFn,
 ): void => {
   for (const id of eligible) {
-    deliverToAgent(id, message, deliver)
+    deliver(id, message)
   }
 }
 
@@ -82,7 +72,7 @@ export const deliverFlow = (
         flowContext,
       },
     }
-    deliverToAgent(result.nextAgentId, enriched, deliver)
+    deliver(result.nextAgentId, enriched)
   }
 
   return { advanced: true, ...result }
@@ -91,7 +81,7 @@ export const deliverFlow = (
 // --- Flow step advancement (pure, no delivery side effects) ---
 // Uses agentId directly from FlowStep — no name resolution needed.
 
-export interface FlowAdvanceResult {
+interface FlowAdvanceResult {
   readonly completed: boolean
   readonly looped: boolean
   readonly nextStepIndex: number
