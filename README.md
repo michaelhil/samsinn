@@ -1,198 +1,252 @@
 # Samsinn
 
-A multi-agent room communication system where AI and human agents converse and cooperate through rooms, direct messages, and orchestrated flows.
+**A multi-agent collaboration system.** Spawn AI agents, put them in rooms, let them think together — or orchestrate them programmatically through the REST API, WebSocket protocol, or as an MCP server.
 
-> **v0.5.7** — Simplified data model (no descriptions), room pause dots, onMessagePosted callback, delivery-modes refactor.
+> v0.5.13 — [Changelog](#changelog)
 
-## Architecture
+---
 
-Three things:
+## What you can do with it
 
-```
-House            — collection of Rooms (self-contained components with delivery)
-Team             — collection of Agents (AI + human, unified interface)
-routeMessage()   — one function that routes messages to rooms and/or agents
-```
+- **Run a panel of AI specialists** — a Researcher, Analyst, and Writer in the same room, bouncing ideas off each other and you
+- **Automate multi-step workflows** — define a Flow (ordered agent sequence) and trigger it with a single message
+- **Track tasks collaboratively** — agents and humans share a todo list per room; agents complete todos and record results
+- **Give agents tools** — agents can search the web, do math, remember facts across sessions, delegate subtasks, manage rooms, and query each other
+- **Embed in your own LLM workflow** — run headless as an MCP server; external LLMs orchestrate everything via 23 tools
+- **Integrate programmatically** — full REST API + WebSocket protocol for building your own UI or automation
 
-### Delivery Modes
-
-Each room has exactly one active delivery mode:
-
-| Mode | Behavior |
-|------|----------|
-| **Broadcast** | Deliver to all non-muted members (default) |
-| **Targeted** | No auto-delivery. Human selects agents per message via UI |
-| **Staleness** | One-at-a-time delivery, agent who hasn't spoken longest goes first |
-| **Flow** | Follow a predefined agent sequence with optional per-step prompts |
-
-`[[AgentName]]` directed addressing and per-agent muting work in all modes.
-
-### Key Concepts
-
-- **Rooms** are self-contained components — messages + explicit members + delivery. `Room.post()` stores the message and dispatches delivery based on the active mode.
-- **Agents** are unified — AI and human agents share the same interface. AI agents use LLMs; human agents relay via WebSocket.
-- **Direct messaging** — agents can message each other outside rooms.
-- **Flows** — user-defined sequences of agent steps with optional per-step prompts. Agents can appear multiple times. Flows can loop.
-- **Muting** — per-agent, per-room mute that excludes agents from all delivery. Mute/unmute events appear in message history.
-- **Plain text protocol** — AI agents respond in natural text. `::PASS::` to stay silent, `::TOOL::` for tool calls.
-- **Markdown** — agents can use Markdown in responses; the UI renders it with sanitized HTML.
-
-### How It Works
-
-1. A message is posted to a room via `room.post()`
-2. The room stores it, then dispatches based on the active delivery mode
-3. In broadcast: all non-muted members receive it. In staleness: the stalest agent receives it. In flow: the next step agent receives it. In targeted: no auto-delivery.
-4. AI agents evaluate and respond via LLM; responses route back through `routeMessage()`
-5. `[[AgentName]]` in any message overrides the mode — delivers only to addressed agents
-
-## Requirements
-
-- [Bun](https://bun.sh) >= 1.0
-- [Ollama](https://ollama.ai) running locally (or remote via `OLLAMA_URL`)
-- TypeScript 5+
+---
 
 ## Quick Start
 
 ```bash
+# 1. Install dependencies
 bun install
+
+# 2. Start Ollama with a model
 ollama pull llama3.2
+
+# 3. Start Samsinn
 bun run start
 ```
 
-Open `http://localhost:3000` in your browser. Enter your name. Create AI agents, switch delivery modes, build flows.
+Open **http://localhost:3000** in your browser.
 
-```bash
-# Tests
-bun run test:unit   # no Ollama needed
-bun test            # full suite (requires Ollama)
-bun run check       # TypeScript type check
+1. Enter your name to join as a human agent
+2. Click **+ Agent** to create an AI agent (give it a name, pick a model, write a system prompt)
+3. Click **+ Room** to create a room
+4. Add yourself and the agent to the room
+5. Start talking
+
+---
+
+## Requirements
+
+| Dependency | Version | Notes |
+|---|---|---|
+| [Bun](https://bun.sh) | ≥ 1.0 | Runtime and package manager |
+| [Ollama](https://ollama.ai) | any | Runs AI models locally |
+
+Ollama can run remotely — set `OLLAMA_URL=http://your-server:11434`.
+
+No cloud services, no API keys, no accounts. Everything runs locally.
+
+---
+
+## Core Concepts
+
+### Rooms
+
+A room is a shared conversation space. Agents must be explicitly added to a room. Messages are stored and history is preserved across restarts (auto-saved snapshot).
+
+Each room has:
+- A **name** and optional **room prompt** (instructions all agents in the room receive in their context)
+- An explicit **member list**
+- A **delivery mode** (`broadcast` or `flow`)
+- A **shared todo list**
+- Optional **flows** (orchestration sequences)
+
+### Agents
+
+Agents are either **AI** (powered by an Ollama model) or **human** (you, via the browser). Both implement the same interface — they can join rooms, receive messages, respond, and use tools.
+
+AI agents have:
+- A **system prompt** (editable at any time)
+- A **model** (switchable without restarting)
+- An **activity state** (`idle` or `generating`) visible in the UI as a pulsing dot
+
+### Delivery Modes
+
+Controls which agents receive each message in a room:
+
+| Mode | Who receives each message |
+|---|---|
+| **Broadcast** | Every non-muted member (default) |
+| **Flow** | One agent at a time, in a predefined sequence |
+
+**Directed addressing** — write `[[AgentName]]` anywhere in a message to override the mode and deliver only to that agent. Works in both modes.
+
+**Muting** — mute any agent in any room from the UI. Muted agents are excluded from delivery in that room only.
+
+**Pause** — pause a room to halt all delivery temporarily (useful while re-configuring it).
+
+### Flows
+
+A flow is an ordered sequence of agents. When a flow is active, each message from one step automatically triggers the next agent in sequence, until the flow completes (or loops).
+
+Each step can have a **step prompt** — extra instructions injected only when that agent is processing its step.
+
+Use cases:
+- Review pipelines: Researcher → Analyst → Writer → Editor
+- Iterative refinement: Agent A drafts, Agent B critiques, Agent A revises (looping)
+- Sequential processing: each agent transforms the output of the previous one
+
+### Todos
+
+Every room has a shared task list visible to all members (human and AI). Agents see the todo list in their context and can create, update, and complete todos via tools.
+
+Todo fields: content, status (`pending` / `in_progress` / `completed` / `blocked`), assignee, result (recorded when completed), dependencies.
+
+The `delegate` tool creates a todo, sends the task to another agent, waits for the result, then marks the todo complete with the result — enabling tracked multi-agent task delegation.
+
+### Tools
+
+Agents invoke tools using the `::TOOL::` syntax (or native function-calling on supported models):
+
+```
+::TOOL:: get_time
+::TOOL:: query_agent {"agent": "Researcher", "question": "What did you find?"}
+::TOOL:: calculate {"expression": "(150 * 12) / 52"}
 ```
 
-## Project Structure
+After tool results are returned, the agent writes its final response. The entire tool loop is invisible to other room participants — only the final response appears.
 
-```
-src/
-  core/
-    types.ts            — All interfaces and type definitions
-    room.ts             — Room: self-contained component (messages + members + delivery modes)
-    house.ts            — House: room collection with house prompts
-    delivery.ts         — routeMessage: routes to rooms and DMs
-    delivery-modes.ts   — Pure functions for broadcast, targeted, staleness, flow delivery
-    staleness.ts        — Staleness calculation (who hasn't spoken longest)
-    addressing.ts       — [[AgentName]] parser
-    tool-registry.ts    — Global tool store
-    names.ts            — Name uniqueness utilities
-  agents/
-    ai-agent.ts         — AI agent factory with two-buffer architecture
-    context-builder.ts  — LLM context assembly (history, prompts, step instructions)
-    evaluation.ts       — LLM interaction + ReAct tool loop
-    human-agent.ts      — Human agent factory (WebSocket transport)
-    team.ts             — Agent collection
-    actions.ts          — Self-management action runner
-    spawn.ts            — Agent wiring (create + register + join)
-  llm/
-    ollama.ts           — Ollama HTTP client with timing
-  tools/
-    built-in.ts         — 19 built-in tools (rooms, agents, todos, delivery, delegation)
-    format.ts           — Text-protocol tool formatting for system prompts
-    loader.ts           — Filesystem tool discovery (./tools/, ~/.samsinn/tools/)
-  integrations/
-    mcp/
-      client.ts         — MCP client: consumes external tool servers
-      server.ts         — MCP server: exposes Samsinn as tools for external LLMs
-  api/
-    server.ts           — Bun.serve: HTTP + WebSocket + static files
-    http-routes.ts      — REST API endpoints
-    ws-handler.ts       — WebSocket message dispatch
-  ui/
-    index.html          — Browser UI (Tailwind + marked + DOMPurify)
-    modules/
-      app.ts            — Main app orchestrator
-      ws-client.ts      — WebSocket client
-      ui-renderer.ts    — DOM rendering (messages, agents, modals, flow editor)
-  main.ts               — createSystem() factory + startup entry point
-```
+See [Tool Reference](#tool-reference) below.
 
-## API
+---
 
-### REST Endpoints
+## Using the Browser UI
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | System health + Ollama status |
-| GET/PUT | `/api/house/prompts` | House prompt + response format |
-| GET/POST/DELETE | `/api/rooms/:name` | Room CRUD |
-| PUT | `/api/rooms/:name/delivery-mode` | Set delivery mode |
-| PUT | `/api/rooms/:name/mute` | Mute/unmute agent |
-| POST | `/api/rooms/:name/deliver-to` | Targeted delivery |
-| PUT | `/api/rooms/:name/staleness/pause` | Pause/resume staleness |
-| POST/GET | `/api/rooms/:name/flows` | Flow CRUD |
-| POST | `/api/rooms/:name/flows/start` | Start a flow |
-| GET/POST/PATCH/DELETE | `/api/agents/:name` | Agent CRUD |
-| POST | `/api/messages` | Post message |
+### Creating agents
 
-### WebSocket Protocol
+Click **+ Agent** in the sidebar. Required fields:
+- **Name** — unique, immutable
+- **Model** — any Ollama model (e.g. `llama3.2`, `qwen2.5:14b`, `deepseek-r1:8b`)
+- **System Prompt** — the agent's identity and instructions
 
-Connect: `ws://localhost:3000/ws?name=YourName`
+You can edit the system prompt and model at any time by clicking the agent name.
 
-## Tools
+### Creating rooms
 
-AI agents can invoke tools using `::TOOL:: tool_name {"param": "value"}` syntax (or native function-calling on supported models). See [`docs/tools.md`](docs/tools.md) for the full reference.
+Click **+ Room**. Optionally add a **Room Prompt** — a shared instruction that appears in every agent's context while they're in that room. Good for defining the room's purpose, constraints, or output format.
 
-### Built-in Tools (always available)
+### Managing delivery
 
-| Tool | Description |
-|------|-------------|
-| `get_time` | Current date/time in ISO format |
+Click the **mode badge** (top of the room panel) to switch between broadcast and flow.
+
+Use the **R** dot next to an agent in the room to edit the room prompt. Use the **×** to mute/remove. Use the **⏸** to pause the room.
+
+### Flows
+
+Open the **Flow Editor** (link in the room header). Create a flow by selecting agents in order, optionally writing per-step prompts. Start a flow by selecting it and sending a trigger message.
+
+### Todos
+
+The **Todos** panel (collapsible, below the room header) shows all tasks for the current room. Add todos manually or let agents create and complete them via the `delegate` tool.
+
+---
+
+## Tool Reference
+
+### Built-in tools (always available)
+
+Every agent can use these tools by listing them in its `tools` config field.
+
+| Tool | What it does |
+|---|---|
+| `get_time` | Current date/time (ISO 8601) |
 | `list_rooms` | All rooms in the system |
-| `list_agents` | All agents (AI + human) with their kind and model |
-| `get_my_context` | Caller's name, id, kind, and current room membership |
-| `query_agent` | Ask another AI agent a direct question synchronously |
-| `delegate` | Assign a task to another agent with todo tracking |
-| `list_todos` | All todos in the current room |
-| `add_todo` | Create a new todo item (with optional assignee) |
-| `update_todo` | Set status, add result, or reassign a todo |
-| `create_room` | Create a new room (caller auto-joins) |
+| `list_agents` | All agents (AI + human), kind, and model |
+| `get_my_context` | Caller's identity, rooms they're in |
+| `query_agent` | Ask another AI agent a direct question |
+| `delegate` | Assign a task to another agent; auto-creates and tracks a todo |
+| `list_todos` | Current room's todo list |
+| `add_todo` | Create a todo (optionally assign to an agent) |
+| `update_todo` | Set status, record a result, reassign |
+| `create_room` | Create a room (caller auto-joins) |
 | `delete_room` | Permanently delete a room |
 | `add_to_room` | Add an agent (or yourself) to a room |
-| `remove_from_room` | Remove an agent (or yourself) from a room |
-| `set_delivery_mode` | Switch room to broadcast mode |
-| `pause_room` | Pause or unpause message delivery |
+| `remove_from_room` | Remove an agent (or yourself) |
+| `set_delivery_mode` | Switch room to broadcast |
+| `pause_room` | Pause or unpause delivery |
 | `mute_agent` | Mute or unmute an agent in a room |
-| `set_room_prompt` | Update the system prompt for a room |
-| `post_to_room` | Post a message to a room from anywhere |
+| `set_room_prompt` | Update the room's shared instructions |
+| `post_to_room` | Post a message to a different room |
 | `get_room_history` | Recent messages from a room |
 
-### External Tools (filesystem-loaded)
+Full documentation, parameters, and usage guidance: [`docs/tools.md`](docs/tools.md)
 
-Drop `.ts` files in `./tools/` (project) or `~/.samsinn/tools/` (user-global). The system loads them at startup and makes them available to any agent that lists the tool by name. See `docs/tools.md` for authoring guidelines.
+### Assigning tools to an agent
 
-**Bundled external tools** (in `tools/`):
+In the **Create Agent** modal (or via API), list tool names in the `tools` field:
+
+```json
+{
+  "name": "Researcher",
+  "model": "qwen2.5:14b",
+  "systemPrompt": "You are a research assistant...",
+  "tools": ["get_time", "query_agent", "delegate", "list_todos", "add_todo", "update_todo", "arxiv_search", "fetch_url"]
+}
+```
+
+### External tools (filesystem-loaded)
+
+Drop a `.ts` file in `./tools/` (project-local) or `~/.samsinn/tools/` (user-global). It is loaded at startup and available to any agent that lists it by name. See [`docs/tools.md#adding-external-tools`](docs/tools.md#adding-external-tools).
+
+**Bundled in `tools/`:**
 
 | File | Tools |
-|------|-------|
+|---|---|
 | `memory.ts` | `think`, `note`, `my_notes`, `remember`, `recall`, `forget` |
 | `compute.ts` | `calculate`, `json_extract`, `format_table` |
-| `web.ts` | `web_search`*, `fetch_url` |
+| `web.ts` | `web_search`†, `fetch_url` |
 | `research.ts` | `arxiv_search`, `doi_lookup`, `semantic_scholar` |
 
-*`web_search` requires `BRAVE_API_KEY` or `SERPER_API_KEY`.
+†`web_search` requires `BRAVE_API_KEY` or `SERPER_API_KEY`.
+
+---
+
+## Configuration
+
+All configuration is via environment variables. No config file is required.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `PORT` | `3000` | HTTP/WebSocket port |
+| `BRAVE_API_KEY` | — | Enables `web_search` via Brave |
+| `SERPER_API_KEY` | — | Enables `web_search` via Serper (alternative to Brave) |
+| `SAMSINN_TOOLS_DIR` | — | Custom directory for external tools |
+
+Snapshot is saved to `data/snapshot.json` and auto-restored on startup.
+
+---
 
 ## Headless Mode (MCP Server)
 
-Samsinn can run without the browser UI as a pure MCP server on stdio. External LLMs and agents can orchestrate the entire system via MCP tools.
+Run without the browser UI as a pure MCP server. An external LLM (Claude, GPT-4, etc.) can orchestrate the entire system through 23 MCP tools.
 
 ```bash
 bun run headless
 ```
 
-This exposes 22 tools (room/agent/message/flow management) and 3 resources (rooms, agents, room messages). Connect with any MCP client — Claude Desktop, Claude Code, or the MCP inspector:
+Connect with the MCP inspector:
 
 ```bash
 npx @modelcontextprotocol/inspector bun run src/main.ts --headless
 ```
 
-### Claude Desktop / Claude Code configuration
+### Claude Desktop / Claude Code
 
 ```json
 {
@@ -205,24 +259,276 @@ npx @modelcontextprotocol/inspector bun run src/main.ts --headless
 }
 ```
 
-No human agent entity is needed in headless mode — use the `post_message` tool to inject messages and `get_room_messages` to read responses.
+### MCP tools exposed
 
-## Docker
+**Room management:** `create_room`, `list_rooms`, `get_room`, `delete_room`, `set_room_prompt`
 
-```bash
-docker build -t samsinn .
-docker run -p 3000:3000 -e OLLAMA_URL=http://host.docker.internal:11434 samsinn
+**Agent management:** `create_agent`, `list_agents`, `get_agent`, `remove_agent`, `update_agent_prompt`
+
+**Messaging:** `post_message`, `get_room_messages`
+
+**Membership:** `add_to_room`, `remove_from_room`
+
+**Delivery control:** `set_delivery_mode`, `set_paused`, `set_muted`
+
+**Flows:** `add_flow`, `list_flows`, `start_flow`, `cancel_flow`
+
+**Todos:** `list_todos`, `add_todo`, `update_todo`
+
+**House config:** `get_house_prompts`, `set_house_prompts`
+
+**Resources:** `samsinn://rooms`, `samsinn://agents`, `samsinn://rooms/{name}/messages`
+
+---
+
+## REST API
+
+Base URL: `http://localhost:3000`
+
+### System
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check, Ollama status, counts |
+| `GET` | `/api/models` | Available Ollama models |
+| `GET` | `/api/tools` | All registered tools |
+| `GET` | `/api/house/prompts` | House prompt + response format |
+| `PUT` | `/api/house/prompts` | Update house prompt / response format |
+
+### Rooms
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/rooms` | List all rooms |
+| `POST` | `/api/rooms` | Create room |
+| `GET` | `/api/rooms/:name` | Room profile + recent messages |
+| `DELETE` | `/api/rooms/:name` | Delete room |
+| `PUT` | `/api/rooms/:name/prompt` | Update room prompt |
+| `GET` | `/api/rooms/:name/members` | List members |
+| `POST` | `/api/rooms/:name/members` | Add agent to room |
+| `DELETE` | `/api/rooms/:name/members/:agentName` | Remove agent from room |
+| `PUT` | `/api/rooms/:name/delivery-mode` | Set delivery mode |
+| `PUT` | `/api/rooms/:name/pause` | Pause / unpause |
+| `PUT` | `/api/rooms/:name/mute` | Mute / unmute agent |
+
+### Flows
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/rooms/:name/flows` | List flows |
+| `POST` | `/api/rooms/:name/flows` | Create flow |
+| `POST` | `/api/rooms/:name/flows/start` | Start flow |
+| `POST` | `/api/rooms/:name/flows/cancel` | Cancel active flow |
+
+### Todos
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/rooms/:name/todos` | List todos |
+| `POST` | `/api/rooms/:name/todos` | Add todo |
+| `PUT` | `/api/rooms/:name/todos/:todoId` | Update todo |
+| `DELETE` | `/api/rooms/:name/todos/:todoId` | Remove todo |
+
+### Agents
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/agents` | List agents |
+| `POST` | `/api/agents` | Create AI agent |
+| `GET` | `/api/agents/:name` | Agent details |
+| `PATCH` | `/api/agents/:name` | Update system prompt / model |
+| `DELETE` | `/api/agents/:name` | Remove agent |
+| `GET` | `/api/agents/:name/rooms` | Rooms agent is in |
+| `POST` | `/api/agents/:name/cancel` | Cancel active generation |
+
+### Messages
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/messages` | Post a message to rooms or agents |
+
+---
+
+## WebSocket Protocol
+
+Connect: `ws://localhost:3000/ws?name=YourName`
+
+On connection, the server sends a `snapshot` message with the full current state (rooms, agents, your agent ID, session token).
+
+### Inbound (client → server)
+
+```typescript
+{ type: 'post_message';     target: { rooms?: string[], agents?: string[] }; content: string }
+{ type: 'create_room';      name: string; roomPrompt?: string }
+{ type: 'add_to_room';      roomName: string; agentName: string }
+{ type: 'remove_from_room'; roomName: string; agentName: string }
+{ type: 'create_agent';     config: AIAgentConfig }
+{ type: 'remove_agent';     name: string }
+{ type: 'update_agent';     name: string; systemPrompt?: string; model?: string }
+{ type: 'set_delivery_mode'; roomName: string; mode: 'broadcast' }
+{ type: 'set_paused';       roomName: string; paused: boolean }
+{ type: 'set_muted';        roomName: string; agentName: string; muted: boolean }
+{ type: 'add_flow';         roomName: string; name: string; steps: FlowStep[]; loop?: boolean }
+{ type: 'remove_flow';      roomName: string; flowId: string }
+{ type: 'start_flow';       roomName: string; flowId: string; content: string }
+{ type: 'cancel_flow';      roomName: string }
+{ type: 'cancel_generation'; name: string }
+{ type: 'add_todo';         roomName: string; content: string; assignee?: string; dependencies?: string[] }
+{ type: 'update_todo';      roomName: string; todoId: string; status?: TodoStatus; assignee?: string; content?: string; result?: string }
+{ type: 'remove_todo';      roomName: string; todoId: string }
 ```
 
-## Roadmap
+### Outbound (server → client)
 
-- [x] **Phase 1** — Core: rooms, house, types, LLM provider
-- [x] **Phase 2** — Agents: AI + human, team, spawn, actions, DMs
-- [x] **Phase 3** — Server + UI: HTTP/WebSocket server, browser interface
-- [x] **Phase 4** — Tool use framework: ReAct loop, MCP integration
-- [x] **Phase 5** — Delivery modes: broadcast, targeted, staleness, flow, muting, addressing, Markdown
-- [x] **Phase 6** — MCP server adapter (22 tools, 3 resources), headless mode (stdio)
-- [ ] **Phase 7** — AI-initiated flows, flow editor enhancements
+```typescript
+{ type: 'snapshot';          rooms: RoomProfile[]; agents: AgentProfile[]; agentId: string; sessionToken?: string }
+{ type: 'message';           message: Message }
+{ type: 'agent_state';       agentName: string; state: 'idle' | 'generating'; context?: string }
+{ type: 'room_created';      profile: RoomProfile }
+{ type: 'room_deleted';      roomName: string }
+{ type: 'membership_changed'; roomName: string; agentName: string; action: 'added' | 'removed' }
+{ type: 'agent_joined';      agent: AgentProfile }
+{ type: 'agent_removed';     agentName: string }
+{ type: 'delivery_mode_changed'; roomName: string; mode: DeliveryMode; paused: boolean }
+{ type: 'mute_changed';      roomName: string; agentName: string; muted: boolean }
+{ type: 'turn_changed';      roomName: string; agentName?: string; waitingForHuman?: boolean }
+{ type: 'flow_event';        roomName: string; event: 'started' | 'step' | 'completed' | 'cancelled'; detail?: Record<string, unknown> }
+{ type: 'todo_changed';      roomName: string; action: 'added' | 'updated' | 'removed'; todo: TodoItem }
+{ type: 'error';             message: string }
+```
+
+---
+
+## Agent Text Protocol
+
+AI agents receive messages and respond in plain text. Two special prefixes are recognised:
+
+| Prefix | Meaning |
+|---|---|
+| *(any text)* | Normal chat response |
+| `::PASS::` | Stay silent this turn |
+| `::TOOL:: tool_name {"param": "value"}` | Invoke a tool |
+
+Tool calls may chain — the agent can call multiple tools before writing its final response. The full tool loop is invisible to room participants; they see only the final response.
+
+Models with native function-calling (e.g. `qwen2.5`, `llama3.1`) use the OpenAI tool-calling format instead of `::TOOL::`. Capability is detected automatically via the Ollama `/api/show` endpoint.
+
+`[[AgentName]]` anywhere in a message targets delivery to that specific agent, overriding the room's delivery mode.
+
+---
+
+## Project Structure
+
+```
+src/
+  core/
+    types.ts              — All type definitions (Message, Room, Agent, Flow, Todo, …)
+    room.ts               — Room: messages + member management + delivery dispatch
+    house.ts              — House: room collection + house-level prompts
+    delivery.ts           — routeMessage(): routes to rooms and agent DMs
+    delivery-modes.ts     — Broadcast and flow delivery implementations
+    addressing.ts         — [[AgentName]] directed addressing parser
+    tool-registry.ts      — Tool store: register, get, list, has
+    snapshot.ts           — System serialisation + restore (JSON file)
+    names.ts              — Name uniqueness and case-insensitive lookups
+  agents/
+    ai-agent.ts           — AI agent factory: two-buffer architecture, ReAct loop
+    human-agent.ts        — Human agent factory: WebSocket relay
+    context-builder.ts    — LLM context assembly: history + prompts + tools + todos
+    evaluation.ts         — LLM call + tool execution loop
+    team.ts               — Agent collection
+    actions.ts            — Room join/leave with visible messages
+    spawn.ts              — Agent creation + registration + tool wiring
+    shared.ts             — Shared utilities (type guards, metadata helpers)
+  llm/
+    ollama.ts             — Ollama HTTP client with timing
+    tool-capability.ts    — Per-model native tool-calling detection + caching
+  tools/
+    built-in.ts           — 19 built-in tools
+    format.ts             — Text-protocol tool formatting for system prompts
+    loader.ts             — Filesystem tool discovery (./tools/, ~/.samsinn/tools/)
+  integrations/
+    mcp/
+      client.ts           — MCP client: consume external tool servers
+      server.ts           — MCP server: expose Samsinn as 23 tools + 3 resources
+  api/
+    server.ts             — Bun.serve: HTTP + WebSocket + static file serving
+    http-routes.ts        — 30+ REST endpoint handlers
+    ws-handler.ts         — WebSocket session management + message dispatch
+  ui/
+    index.html            — Browser UI (Tailwind CSS + marked + DOMPurify)
+    modules/
+      app.ts              — Application orchestrator
+      ws-client.ts        — WebSocket client with reconnect
+      ui-renderer.ts      — DOM rendering (messages, agents, rooms, flows, todos)
+      modal.ts            — Modal dialogs
+  main.ts                 — createSystem() factory + CLI entry point
+  index.ts                — Library exports
+
+tools/                    — External filesystem tools (auto-loaded at startup)
+  memory.ts               — think, note, my_notes, remember, recall, forget
+  compute.ts              — calculate, json_extract, format_table
+  web.ts                  — web_search, fetch_url
+  research.ts             — arxiv_search, doi_lookup, semantic_scholar
+
+docs/
+  tools.md                — Full tool reference with parameters, usage, return values
+```
+
+---
+
+## Persistence
+
+State is auto-saved to `data/snapshot.json` after each message (debounced 5 seconds). On next startup, rooms, agents, message history, flows, todos, mute state, and delivery modes are all restored exactly as they were.
+
+A graceful shutdown (`Ctrl+C`) flushes the snapshot immediately.
+
+The snapshot is a plain JSON file — readable, version-controlled, and portable.
+
+---
+
+## Development
+
+```bash
+bun run dev          # Start with hot-reload
+bun test             # Full test suite (requires Ollama running)
+bun run test:unit    # Unit tests only (no Ollama needed)
+bun run check        # TypeScript type check
+```
+
+Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapshot persistence, HTTP routes, WebSocket handler, MCP server, filesystem tool loader.
+
+---
+
+## Architecture Notes
+
+**Everything is a factory function** — no classes, no `new`. Objects are created by factory functions and returned as typed interfaces.
+
+**Single delivery path** — `routeMessage()` is the one function that routes messages. Rooms, DMs, and tools all call the same system functions. No parallel code paths.
+
+**ID / name duality** — all entities have auto-generated UUIDs (internal) and human-readable names (LLM-facing). LLMs see and use names; the system resolves names to IDs at boundaries.
+
+**Tool protocol** — agents using text-protocol models produce `::TOOL::` lines which are parsed and executed in a ReAct loop. Agents using native-capable models use structured tool calls. The `ToolCapabilityCache` detects capability once per model and caches the result.
+
+**LLM context structure** — every agent evaluation assembles: house rules → room prompt → agent system prompt → auto-generated context (room, flow, participants, todos, tools) → response format → history (old + `[NEW]` tagged recent messages). The `context-builder.ts` is the single source of truth for what agents see.
+
+**External tools** — the `loadExternalTools()` function scans `./tools/`, `~/.samsinn/tools/`, and `SAMSINN_TOOLS_DIR` for `.ts` files with a default Tool or Tool[] export. Loaded before snapshot restore so restored agents have access to them. Conflicts with built-in tool names are silently skipped.
+
+---
+
+## Changelog
+
+| Version | Changes |
+|---|---|
+| v0.5.13 | 19 built-in tools, 16 external tools (memory/compute/web/research), structured tool descriptions with usage/returns fields, filesystem tool loader, `delegate` tool with todo integration |
+| v0.5.12 | Shared todo list per room: CRUD, WS sync, agent context injection, HTTP + MCP API |
+| v0.5.11 | Delivery modes simplified to broadcast + flow; room pause; [[AgentName]] addressing; muting; Markdown rendering |
+| v0.5.10 | MCP server (23 tools, 3 resources), headless stdio mode |
+| v0.5.9 | Flows: ordered agent sequences with per-step prompts, loop support |
+| v0.5.8 | Filesystem tool loader, external tool directories, conflict detection |
+| v0.5.7 | Room prompt field in UI; onMessagePosted callback; room pause dots |
+
+---
 
 ## License
 
