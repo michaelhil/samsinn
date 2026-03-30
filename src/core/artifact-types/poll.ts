@@ -45,7 +45,7 @@ export const pollArtifactType: ArtifactTypeDefinition = {
 
   onCreate: (artifact: Artifact): void => {
     // Ensure votes map is initialized for all options
-    const body = artifact.body as PollBody
+    const body = artifact.body as unknown as PollBody
     const votes: Record<string, ReadonlyArray<string>> = {}
     for (const opt of body.options) {
       votes[opt.id] = []
@@ -56,12 +56,12 @@ export const pollArtifactType: ArtifactTypeDefinition = {
   },
 
   onUpdate: (artifact: Artifact, updates: ArtifactUpdateConfig, ctx): ArtifactUpdateResult | void => {
-    const body = artifact.body as PollBody
+    const body = artifact.body as unknown as PollBody
     const castVote = updates.body?.castVote as string | undefined
 
     if (castVote) {
       const validOption = body.options.find(o => o.id === castVote)
-      if (!validOption) return { newBody: body }  // invalid option — no-op, don't mutate
+      if (!validOption) return { newBody: body as unknown as Record<string, unknown> }  // invalid option — no-op, don't mutate
 
       const votes = { ...body.votes }
       // Remove previous votes if not allowMultiple
@@ -75,7 +75,7 @@ export const pollArtifactType: ArtifactTypeDefinition = {
       if (!current.includes(ctx.callerId)) {
         votes[castVote] = [...current, ctx.callerId]
       }
-      return { newBody: { ...body, votes } }
+      return { newBody: { ...body, votes } as unknown as Record<string, unknown> }
     }
 
     // Non-vote update — only allow updating question (not options, not votes directly)
@@ -84,11 +84,11 @@ export const pollArtifactType: ArtifactTypeDefinition = {
     if (updates.body?.question) safeUpdates.question = updates.body.question
     if (updates.body?.allowMultiple !== undefined) safeUpdates.allowMultiple = updates.body.allowMultiple
     if (Object.keys(safeUpdates).length === 0) return
-    return { newBody: { ...body, ...safeUpdates } }
+    return { newBody: { ...body, ...safeUpdates } as unknown as Record<string, unknown> }
   },
 
   formatForContext: (artifact: Artifact): string => {
-    const body = artifact.body as PollBody
+    const body = artifact.body as unknown as PollBody
     const votes = body.votes ?? {}
     const lines: string[] = [`Poll: "${body.question}" [id: ${artifact.id}]`]
     for (const opt of body.options) {
@@ -105,7 +105,7 @@ export const pollArtifactType: ArtifactTypeDefinition = {
   },
 
   formatUpdateMessage: (artifact: Artifact): string => {
-    const body = artifact.body as PollBody
+    const body = artifact.body as unknown as PollBody
     const votes = body.votes ?? {}
     const tallies = body.options
       .map(opt => `${opt.text}: ${(votes[opt.id] ?? []).length}`)

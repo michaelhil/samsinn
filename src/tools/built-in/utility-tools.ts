@@ -32,6 +32,7 @@ export const createPostToRoomTool = (house: House): Tool => ({
     if (!roomName || !content) return { success: false, error: 'roomName and content are required' }
     const room = house.getRoom(roomName)
     if (!room) return { success: false, error: `Room "${roomName}" not found` }
+    // 'chat' type: agent speaks into the room as itself, visible to all members as a normal message.
     const message = room.post({
       senderId: context.callerId,
       senderName: context.callerName,

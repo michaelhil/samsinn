@@ -24,7 +24,7 @@ export const resolveFlowArtifact = (
     return { error: `Artifact "${artifact.id}" is not a flow (type: ${artifact.type})` }
   }
 
-  const flowBody = artifact.body as FlowArtifactBody
+  const flowBody = artifact.body as unknown as FlowArtifactBody
   const steps: FlowStep[] = (flowBody.steps ?? []).map(s => ({
     agentId: s.agentId || (team.getAgent(s.agentName)?.id ?? ''),
     agentName: s.agentName,

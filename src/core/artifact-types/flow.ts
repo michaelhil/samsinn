@@ -52,7 +52,7 @@ export const createFlowArtifactType = (team: Team): ArtifactTypeDefinition => ({
 
   onUpdate: (artifact: Artifact, updates): import('../types.ts').ArtifactUpdateResult | void => {
     if (!updates.body?.steps) return  // no steps change — default merge
-    const body = artifact.body as FlowArtifactBody
+    const body = artifact.body as unknown as FlowArtifactBody
     // Resolve any steps missing agentId
     const rawSteps = updates.body.steps as Array<Partial<FlowStep>>
     const resolvedSteps: FlowStep[] = rawSteps.map(s => {
@@ -60,11 +60,11 @@ export const createFlowArtifactType = (team: Team): ArtifactTypeDefinition => ({
       const agentName = s.agentName ?? ''
       return { agentId, agentName, ...(s.stepPrompt ? { stepPrompt: s.stepPrompt } : {}) }
     })
-    return { newBody: { ...body, ...updates.body, steps: resolvedSteps } }
+    return { newBody: { ...body, ...updates.body, steps: resolvedSteps } as unknown as Record<string, unknown> }
   },
 
   formatForContext: (artifact: Artifact): string => {
-    const body = artifact.body as FlowArtifactBody
+    const body = artifact.body as unknown as FlowArtifactBody
     const steps = body.steps ?? []
     const sequence = steps.map(s => s.agentName).join(' → ')
     const loopTag = body.loop ? ' [loops]' : ''

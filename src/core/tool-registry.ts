@@ -14,6 +14,9 @@ export const createToolRegistry = (): ToolRegistry => {
     if (!tool.name || typeof tool.name !== 'string') {
       throw new Error('Tool must have a non-empty string name')
     }
+    if (tools.has(tool.name)) {
+      console.warn(`[ToolRegistry] Tool "${tool.name}" already registered — overwriting`)
+    }
     tools.set(tool.name, tool)
   }
 

@@ -34,8 +34,8 @@ export const createListArtifactTypesTool = (house: House): Tool => ({
 
 export const createListArtifactsTool = (house: House): Tool => ({
   name: 'list_artifacts',
-  description: 'Lists artifacts visible to the current room (scoped to it, not system-wide). Filter by type or include resolved.',
-  usage: 'Use to check active task lists, open polls, or available flow blueprints. Omit roomName to use the current room.',
+  description: 'Lists artifacts visible to the current room (scoped to it and system-wide artifacts). Filter by type or include resolved.',
+  usage: 'Use to check active task lists, open polls, or available flow blueprints scoped to this room and system-wide. Omit roomName to use the current room.',
   returns: 'Array of artifact objects with id, type, title, body, scope, resolution.',
   parameters: {
     type: 'object',
@@ -66,23 +66,24 @@ export const createAddArtifactTool = (house: House): Tool => ({
   parameters: {
     type: 'object',
     properties: {
-      artifactType: { type: 'string', description: 'Type of artifact to create (e.g. "task_list", "poll", "flow")' },
+      type: { type: 'string', description: 'Type of artifact to create (e.g. "task_list", "poll", "flow")' },
       title: { type: 'string', description: 'Human-readable name for this artifact' },
       body: { type: 'object', description: 'Type-specific body data (see list_artifact_types for schema)' },
       scope: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Room names to scope this artifact to. Omit for system-wide.',
+        description: 'Room names to scope this artifact to. Omit for system-wide (no scope restriction).',
       },
     },
-    required: ['artifactType', 'title', 'body'],
+    required: ['type', 'title', 'body'],
   },
   execute: async (params, context) => {
-    const type = params.artifactType as string
+    const type = params.type as string
     const typeDef = house.artifactTypes.get(type)
     if (!typeDef) return { success: false, error: `Unknown artifact type "${type}". Use list_artifact_types to see available types.` }
 
     // Resolve scope: room names → room IDs
+    // When no scope is provided, create as system-wide (empty scope array)
     const scopeNames = params.scope as string[] | undefined
     const scope: string[] = []
     if (scopeNames) {
@@ -91,9 +92,6 @@ export const createAddArtifactTool = (house: House): Tool => ({
         if (!room) return { success: false, error: `Room "${name}" not found` }
         scope.push(room.profile.id)
       }
-    } else if (context.roomId) {
-      // Default scope: current room
-      scope.push(context.roomId)
     }
 
     const artifact = house.artifacts.add({
@@ -172,6 +170,9 @@ export const createCastVoteTool = (house: House): Tool => ({
   },
   execute: async (params, context) => {
     const ctx: ToolContext = context
+    const existing = house.artifacts.get(params.artifactId as string)
+    if (!existing) return { success: false, error: `Poll artifact "${params.artifactId}" not found` }
+    if (existing.type !== 'poll') return { success: false, error: 'cast_vote can only be used on poll artifacts' }
     const updated = house.artifacts.update(
       params.artifactId as string,
       { body: { castVote: params.optionId } },

@@ -147,7 +147,7 @@ export const registerMessageTools = (mcpServer: McpServer, system: System): void
       type: z.string().describe('Artifact type (e.g. task_list, poll, flow)'),
       title: z.string().describe('Human-readable title'),
       description: z.string().optional().describe('Optional longer description'),
-      body: z.record(z.unknown()).describe('Type-specific body (see list_artifact_types for schema)'),
+      body: z.record(z.string(), z.unknown()).describe('Type-specific body (see list_artifact_types for schema)'),
       scope: z.array(z.string()).optional().describe('Room names to scope this artifact to (empty = system-wide)'),
     },
     async ({ type, title, description, body, scope }) => {
@@ -181,7 +181,7 @@ export const registerMessageTools = (mcpServer: McpServer, system: System): void
     {
       artifactId: z.string().describe('Artifact ID'),
       title: z.string().optional().describe('New title'),
-      body: z.record(z.unknown()).optional().describe('Body updates (merged with existing)'),
+      body: z.record(z.string(), z.unknown()).optional().describe('Body updates (merged with existing)'),
       resolution: z.string().optional().describe('Resolve the artifact with this comment'),
     },
     async ({ artifactId, title, body, resolution }) => {

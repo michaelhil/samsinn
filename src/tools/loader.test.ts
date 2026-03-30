@@ -1,11 +1,9 @@
-import { describe, test, expect, beforeEach } from 'bun:test'
-import { join, resolve } from 'node:path'
+import { describe, test, expect } from 'bun:test'
+import { join } from 'node:path'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { loadToolDirectory, loadExternalTools } from './loader.ts'
 import { createToolRegistry } from '../core/tool-registry.ts'
-
-const FIXTURES = resolve(import.meta.dir, '__fixtures__')
 
 // Registry is recreated per test to avoid cross-test pollution
 const makeRegistry = () => createToolRegistry()

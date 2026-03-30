@@ -169,7 +169,7 @@ export const roomRoutes: RouteEntry[] = [
       if (!artifact || artifact.type !== 'flow') {
         return errorResponse(`Flow artifact "${body.flowArtifactId}" not found`, 404)
       }
-      const flowBody = artifact.body as import('../../core/types.ts').FlowArtifactBody
+      const flowBody = artifact.body as unknown as import('../../core/types.ts').FlowArtifactBody
       const steps = (flowBody.steps ?? []).map(s => ({
         agentId: s.agentId || (system.team.getAgent(s.agentName)?.id ?? ''),
         agentName: s.agentName,

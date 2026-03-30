@@ -8,11 +8,11 @@ import type { Message } from '../core/types.ts'
 
 const createTestSystem = () => {
   const team = createTeam()
-  const deliver = (agentId: string, message: Message, history: ReadonlyArray<Message>) => {
-    team.getAgent(agentId)?.receive(message, history)
+  const deliver = (agentId: string, message: Message) => {
+    team.getAgent(agentId)?.receive(message)
   }
   const house = createHouse({ deliver })
-  const routeMessage = createMessageRouter({ house, team, deliver })
+  const routeMessage = createMessageRouter({ house })
   return { house, team, routeMessage }
 }
 

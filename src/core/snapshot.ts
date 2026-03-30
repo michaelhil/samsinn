@@ -14,7 +14,7 @@
 // ============================================================================
 
 import type {
-  Agent, AIAgentConfig, Artifact, DeliveryMode, Flow, Message, Room, RoomProfile,
+  Agent, AIAgentConfig, Artifact, DeliveryMode, Message, Room, RoomProfile,
 } from './types.ts'
 import { asAIAgent } from '../agents/shared.ts'
 import { mkdir, rename } from 'node:fs/promises'

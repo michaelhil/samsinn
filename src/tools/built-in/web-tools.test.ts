@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, afterEach } from 'bun:test'
 import { createWebTools, webFetchTool, webExtractJsonTool } from './web-tools.ts'
 
 // === Mock fetch helpers ===

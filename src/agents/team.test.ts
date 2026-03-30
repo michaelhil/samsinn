@@ -11,6 +11,7 @@ const makeAgent = (overrides?: Partial<Agent>): Agent => ({
   state: { get: () => 'idle' as const, subscribe: () => () => {} },
   receive: () => {},
   join: async () => {},
+  leave: () => {},
   ...overrides,
 })
 

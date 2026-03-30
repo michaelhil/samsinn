@@ -21,7 +21,7 @@
 // ============================================================================
 
 import type {
-  DeliverFn, DeliveryMode, Flow, FlowDeliveryContext,
+  DeliverFn, DeliveryMode, Flow,
   Message, OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted,
   OnTurnChanged, PostParams, ResolveAgentName, ResolveTagFn, Room, RoomProfile, RoomRestoreParams, RoomState,
 } from './types.ts'

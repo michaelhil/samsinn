@@ -75,7 +75,7 @@ describe('HTTP Routes', () => {
   test('GET /health returns ok', async () => {
     const res = await call(system, req('GET', '/health'), '/health')
     expect(res?.status).toBe(200)
-    const data = await res!.json()
+    const data = await res!.json() as { status: string; rooms: number }
     expect(data.status).toBe('ok')
     expect(typeof data.rooms).toBe('number')
   })
@@ -85,16 +85,16 @@ describe('HTTP Routes', () => {
   test('GET /api/rooms returns all rooms', async () => {
     const res = await call(system, req('GET', '/api/rooms'), '/api/rooms')
     expect(res?.status).toBe(200)
-    const data = await res!.json()
+    const data = await res!.json() as Array<{ name: string }>
     expect(Array.isArray(data)).toBe(true)
     expect(data).toHaveLength(1)
-    expect(data[0].name).toBe('TestRoom')
+    expect(data[0]!.name).toBe('TestRoom')
   })
 
   test('POST /api/rooms creates room with 201', async () => {
     const res = await call(system, req('POST', '/api/rooms', { name: 'NewRoom' }), '/api/rooms')
     expect(res?.status).toBe(201)
-    const data = await res!.json()
+    const data = await res!.json() as { value: { profile: { name: string } } }
     expect(data.value.profile.name).toBe('NewRoom')
   })
 
@@ -106,7 +106,7 @@ describe('HTTP Routes', () => {
   test('GET /api/rooms/:name returns room', async () => {
     const res = await call(system, req('GET', '/api/rooms/TestRoom'), '/api/rooms/TestRoom')
     expect(res?.status).toBe(200)
-    const data = await res!.json()
+    const data = await res!.json() as { profile: { name: string }; messages: unknown[] }
     expect(data.profile.name).toBe('TestRoom')
     expect(Array.isArray(data.messages)).toBe(true)
   })
@@ -127,7 +127,7 @@ describe('HTTP Routes', () => {
   test('PUT /api/rooms/:name/pause with true pauses room', async () => {
     const res = await call(system, req('PUT', '/api/rooms/TestRoom/pause', { paused: true }), '/api/rooms/TestRoom/pause')
     expect(res?.status).toBe(200)
-    const data = await res!.json()
+    const data = await res!.json() as { paused: boolean }
     expect(data.paused).toBe(true)
   })
 
@@ -136,7 +136,7 @@ describe('HTTP Routes', () => {
     room.setPaused(true)
     const res = await call(system, req('PUT', '/api/rooms/TestRoom/pause', { paused: false }), '/api/rooms/TestRoom/pause')
     expect(res?.status).toBe(200)
-    expect((await res!.json()).paused).toBe(false)
+    expect((await res!.json() as { paused: boolean }).paused).toBe(false)
   })
 
   test('PUT /api/rooms/:name/pause with string value returns 400', async () => {
@@ -246,7 +246,7 @@ describe('HTTP Routes', () => {
     expect(res?.status).toBe(200)
     const data = await res!.json() as Array<{ id: string; name: string }>
     expect(data).toHaveLength(1)
-    expect(data[0].name).toBe('Alice')
+    expect(data[0]!.name).toBe('Alice')
   })
 
   test('GET /api/rooms/:name/members unknown room returns 404', async () => {

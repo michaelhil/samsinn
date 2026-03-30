@@ -60,7 +60,7 @@ export const createTaskListArtifactType = (store: ArtifactStore): ArtifactTypeDe
     const body = updates.body
     if (!body) return
 
-    const currentBody = artifact.body as TaskListBody
+    const currentBody = artifact.body as unknown as TaskListBody
     const tasks = [...(currentBody.tasks ?? [])]
     const op = body.op as string | undefined
 
@@ -78,7 +78,7 @@ export const createTaskListArtifactType = (store: ArtifactStore): ArtifactTypeDe
         createdAt: now,
         updatedAt: now,
       }
-      return { newBody: { ...currentBody, tasks: [...tasks, newTask] } }
+      return { newBody: { ...currentBody, tasks: [...tasks, newTask] } as unknown as Record<string, unknown> }
     }
 
     if (op === 'complete_task') {
@@ -89,7 +89,7 @@ export const createTaskListArtifactType = (store: ArtifactStore): ArtifactTypeDe
           ? { ...t, status: 'completed' as TaskStatus, result: body.taskResult as string | undefined, updatedAt: Date.now() }
           : t,
       )
-      return { newBody: { ...currentBody, tasks: updated } }
+      return { newBody: { ...currentBody, tasks: updated } as unknown as Record<string, unknown> }
     }
 
     if (op === 'update_task') {
@@ -105,32 +105,32 @@ export const createTaskListArtifactType = (store: ArtifactStore): ArtifactTypeDe
           updatedAt: Date.now(),
         }
       })
-      return { newBody: { ...currentBody, tasks: updated } }
+      return { newBody: { ...currentBody, tasks: updated } as unknown as Record<string, unknown> }
     }
 
     if (op === 'remove_task') {
       const taskId = body.taskId as string | undefined
       if (!taskId) return
-      return { newBody: { ...currentBody, tasks: tasks.filter(t => t.id !== taskId) } }
+      return { newBody: { ...currentBody, tasks: tasks.filter(t => t.id !== taskId) } as unknown as Record<string, unknown> }
     }
 
     // No op — caller provided full tasks array or description; use default shallow merge.
     // Unknown op values (typos) also land here — return no-op to avoid polluting body.
-    if (op !== undefined) return { newBody: currentBody }
+    if (op !== undefined) return { newBody: currentBody as unknown as Record<string, unknown> }
     return undefined
   },
 
   checkAutoResolve: (artifact: Artifact): string | undefined => {
     // Suppress unused store warning — kept for future use (cross-list dependency checks)
     void store
-    const body = artifact.body as TaskListBody
+    const body = artifact.body as unknown as TaskListBody
     if (!body.tasks || body.tasks.length === 0) return undefined
     const allDone = body.tasks.every(t => t.status === 'completed')
     return allDone ? 'All tasks completed' : undefined
   },
 
   formatForContext: (artifact: Artifact): string => {
-    const body = artifact.body as TaskListBody
+    const body = artifact.body as unknown as TaskListBody
     const tasks = body.tasks ?? []
     const desc = artifact.description ?? body.description
     const lines: string[] = [`Task list: "${artifact.title}" [id: ${artifact.id}]`]
@@ -150,7 +150,7 @@ export const createTaskListArtifactType = (store: ArtifactStore): ArtifactTypeDe
   },
 
   formatUpdateMessage: (artifact: Artifact): string => {
-    const body = artifact.body as TaskListBody
+    const body = artifact.body as unknown as TaskListBody
     const tasks = body.tasks ?? []
     const done = tasks.filter(t => t.status === 'completed').length
     return `task_list "${artifact.title}" was updated — ${done}/${tasks.length} tasks complete`

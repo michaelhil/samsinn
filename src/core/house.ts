@@ -58,15 +58,16 @@ export const createHouse = (callbacks: HouseCallbacks = {}): House => {
   // Classify a raw artifact action into the event key used for postSystemMessageOn checks.
   // A plain update that also resolves is classified as 'resolved', not 'updated'.
   const classifyArtifactEvent = (
-    action: 'added' | 'updated' | 'removed',
+    action: 'added' | 'updated' | 'removed' | 'resolved',
     artifact: Artifact,
   ): 'added' | 'updated' | 'removed' | 'resolved' => {
+    if (action === 'resolved') return 'resolved'
     if (action === 'updated' && artifact.resolvedAt !== undefined) return 'resolved'
     return action
   }
 
   // Wire onArtifactChanged to post system messages in scoped rooms on significant events.
-  const artifactChangedHandler: OnArtifactChanged = (action, artifact) => {
+  const artifactChangedHandler: OnArtifactChanged = (action: 'added' | 'updated' | 'removed' | 'resolved', artifact: Artifact) => {
     const typeDef = artifactTypeRegistry.get(artifact.type)
     const postOn = typeDef?.postSystemMessageOn ?? ['added', 'removed', 'resolved']
     const eventKey = classifyArtifactEvent(action, artifact)

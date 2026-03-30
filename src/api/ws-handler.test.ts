@@ -93,14 +93,14 @@ describe('WS Handler', () => {
     const { ws, errors } = makeWS()
     await handleWSMessage(ws, session, 'not-json', system, wsManager)
     expect(errors()).toHaveLength(1)
-    expect(errors()[0].message).toContain('Invalid JSON')
+    expect(errors()[0]!.message).toContain('Invalid JSON')
   })
 
   test('unknown message type sends error response', async () => {
     const { ws, errors } = makeWS()
     await dispatch(ws, session, system, wsManager, { type: '__unknown__' })
     expect(errors()).toHaveLength(1)
-    expect(String(errors()[0].message)).toContain('Unknown message type')
+    expect(String(errors()[0]!.message)).toContain('Unknown message type')
   })
 
   // --- cancel_generation ---
@@ -109,14 +109,14 @@ describe('WS Handler', () => {
     const { ws, errors } = makeWS()
     await dispatch(ws, session, system, wsManager, { type: 'cancel_generation', name: 'NoSuchBot' })
     expect(errors()).toHaveLength(1)
-    expect(String(errors()[0].message)).toContain('not found')
+    expect(String(errors()[0]!.message)).toContain('not found')
   })
 
   test('cancel_generation for non-AI agent sends error', async () => {
     const { ws, errors } = makeWS()
     await dispatch(ws, session, system, wsManager, { type: 'cancel_generation', name: 'Human' })
     expect(errors()).toHaveLength(1)
-    expect(String(errors()[0].message)).toContain('not an AI agent')
+    expect(String(errors()[0]!.message)).toContain('not an AI agent')
   })
 
   test('cancel_generation for AI agent succeeds with no error', async () => {
@@ -140,20 +140,20 @@ describe('WS Handler', () => {
     })
     const msgEvents = messages().filter(m => m.type === 'message')
     expect(msgEvents).toHaveLength(1)
-    expect((msgEvents[0].message as Record<string, unknown>).content).toBe('Hello')
+    expect((msgEvents[0]!.message as Record<string, unknown>).content).toBe('Hello')
   })
 
   // --- set_paused ---
 
   test('set_paused pauses room and broadcasts', async () => {
     let broadcasted: WSOutbound | null = null
-    wsManager.broadcast = (msg: WSOutbound) => { broadcasted = msg }
+    ;(wsManager as unknown as Record<string, unknown>).broadcast = (msg: WSOutbound) => { broadcasted = msg }
     const { ws } = makeWS()
     await dispatch(ws, session, system, wsManager, { type: 'set_paused', roomName: 'TestRoom', paused: true })
     const room = system.house.getRoom('TestRoom')!
     expect(room.paused).toBe(true)
     expect(broadcasted).not.toBeNull()
-    expect((broadcasted as WSOutbound & { type: 'delivery_mode_changed' }).paused).toBe(true)
+    expect(((broadcasted as unknown) as { type: string; paused: boolean }).paused).toBe(true)
   })
 
   test('set_paused on unknown room sends error', async () => {
@@ -166,7 +166,7 @@ describe('WS Handler', () => {
 
   test('add_artifact creates artifact and triggers artifact_changed', async () => {
     const broadcasts: WSOutbound[] = []
-    wsManager.broadcast = (msg: WSOutbound) => { broadcasts.push(msg) }
+    ;(wsManager as unknown as Record<string, unknown>).broadcast = (msg: WSOutbound) => { broadcasts.push(msg) }
     const { ws } = makeWS()
     await dispatch(ws, session, system, wsManager, {
       type: 'add_artifact', artifactType: 'task_list', title: 'Sprint', body: { tasks: [] }, scope: ['TestRoom'],
@@ -188,7 +188,7 @@ describe('WS Handler', () => {
       type: 'update_artifact', artifactId: 'no-such-id', title: 'New',
     })
     expect(errors()).toHaveLength(1)
-    expect(String(errors()[0].message)).toContain('not found')
+    expect(String(errors()[0]!.message)).toContain('not found')
   })
 
   test('update_artifact updates artifact', async () => {
@@ -209,7 +209,7 @@ describe('WS Handler', () => {
       type: 'remove_artifact', artifactId: 'no-such-id',
     })
     expect(errors()).toHaveLength(1)
-    expect(String(errors()[0].message)).toContain('not found')
+    expect(String(errors()[0]!.message)).toContain('not found')
   })
 
   test('remove_artifact removes artifact', async () => {
@@ -240,7 +240,7 @@ describe('WS Handler', () => {
 
   test('add_to_room with valid room and agent calls system.addAgentToRoom', async () => {
     let called = false
-    system.addAgentToRoom = async () => { called = true }
+    ;(system as unknown as Record<string, unknown>).addAgentToRoom = async () => { called = true }
     const { ws, errors } = makeWS()
     await dispatch(ws, session, system, wsManager, { type: 'add_to_room', roomName: 'TestRoom', agentName: 'Human' })
     expect(errors()).toHaveLength(0)
@@ -261,7 +261,7 @@ describe('WS Handler', () => {
 
   test('remove_from_room with valid room and agent calls system.removeAgentFromRoom', async () => {
     let called = false
-    system.removeAgentFromRoom = () => { called = true }
+    ;(system as unknown as Record<string, unknown>).removeAgentFromRoom = () => { called = true }
     const { ws, errors } = makeWS()
     await dispatch(ws, session, system, wsManager, { type: 'remove_from_room', roomName: 'TestRoom', agentName: 'Human' })
     expect(errors()).toHaveLength(0)
@@ -272,7 +272,7 @@ describe('WS Handler', () => {
 
   test('create_room with duplicate name still calls addAgentToRoom', async () => {
     let addCalled = false
-    system.addAgentToRoom = async () => { addCalled = true }
+    ;(system as unknown as Record<string, unknown>).addAgentToRoom = async () => { addCalled = true }
     const { ws, errors } = makeWS()
     await dispatch(ws, session, system, wsManager, { type: 'create_room', name: 'TestRoom' })
     // Duplicate names are allowed (createRoomSafe returns sanitised name) — no error expected
