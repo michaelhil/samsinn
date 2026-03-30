@@ -4,3 +4,4 @@ export { createListRoomsTool, createCreateRoomTool, createDeleteRoomTool, create
 export { createListAgentsTool, createMuteAgentTool, createGetMyContextTool } from './agent-tools.ts'
 export { createListArtifactTypesTool, createListArtifactsTool, createAddArtifactTool, createUpdateArtifactTool, createRemoveArtifactTool, createCastVoteTool } from './artifact-tools.ts'
 export { createGetTimeTool, createPostToRoomTool, createGetRoomHistoryTool } from './utility-tools.ts'
+export { createWebTools } from './web-tools.ts'

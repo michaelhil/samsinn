@@ -475,10 +475,9 @@ export interface ToolResult {
 export interface ToolContext {
   readonly callerId: string
   readonly callerName: string
-  readonly roomId?: string    // current trigger room ID — available when tool is called from a room context
-  // LLM access — model is inherited from the calling agent at spawn time.
-  // Note: does not track subsequent model updates (updateModel calls).
-  readonly llm?: (request: ToolLLMRequest) => Promise<string>
+  readonly roomId?: string          // current trigger room ID — available when tool is called from a room context
+  readonly llm?: (request: ToolLLMRequest) => Promise<string>  // model inherited from calling agent at spawn time
+  readonly maxResultChars?: number  // evaluation loop's context budget for this tool's result — tools should pre-size output to fit
 }
 
 export interface Tool {

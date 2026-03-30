@@ -128,6 +128,7 @@ const resolveAgentTools = async (
     get callerId() { return agentRef.id },
     get callerName() { return agentRef.name },
     llm: (request) => callLLM(llmProvider, { ...request, model: config.model }),
+    maxResultChars: config.maxToolResultChars,
   }
   const toolExecutor = createToolExecutor(toolRegistry, requestedTools, lazyContext)
 

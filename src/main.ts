@@ -31,6 +31,7 @@ import {
   createPostToRoomTool, createGetRoomHistoryTool,
   createListArtifactTypesTool, createListArtifactsTool, createAddArtifactTool,
   createUpdateArtifactTool, createRemoveArtifactTool, createCastVoteTool,
+  createWebTools,
 } from './tools/built-in/index.ts'
 import { createTaskListArtifactType } from './core/artifact-types/task-list.ts'
 import { pollArtifactType } from './core/artifact-types/poll.ts'
@@ -175,6 +176,14 @@ export const createSystem = (ollamaUrl?: string): System => {
     createGetRoomHistoryTool(house),
     createPostToRoomTool(house),
   ])
+
+  // Web tools — web_fetch and web_extract_json always registered;
+  // web_search registered only when BRAVE_API_KEY or GOOGLE_CSE_API_KEY+GOOGLE_CSE_ID is set.
+  toolRegistry.registerAll(createWebTools({
+    braveApiKey: process.env.BRAVE_API_KEY,
+    googleApiKey: process.env.GOOGLE_CSE_API_KEY,
+    googleCseId: process.env.GOOGLE_CSE_ID,
+  }))
 
   const boundSpawnAIAgent = (config: AIAgentConfig, options?: SpawnOptions) =>
     spawnAIAgent(config, ollama, house, team, routeMessage, toolRegistry, {
