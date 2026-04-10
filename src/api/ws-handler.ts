@@ -45,6 +45,8 @@ export interface WSManager {
   readonly broadcast: (msg: WSOutbound) => void
   readonly subscribeAgentState: (agentId: string, agentName: string) => void
   readonly unsubscribeAgentState: (agentId: string) => void
+  readonly subscribeOllamaMetrics: (sessionToken: string) => void
+  readonly unsubscribeOllamaMetrics: (sessionToken: string) => void
   readonly buildSnapshot: (agentId: string, sessionToken?: string) => Extract<WSOutbound, { type: 'snapshot' }>
 }
 
@@ -70,6 +72,46 @@ export const createWSManager = (system: System): WSManager => {
   system.setOnMembershipChanged((_roomId, roomName, _agentId, agentName, action) => {
     broadcast({ type: 'membership_changed', roomName, agentName, action })
   })
+
+  // Wire gateway health changes → broadcast to all clients
+  system.ollama.onHealthChange((health) => {
+    broadcast({ type: 'ollama_health', health: health as unknown as Record<string, unknown> })
+  })
+
+  // Subscribe-based ollama metrics push (keyed by agent ID)
+  const metricsSubscribers = new Set<string>()
+  let metricsPushTimer: ReturnType<typeof setInterval> | undefined
+
+  const startMetricsPush = (): void => {
+    if (metricsPushTimer) return
+    metricsPushTimer = setInterval(() => {
+      if (metricsSubscribers.size === 0) return
+      const metrics = system.ollama.getMetrics() as unknown as Record<string, unknown>
+      const data = JSON.stringify({ type: 'ollama_metrics', metrics })
+      // Find WS connections for subscribed agents
+      for (const agentId of metricsSubscribers) {
+        for (const [token, session] of sessions) {
+          if (session.agent.id === agentId) {
+            const ws = wsConnections.get(token)
+            if (ws) try { ws.send(data) } catch { /* client gone */ }
+          }
+        }
+      }
+    }, 3_000)
+  }
+
+  const subscribeOllamaMetrics = (agentId: string): void => {
+    metricsSubscribers.add(agentId)
+    startMetricsPush()
+  }
+
+  const unsubscribeOllamaMetrics = (agentId: string): void => {
+    metricsSubscribers.delete(agentId)
+    if (metricsSubscribers.size === 0 && metricsPushTimer) {
+      clearInterval(metricsPushTimer)
+      metricsPushTimer = undefined
+    }
+  }
 
   const subscribeAgentState = (agentId: string, agentName: string): void => {
     const agent = system.team.getAgent(agentId)
@@ -115,7 +157,7 @@ export const createWSManager = (system: System): WSManager => {
     }
   }
 
-  return { sessions, wsConnections, broadcast, subscribeAgentState, unsubscribeAgentState, buildSnapshot }
+  return { sessions, wsConnections, broadcast, subscribeAgentState, unsubscribeAgentState, subscribeOllamaMetrics, unsubscribeOllamaMetrics, buildSnapshot }
 }
 
 // === Command dispatch order — first handler that returns true wins ===
@@ -141,6 +183,17 @@ export const handleWSMessage = async (
     msg = JSON.parse(raw) as WSInbound
   } catch {
     sendError(ws, 'Invalid JSON')
+    return
+  }
+
+  // Handle ollama metrics subscribe/unsubscribe
+  const msgType = (msg as Record<string, unknown>).type
+  if (msgType === 'subscribe_ollama_metrics') {
+    wsManager.subscribeOllamaMetrics(session.agent.id)
+    return
+  }
+  if (msgType === 'unsubscribe_ollama_metrics') {
+    wsManager.unsubscribeOllamaMetrics(session.agent.id)
     return
   }
 

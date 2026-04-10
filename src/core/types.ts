@@ -446,6 +446,7 @@ export interface AIAgent extends Agent {
   readonly getTemperature: () => number | undefined
   readonly getHistoryLimit: () => number | undefined
   readonly getTools: () => ReadonlyArray<string> | undefined
+  readonly refreshTools?: (support: { toolExecutor?: ToolExecutor; toolDescriptions?: string; toolDefinitions?: ReadonlyArray<ToolDefinition> }) => void
   // Returns a snapshot of the agent's current configuration (mutable fields resolved).
   // Use this when you need multiple config fields at once (e.g. for serialization).
   readonly getConfig: () => AIAgentConfig
@@ -571,6 +572,7 @@ export interface ChatRequest {
   readonly maxTokens?: number
   readonly jsonMode?: boolean
   readonly tools?: ReadonlyArray<ToolDefinition>
+  readonly numCtx?: number
 }
 
 export interface ChatResponse {
@@ -581,6 +583,9 @@ export interface ChatResponse {
     readonly completion: number
   }
   readonly toolCalls?: ReadonlyArray<NativeToolCall>
+  readonly tokensPerSecond?: number
+  readonly promptEvalMs?: number
+  readonly modelLoadMs?: number
 }
 
 // A single streamed token/delta from the LLM
@@ -663,6 +668,8 @@ export type WSOutbound =
   | { readonly type: 'artifact_changed'; readonly action: 'added' | 'updated' | 'removed' | 'resolved'; readonly artifact: Artifact }
   | { readonly type: 'membership_changed'; readonly roomName: string; readonly agentName: string; readonly action: 'added' | 'removed' }
   | { readonly type: 'room_deleted'; readonly roomName: string }
+  | { readonly type: 'ollama_health'; readonly health: Record<string, unknown> }
+  | { readonly type: 'ollama_metrics'; readonly metrics: Record<string, unknown> }
 
 // === System Constants ===
 
@@ -670,7 +677,7 @@ export const SYSTEM_SENDER_ID = 'system' as const
 
 export const DEFAULTS = {
   port: 3000,
-  ollamaBaseUrl: 'http://localhost:11434',
-  historyLimit: 50,
+  ollamaBaseUrl: 'http://127.0.0.1:11434',
+  historyLimit: 10,
   roomMessageLimit: 500,
 } as const

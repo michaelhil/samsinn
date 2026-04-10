@@ -6,7 +6,7 @@
 // ============================================================================
 
 import type {
-  Agent, AIAgentConfig, DeliverFn, House, HouseCallbacks, LLMProvider,
+  Agent, AIAgent, AIAgentConfig, DeliverFn, House, HouseCallbacks,
   OnArtifactChanged, OnDeliveryModeChanged, OnFlowEvent,
   OnMembershipChanged, OnMessagePosted, OnRoomCreated, OnRoomDeleted,
   OnTurnChanged, ResolveAgentName, ResolveTagFn, RouteMessage, Team, ToolRegistry,
@@ -16,8 +16,9 @@ import { createHouse } from './core/house.ts'
 import { createTeam } from './agents/team.ts'
 import { createMessageRouter } from './core/delivery.ts'
 import { createOllamaProvider } from './llm/ollama.ts'
+import { createLLMGateway, type LLMGateway } from './llm/gateway.ts'
 import { createToolRegistry } from './core/tool-registry.ts'
-import { spawnAIAgent, spawnHumanAgent, type SpawnOptions } from './agents/spawn.ts'
+import { spawnAIAgent, spawnHumanAgent, buildToolSupport, type SpawnOptions } from './agents/spawn.ts'
 import { callLLM } from './agents/evaluation.ts'
 import { createHumanAgent } from './agents/human-agent.ts'
 import type { HumanAgentConfig, TransportSend } from './agents/human-agent.ts'
@@ -32,19 +33,25 @@ import {
   createListArtifactTypesTool, createListArtifactsTool, createAddArtifactTool,
   createUpdateArtifactTool, createRemoveArtifactTool, createCastVoteTool,
   createWebTools, createWriteDocumentSectionTool,
+  createWriteSkillTool, createWriteToolTool, createListSkillsTool,
 } from './tools/built-in/index.ts'
 import { createTaskListArtifactType } from './core/artifact-types/task-list.ts'
 import { pollArtifactType } from './core/artifact-types/poll.ts'
 import { createFlowArtifactType } from './core/artifact-types/flow.ts'
 import { documentArtifactType } from './core/artifact-types/document.ts'
 import { createToolCapabilityCache } from './llm/tool-capability.ts'
+import { createSkillStore, type SkillStore } from './skills/loader.ts'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 export interface System {
   readonly house: House
   readonly team: Team
   readonly routeMessage: RouteMessage
-  readonly ollama: LLMProvider
+  readonly ollama: LLMGateway
   readonly toolRegistry: ToolRegistry
+  readonly skillStore: SkillStore
+  readonly skillsDir: string
   readonly removeAgent: (id: string) => boolean
   readonly removeRoom: (roomId: string) => boolean
   readonly addAgentToRoom: (agentId: string, roomId: string, invitedBy?: string) => Promise<void>
@@ -87,7 +94,8 @@ export const createSystem = (ollamaUrl?: string): System => {
   const resolveTag: ResolveTagFn = (tag) => team.listByTag(tag).map(a => a.id)
 
   const resolvedOllamaUrl = ollamaUrl ?? DEFAULTS.ollamaBaseUrl
-  const ollama = createOllamaProvider(resolvedOllamaUrl)
+  const ollamaRaw = createOllamaProvider(resolvedOllamaUrl)
+  const ollama = createLLMGateway(ollamaRaw)
   const toolCapabilityCache = createToolCapabilityCache(resolvedOllamaUrl)
 
   const houseCallbacks: HouseCallbacks = {
@@ -112,6 +120,7 @@ export const createSystem = (ollamaUrl?: string): System => {
   house.artifactTypes.register(pollArtifactType)
   house.artifactTypes.register(createFlowArtifactType(team))
   house.artifactTypes.register(documentArtifactType)
+
 
   // System-level membership operations
   const systemAddAgentToRoom = async (agentId: string, roomId: string, invitedBy?: string): Promise<void> => {
@@ -190,10 +199,39 @@ export const createSystem = (ollamaUrl?: string): System => {
   // Document tool — collaborative structured writing with streaming LLM output
   toolRegistry.register(createWriteDocumentSectionTool(house.artifacts))
 
+  // Skill system — file-based behavioral templates with bundled tools
+  const skillsDir = join(homedir(), '.samsinn', 'skills')
+  const skillStore = createSkillStore()
+
+  const getSkillsForRoom = (roomName: string): string => {
+    const skills = skillStore.forScope(roomName)
+    if (skills.length === 0) return ''
+    return skills.map(s => `[${s.name}] ${s.description}\n${s.body}`).join('\n\n---\n\n')
+  }
+
+  const refreshAllAgentTools = async (): Promise<void> => {
+    for (const agent of team.listByKind('ai')) {
+      const ai = agent as AIAgent
+      if (!ai.refreshTools) continue
+      const toolNames = ai.getTools() ?? toolRegistry.list().map(t => t.name)
+      const support = await buildToolSupport(
+        toolNames, toolRegistry, ai.getModel(),
+        { id: ai.id, name: ai.name, currentModel: () => ai.getModel() },
+        ollama, toolCapabilityCache,
+      )
+      ai.refreshTools(support)
+    }
+  }
+
+  toolRegistry.register(createWriteSkillTool(skillStore, skillsDir))
+  toolRegistry.register(createWriteToolTool(toolRegistry, skillStore, refreshAllAgentTools))
+  toolRegistry.register(createListSkillsTool(skillStore))
+
   const boundSpawnAIAgent = (config: AIAgentConfig, options?: SpawnOptions) =>
     spawnAIAgent(config, ollama, house, team, routeMessage, toolRegistry, {
       ...options,
       toolCapabilityCache,
+      getSkills: getSkillsForRoom,
     })
 
   const boundSpawnHumanAgent = async (config: HumanAgentConfig, send: TransportSend): Promise<HumanAgent> => {
@@ -203,7 +241,7 @@ export const createSystem = (ollamaUrl?: string): System => {
   }
 
   return {
-    house, team, routeMessage, ollama, toolRegistry,
+    house, team, routeMessage, ollama, toolRegistry, skillStore, skillsDir,
     removeAgent,
     removeRoom: systemRemoveRoom,
     addAgentToRoom: systemAddAgentToRoom,

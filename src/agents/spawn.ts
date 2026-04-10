@@ -75,7 +75,7 @@ const createToolExecutor = (
 // Uses an agentRef (filled after agent creation) so the lazy ToolContext
 // captures the agent's id/name without a circular dependency.
 
-interface AgentToolSupport {
+export interface AgentToolSupport {
   readonly toolExecutor?: ToolExecutor
   readonly toolDescriptions?: string
   readonly toolDefinitions?: ReadonlyArray<ToolDefinition>
@@ -103,6 +103,36 @@ const selectProtocol = async (
   return { toolExecutor: executor, toolDescriptions: formatToolDescriptions(availableTools) }
 }
 
+// Reusable tool support builder — used at spawn time and for runtime refresh.
+export const buildToolSupport = async (
+  toolNames: ReadonlyArray<string>,
+  registry: ToolRegistry,
+  model: string,
+  agentRef: { readonly id: string; readonly name: string; readonly currentModel?: () => string },
+  llmProvider: LLMProvider,
+  capabilityCache?: ToolCapabilityCache,
+  maxResultChars?: number,
+): Promise<AgentToolSupport> => {
+  if (toolNames.length === 0) return {}
+
+  const availableTools = toolNames
+    .map(name => registry.get(name))
+    .filter((t): t is Tool => t !== undefined)
+
+  if (availableTools.length === 0) return {}
+
+  const lazyContext: ToolContext = {
+    get callerId() { return agentRef.id },
+    get callerName() { return agentRef.name },
+    llm: (request) => callLLM(llmProvider, { ...request, model: agentRef.currentModel?.() ?? model }),
+    llmStream: (request) => streamLLM(llmProvider, { ...request, model: agentRef.currentModel?.() ?? model }),
+    maxResultChars,
+  }
+  const executor = createToolExecutor(registry, toolNames, lazyContext)
+
+  return selectProtocol(availableTools, executor, model, capabilityCache)
+}
+
 const resolveAgentTools = async (
   config: AIAgentConfig,
   llmProvider: LLMProvider,
@@ -113,28 +143,11 @@ const resolveAgentTools = async (
   const requestedTools = config.tools ?? toolRegistry?.list().map(t => t.name) ?? []
   if (!toolRegistry || requestedTools.length === 0) return {}
 
-  const availableTools = requestedTools
-    .map(name => toolRegistry.get(name))
-    .filter((t): t is Tool => t !== undefined)
-
-  if (availableTools.length < requestedTools.length) {
+  if (requestedTools.length > 0) {
     warnMissingTools(config.name, requestedTools, toolRegistry)
   }
 
-  if (availableTools.length === 0) return {}
-
-  // Late-binding context: agentRef is filled after createAIAgent returns.
-  // llm/llmStream use config.model (spawn-time value); do not track updateModel() calls.
-  const lazyContext: ToolContext = {
-    get callerId() { return agentRef.id },
-    get callerName() { return agentRef.name },
-    llm: (request) => callLLM(llmProvider, { ...request, model: config.model }),
-    llmStream: (request) => streamLLM(llmProvider, { ...request, model: config.model }),
-    maxResultChars: config.maxToolResultChars,
-  }
-  const toolExecutor = createToolExecutor(toolRegistry, requestedTools, lazyContext)
-
-  return selectProtocol(availableTools, toolExecutor, config.model, capabilityCache)
+  return buildToolSupport(requestedTools, toolRegistry, config.model, agentRef, llmProvider, capabilityCache, config.maxToolResultChars)
 }
 
 // --- Spawn AI Agent ---
@@ -142,6 +155,7 @@ const resolveAgentTools = async (
 export interface SpawnOptions {
   readonly overrideId?: string
   readonly toolCapabilityCache?: ToolCapabilityCache
+  readonly getSkills?: (roomName: string) => string
 }
 
 export const spawnAIAgent = async (
@@ -195,6 +209,7 @@ export const spawnAIAgent = async (
     getArtifactsForScope: (roomId: string) => house.artifacts.getForScope(roomId),
     getArtifactTypeDef: (type: string) => house.artifactTypes.get(type),
     getCompressedIds: (roomId: string) => house.getRoom(roomId)?.getCompressedIds() ?? new Set(),
+    getSkills: spawnOptions?.getSkills,
   }, spawnOptions?.overrideId)
 
   // Fill agentRef so the lazy ToolContext in resolveAgentTools resolves correctly

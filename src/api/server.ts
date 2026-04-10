@@ -216,6 +216,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
           wsManager.broadcast({ type: 'agent_removed', agentName: session.agent.name })
         }
         wsManager.wsConnections.delete(ws.data.sessionToken)
+        if (session) wsManager.unsubscribeOllamaMetrics(session.agent.id)
       },
     },
   })

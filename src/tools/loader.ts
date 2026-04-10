@@ -20,7 +20,7 @@ import { join, resolve, extname, basename } from 'node:path'
 import { homedir } from 'node:os'
 
 // Only letters, digits, underscores, hyphens — matches tool name conventions
-const VALID_NAME = /^[a-zA-Z0-9_-]+$/
+export const VALID_NAME = /^[a-zA-Z0-9_-]+$/
 
 export interface LoadResult {
   readonly loaded: ReadonlyArray<string>   // tool names successfully registered
@@ -28,7 +28,7 @@ export interface LoadResult {
   readonly errors: ReadonlyArray<string>   // files that threw during import
 }
 
-const isTool = (value: unknown): value is Tool => {
+export const isTool = (value: unknown): value is Tool => {
   if (!value || typeof value !== 'object') return false
   const t = value as Record<string, unknown>
   return (

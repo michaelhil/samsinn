@@ -2,7 +2,7 @@
 
 **A multi-agent collaboration system.** Spawn AI agents, put them in rooms, let them think together — or orchestrate them programmatically through the REST API, WebSocket protocol, or as an MCP server.
 
-> v0.5.14 — [Changelog](#changelog)
+> v0.6.0 — [Changelog](#changelog)
 
 ---
 
@@ -12,6 +12,7 @@
 - **Automate multi-step workflows** — define a Flow (ordered agent sequence) and trigger it with a single message
 - **Track tasks collaboratively** — agents and humans share a todo list per room; agents complete todos and record results
 - **Give agents tools** — agents can search the web, do math, remember facts across sessions, delegate subtasks, manage rooms, and query each other
+- **Self-extending agents** — agents create Skills (behavioral templates) and write new tools at runtime, making the system grow its own capabilities
 - **Embed in your own LLM workflow** — run headless as an MCP server; external LLMs orchestrate everything via 23 tools
 - **Integrate programmatically** — full REST API + WebSocket protocol for building your own UI or automation
 
@@ -127,6 +128,41 @@ Persistent memory survives restarts and is completely independent of the room me
 
 ---
 
+### Skills
+
+A skill is a reusable behavioral template stored as a markdown file. Skills tell agents *how to approach* a category of task — they shape reasoning, not just capability.
+
+Each skill is a directory under `~/.samsinn/skills/` containing a `SKILL.md` file (YAML frontmatter + markdown body) and an optional `tools/` subdirectory with bundled tool code:
+
+```
+~/.samsinn/skills/
+  data-analyst/
+    SKILL.md              ← behavioral instructions
+    tools/                ← optional bundled tools
+      analyze_csv.ts
+  code-reviewer/
+    SKILL.md
+```
+
+**SKILL.md format** (Claude Skills compatible):
+
+```markdown
+---
+name: data-analyst
+description: Use when asked to analyze data or metrics
+scope: [research-room]
+---
+
+When analyzing data, follow these steps:
+1. Identify the data source
+2. Formulate queries using available tools
+3. Summarize findings with citations
+```
+
+Skills are loaded at startup and injected into agent context as a dedicated `=== SKILLS ===` section. Scope controls which rooms see which skills — empty scope means global.
+
+**Runtime skill creation** — agents can create new skills (`write_skill`) and bundle tools with them (`write_tool`) at runtime. Generated skills persist as files and survive restarts.
+
 ### Tools
 
 Agents invoke tools using the `::TOOL::` syntax (or native function-calling on supported models):
@@ -201,6 +237,9 @@ Every agent can use these tools by listing them in its `tools` config field.
 | `set_room_prompt` | Update the room's shared instructions |
 | `post_to_room` | Post a message to a different room |
 | `get_room_history` | Recent messages from a room |
+| `write_skill` | Create a new skill (SKILL.md + directory) |
+| `write_tool` | Generate an executable tool inside a skill's tools/ dir |
+| `list_skills` | List all loaded skills with scope and bundled tools |
 
 Full documentation, parameters, and usage guidance: [`docs/tools.md`](docs/tools.md)
 
@@ -219,7 +258,7 @@ In the **Create Agent** modal (or via API), list tool names in the `tools` field
 
 ### External tools (filesystem-loaded)
 
-Drop a `.ts` file in `./tools/` (project-local) or `~/.samsinn/tools/` (user-global). It is loaded at startup and available to any agent that lists it by name. See [`docs/tools.md#adding-external-tools`](docs/tools.md#adding-external-tools).
+Drop a `.ts` file in `./tools/` (project-local) or `~/.samsinn/tools/` (user-global). It is loaded at startup and available to any agent that lists it by name. Tools can also be bundled with skills in `~/.samsinn/skills/<name>/tools/`. See [`docs/tools.md#adding-external-tools`](docs/tools.md#adding-external-tools).
 
 **Bundled in `tools/`:**
 
@@ -472,6 +511,8 @@ src/
       utility-tools.ts    — get_time, post_to_room, get_room_history
     format.ts             — Text-protocol tool formatting for system prompts
     loader.ts             — Filesystem tool discovery (./tools/, ~/.samsinn/tools/)
+  skills/
+    loader.ts             — Skill discovery, frontmatter parsing, bundled tool loading
   integrations/
     mcp/
       client.ts           — MCP client: consume external tool servers
@@ -552,7 +593,7 @@ Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapsh
 
 **Tool protocol** — agents using text-protocol models produce `::TOOL::` lines which are parsed and executed in a ReAct loop. Agents using native-capable models use structured tool calls. The `ToolCapabilityCache` detects capability once per model and caches the result. Tool results are truncated to 4,000 characters by default to prevent context overflow; this limit is configurable per agent via `maxToolResultChars` in `AIAgentConfig`.
 
-**LLM context structure** — every agent evaluation assembles: house rules → room prompt → agent system prompt → auto-generated context (room, flow, participants, todos, tools) → response format → history (old + `[NEW]` tagged recent messages). The `context-builder.ts` is the single source of truth for what agents see.
+**LLM context structure** — every agent evaluation assembles: house rules → room prompt → agent system prompt → skills (scope-matched behavioral templates) → auto-generated context (room, flow, participants, artifacts, tools) → response format → history (old + `[NEW]` tagged recent messages). The `context-builder.ts` is the single source of truth for what agents see.
 
 **External tools** — the `loadExternalTools()` function scans `./tools/`, `~/.samsinn/tools/`, and `SAMSINN_TOOLS_DIR` for `.ts` files with a default Tool or Tool[] export. Loaded before snapshot restore so restored agents have access to them. Conflicts with built-in tool names are silently skipped.
 
@@ -566,6 +607,7 @@ Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapsh
 
 | Version | Changes |
 |---|---|
+| v0.6.0 | File-based skills system (Claude Skills compatible SKILL.md format with bundled tools); runtime code generation (`write_skill`, `write_tool`, `list_skills`); dynamic tool resolution (`refreshTools` — agents gain new tools without respawning); dedicated `=== SKILLS ===` prompt section; fix: `ToolContext.llm` now tracks current model instead of spawn-time model |
 | v0.5.14 | Unified `AgentHistory` struct (rooms/DMs/incoming in one place); flush-on-pass (agents never re-evaluate passed messages); `ConcurrencyManager` extraction; snapshot migration framework; tool result truncation (4,000 char default, configurable); comprehensive file splitting (tools/built-in/, api/routes/, api/ws-commands/, mcp/tools/); config object consolidation; delivery-mode bug fix; graceful shutdown with eval drain |
 | v0.5.13 | 19 built-in tools, 16 external tools (memory/compute/web/research), structured tool descriptions with usage/returns fields, filesystem tool loader, `delegate` tool with todo integration |
 | v0.5.12 | Shared todo list per room: CRUD, WS sync, agent context injection, HTTP + MCP API |

@@ -1,12 +1,14 @@
 {
   "name": "samsinn",
-  "version": "0.5.14",
+  "version": "0.6.0",
   "description": "Multi-agent room communication system with delivery modes, flows, muting, directed addressing, and MCP server",
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
     "start": "bun run src/main.ts",
     "dev": "bun --watch src/main.ts",
+    "dev:remote": "OLLAMA_URL=http://192.168.0.222:11434 bun --watch src/main.ts",
+    "start:remote": "OLLAMA_URL=http://192.168.0.222:11434 bun run src/main.ts",
     "check": "tsc --noEmit",
     "test": "bun test",
     "test:unit": "bun test --filter '!Ollama'",

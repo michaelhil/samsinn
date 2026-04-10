@@ -492,6 +492,16 @@ const handleMessage = (raw: unknown) => {
       console.error('Server error:', msg.message)
       break
     }
+    case 'ollama_health': {
+      const health = (msg as { health: Record<string, unknown> }).health
+      updateOllamaHealthUI(health)
+      break
+    }
+    case 'ollama_metrics': {
+      const metrics = (msg as { metrics: Record<string, unknown> }).metrics
+      updateOllamaMetricsUI(metrics)
+      break
+    }
   }
 }
 
@@ -539,12 +549,16 @@ document.getElementById('btn-create-agent')!.onclick = async () => {
     const res = await fetch('/api/models')
     const data = await res.json() as { running: string[]; available: string[] }
     modelSelect.innerHTML = ''
+    const allModels = [...data.running, ...data.available]
+    // Prefer the lightest model as default: qwen3:4b > llama3.2 > first available
+    const preferredDefaults = ['llama3.2:latest', 'qwen3:4b', 'llama3.2:3b']
+    const defaultModel = preferredDefaults.find(p => allModels.includes(p)) ?? allModels[0] ?? ''
     if (data.running.length > 0) {
       const group = document.createElement('optgroup')
       group.label = 'Running'
       for (const m of data.running) {
         const opt = document.createElement('option')
-        opt.value = m; opt.textContent = m; opt.selected = data.running.indexOf(m) === 0
+        opt.value = m; opt.textContent = m; opt.selected = m === defaultModel
         group.appendChild(opt)
       }
       modelSelect.appendChild(group)
@@ -554,12 +568,12 @@ document.getElementById('btn-create-agent')!.onclick = async () => {
       group.label = 'Available'
       for (const m of data.available) {
         const opt = document.createElement('option')
-        opt.value = m; opt.textContent = m
+        opt.value = m; opt.textContent = m; opt.selected = m === defaultModel
         group.appendChild(opt)
       }
       modelSelect.appendChild(group)
     }
-    if (data.running.length === 0 && data.available.length === 0) {
+    if (allModels.length === 0) {
       modelSelect.innerHTML = '<option value="">No models found</option>'
     }
   } catch {
@@ -663,6 +677,135 @@ btnRoomPrompt.onclick = () => {
     'PUT',
     (data) => ((data.profile as Record<string, unknown>)?.roomPrompt as string) ?? '',
   )
+}
+
+// === Ollama Dashboard ===
+
+const ollamaStatusDot = document.getElementById('ollama-status-dot') as HTMLElement
+const ollamaDashboard = document.getElementById('ollama-dashboard') as HTMLDialogElement
+const ollamaDashboardClose = document.getElementById('ollama-dashboard-close') as HTMLButtonElement
+
+const statusColors: Record<string, string> = {
+  healthy: 'bg-green-500',
+  degraded: 'bg-yellow-400',
+  down: 'bg-red-500',
+}
+
+const updateOllamaHealthUI = (health: Record<string, unknown>): void => {
+  const status = health.status as string ?? 'down'
+  ollamaStatusDot.className = `inline-block w-2 h-2 rounded-full ${statusColors[status] ?? 'bg-gray-400'}`
+
+  // Update dashboard if open
+  const dotEl = document.getElementById('od-status-dot')
+  const textEl = document.getElementById('od-status-text')
+  const latencyEl = document.getElementById('od-latency')
+  if (dotEl) dotEl.className = `inline-block w-3 h-3 rounded-full ${statusColors[status] ?? 'bg-gray-400'}`
+  if (textEl) textEl.textContent = status.charAt(0).toUpperCase() + status.slice(1)
+  if (latencyEl) latencyEl.textContent = `${health.latencyMs ?? 0}ms`
+
+  // Update models
+  const modelsEl = document.getElementById('od-models')
+  const loaded = health.loadedModels as Array<{ name: string; sizeVram: number; expiresAt?: string }> ?? []
+  if (modelsEl) {
+    if (loaded.length === 0) {
+      modelsEl.textContent = 'No models loaded'
+    } else {
+      modelsEl.innerHTML = loaded.map(m => {
+        const sizeMb = Math.round(m.sizeVram / 1e6)
+        const unloadBtn = `<button class="od-unload text-xs text-red-400 hover:text-red-600 ml-2" data-model="${m.name}">unload</button>`
+        return `<div class="flex items-center justify-between py-0.5"><span class="font-mono text-xs">${m.name}</span><span class="text-xs text-gray-400">${sizeMb}MB${unloadBtn}</span></div>`
+      }).join('')
+      // Wire unload buttons
+      modelsEl.querySelectorAll('.od-unload').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const model = (btn as HTMLElement).dataset.model
+          if (model) {
+            await fetch(`/api/ollama/models/${encodeURIComponent(model)}/unload`, { method: 'POST' })
+          }
+        })
+      })
+    }
+  }
+}
+
+const updateOllamaMetricsUI = (metrics: Record<string, unknown>): void => {
+  const tpsEl = document.getElementById('od-tps')
+  const p50El = document.getElementById('od-p50')
+  const errorsEl = document.getElementById('od-errors')
+  const queueEl = document.getElementById('od-queue')
+  const concurrentEl = document.getElementById('od-concurrent')
+  const circuitEl = document.getElementById('od-circuit')
+  const requestsEl = document.getElementById('od-requests')
+
+  if (tpsEl) tpsEl.textContent = `${(metrics.avgTokensPerSecond as number ?? 0).toFixed(1)}`
+  if (p50El) {
+    const ms = metrics.p50Latency as number ?? 0
+    p50El.textContent = ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+  }
+  if (errorsEl) errorsEl.textContent = `${((metrics.errorRate as number ?? 0) * 100).toFixed(0)}%`
+  if (queueEl) queueEl.textContent = `${metrics.queueDepth ?? 0}`
+  if (concurrentEl) concurrentEl.textContent = `${metrics.concurrentRequests ?? 0}`
+  if (circuitEl) {
+    const state = metrics.circuitState as string ?? 'closed'
+    circuitEl.textContent = state
+    circuitEl.className = `text-lg font-semibold ${state === 'closed' ? 'text-green-600' : state === 'open' ? 'text-red-600' : 'text-yellow-500'}`
+  }
+  if (requestsEl) requestsEl.textContent = `${metrics.requestCount ?? 0}`
+}
+
+// Dashboard open/close
+document.getElementById('btn-ollama-dashboard')!.onclick = async () => {
+  ollamaDashboard.showModal()
+  send({ type: 'subscribe_ollama_metrics' } as unknown as Parameters<typeof send>[0])
+
+  // Fetch initial data
+  try {
+    const [healthRes, metricsRes, configRes] = await Promise.all([
+      fetch('/api/ollama/health'),
+      fetch('/api/ollama/metrics'),
+      fetch('/api/ollama/config'),
+    ])
+    if (healthRes.ok) updateOllamaHealthUI(await healthRes.json() as Record<string, unknown>)
+    if (metricsRes.ok) updateOllamaMetricsUI(await metricsRes.json() as Record<string, unknown>)
+    if (configRes.ok) {
+      const cfg = await configRes.json() as Record<string, unknown>
+      const cfgConcurrent = document.getElementById('od-cfg-concurrent') as HTMLInputElement
+      const cfgQueue = document.getElementById('od-cfg-queue') as HTMLInputElement
+      const cfgTimeout = document.getElementById('od-cfg-timeout') as HTMLInputElement
+      const cfgKeepalive = document.getElementById('od-cfg-keepalive') as HTMLInputElement
+      if (cfgConcurrent) cfgConcurrent.value = String(cfg.maxConcurrent ?? 2)
+      if (cfgQueue) cfgQueue.value = String(cfg.maxQueueDepth ?? 6)
+      if (cfgTimeout) cfgTimeout.value = String(cfg.queueTimeoutMs ?? 30000)
+      if (cfgKeepalive) cfgKeepalive.value = String(cfg.keepAlive ?? '30m')
+    }
+  } catch { /* ignore fetch errors on dashboard open */ }
+}
+
+ollamaDashboardClose.onclick = () => {
+  ollamaDashboard.close()
+  send({ type: 'unsubscribe_ollama_metrics' } as unknown as Parameters<typeof send>[0])
+}
+
+ollamaDashboard.addEventListener('close', () => {
+  send({ type: 'unsubscribe_ollama_metrics' } as unknown as Parameters<typeof send>[0])
+})
+
+// Config save
+document.getElementById('od-cfg-save')!.onclick = async () => {
+  const body: Record<string, unknown> = {}
+  const cfgConcurrent = document.getElementById('od-cfg-concurrent') as HTMLInputElement
+  const cfgQueue = document.getElementById('od-cfg-queue') as HTMLInputElement
+  const cfgTimeout = document.getElementById('od-cfg-timeout') as HTMLInputElement
+  const cfgKeepalive = document.getElementById('od-cfg-keepalive') as HTMLInputElement
+  if (cfgConcurrent?.value) body.maxConcurrent = parseInt(cfgConcurrent.value)
+  if (cfgQueue?.value) body.maxQueueDepth = parseInt(cfgQueue.value)
+  if (cfgTimeout?.value) body.queueTimeoutMs = parseInt(cfgTimeout.value)
+  if (cfgKeepalive?.value) body.keepAlive = cfgKeepalive.value
+  await fetch('/api/ollama/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 }
 
 // === Startup ===

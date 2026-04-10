@@ -9,7 +9,7 @@ import { createTeam } from '../agents/team.ts'
 import { createAIAgent } from '../agents/ai-agent.ts'
 import { createHumanAgent } from '../agents/human-agent.ts'
 import { createTaskListArtifactType } from '../core/artifact-types/task-list.ts'
-import type { DeliverFn, LLMProvider, Message, RouteMessage, WSOutbound } from '../core/types.ts'
+import type { DeliverFn, Message, RouteMessage, WSOutbound } from '../core/types.ts'
 import type { System } from '../main.ts'
 import type { ClientSession, WSManager } from './ws-handler.ts'
 
@@ -17,10 +17,18 @@ import type { ClientSession, WSManager } from './ws-handler.ts'
 
 const noopDeliver: DeliverFn = () => {}
 
-const makeLLMProvider = (): LLMProvider => ({
+const makeLLMProvider = () => ({
   chat: async () => ({ content: '::PASS::', generationMs: 0, tokensUsed: { prompt: 0, completion: 0 } }),
   models: async () => [],
   runningModels: async () => [],
+  getHealth: () => ({ status: 'healthy' as const, latencyMs: 0, loadedModels: [], availableModels: [], lastCheckedAt: 0 }),
+  getMetrics: () => ({ requestCount: 0, errorCount: 0, errorRate: 0, p50Latency: 0, p95Latency: 0, avgTokensPerSecond: 0, queueDepth: 0, concurrentRequests: 0, circuitState: 'closed' as const, shedCount: 0, windowMs: 300000 }),
+  getConfig: () => ({}),
+  updateConfig: () => {},
+  loadModel: async () => {},
+  unloadModel: async () => {},
+  onHealthChange: () => {},
+  dispose: () => {},
 })
 
 const makeSystem = (): System => {

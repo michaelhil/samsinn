@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs'
 import { loadSnapshot, restoreFromSnapshot, createAutoSaver } from './core/snapshot.ts'
 import { resolve } from 'node:path'
 import { loadExternalTools } from './tools/loader.ts'
+import { loadSkills } from './skills/loader.ts'
 import { asAIAgent } from './agents/shared.ts'
 
 const DRAIN_TIMEOUT_MS = 5_000
@@ -35,8 +36,9 @@ export const bootstrap = async (): Promise<void> => {
   console.log(`Samsinn v${pkg.version}${headless ? ' (headless)' : ''}`)
   console.log(`Ollama: ${ollamaUrl}`)
 
-  // Load filesystem tools before snapshot restore so restored agents get them
+  // Load filesystem tools and skills before snapshot restore so restored agents get them
   await loadExternalTools(system.toolRegistry)
+  await loadSkills(system.skillsDir, system.skillStore, system.toolRegistry)
 
   // Restore from snapshot if available
   const snapshotPath = resolve(import.meta.dir, '../data/snapshot.json')

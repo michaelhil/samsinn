@@ -18,21 +18,36 @@ interface OllamaChatResponse {
   readonly message: OllamaMessage
   readonly done: boolean
   readonly total_duration?: number
+  readonly load_duration?: number
   readonly prompt_eval_count?: number
+  readonly prompt_eval_duration?: number
   readonly eval_count?: number
+  readonly eval_duration?: number
 }
 
 interface OllamaTagsResponse {
   readonly models: ReadonlyArray<{ readonly name: string }>
 }
 
+export interface OllamaPsModel {
+  readonly name: string
+  readonly size: number
+  readonly size_vram: number
+  readonly details?: {
+    readonly parameter_size?: string
+    readonly quantization_level?: string
+  }
+  readonly expires_at?: string
+}
+
 interface OllamaPsResponse {
-  readonly models: ReadonlyArray<{ readonly name: string; readonly size: number }>
+  readonly models: ReadonlyArray<OllamaPsModel>
 }
 
 const CHAT_TIMEOUT_MS = 300_000 // 5 minutes — large models can be slow
 const TAGS_TIMEOUT_MS = 10_000
 const STREAM_IDLE_TIMEOUT_MS = 30_000  // abort if no chunk arrives within 30s
+const DEFAULT_NUM_CTX = 4096  // enough room for system prompt + 10 history messages + tools
 
 const fetchWithTimeout = async (
   url: string,
@@ -68,14 +83,25 @@ const validateChatResponse = (data: unknown): OllamaChatResponse => {
 // This is an Ollama-specific concern — the provider contract is clean text out.
 const TEMPLATE_TOKEN_RE = /(<\|[^|>]*\|>|\[INST\]|\[\/INST\]|<<SYS>>|<<\/SYS>>|<\|start_header_id\|>.*?<\|end_header_id\|>)/g
 
+const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/g
+
 const sanitizeContent = (raw: string): string => {
   let s = raw.replace(TEMPLATE_TOKEN_RE, '')
+  // Strip qwen3 thinking blocks — they add latency and noise to responses
+  s = s.replace(THINK_BLOCK_RE, '')
   // Strip spurious role-label prefix the model sometimes emits before its response
   s = s.replace(/^(assistant|user|system)\s*[:\n]/i, '')
   return s.trim()
 }
 
-export const createOllamaProvider = (baseUrl: string): LLMProvider => {
+export interface OllamaProviderExtended extends LLMProvider {
+  readonly runningModelsDetailed: () => Promise<ReadonlyArray<OllamaPsModel>>
+  readonly loadModel: (name: string, keepAlive?: string) => Promise<void>
+  readonly unloadModel: (name: string) => Promise<void>
+  readonly baseUrl: string
+}
+
+export const createOllamaProvider = (baseUrl: string): OllamaProviderExtended => {
   const chat = async (request: ChatRequest): Promise<ChatResponse> => {
     const startMs = performance.now()
 
@@ -88,16 +114,18 @@ export const createOllamaProvider = (baseUrl: string): LLMProvider => {
       stream: false,
     }
 
-    if (request.temperature !== undefined) {
-      body.options = { temperature: request.temperature }
+    if ((request as unknown as Record<string, unknown>).keepAlive !== undefined) {
+      body.keep_alive = (request as unknown as Record<string, unknown>).keepAlive
     }
 
-    if (request.maxTokens !== undefined) {
-      body.options = {
-        ...(body.options as Record<string, unknown> | undefined),
-        num_predict: request.maxTokens,
-      }
+    const options: Record<string, unknown> = {
+      num_ctx: request.numCtx ?? DEFAULT_NUM_CTX,
     }
+
+    if (request.temperature !== undefined) options.temperature = request.temperature
+    if (request.maxTokens !== undefined) options.num_predict = request.maxTokens
+
+    body.options = options
 
     if (request.jsonMode) {
       body.format = 'json'
@@ -132,14 +160,23 @@ export const createOllamaProvider = (baseUrl: string): LLMProvider => {
         }))
       : undefined
 
+    const evalCount = data.eval_count ?? 0
+    const evalDurationNs = data.eval_duration ?? 0
+    const tokensPerSecond = evalDurationNs > 0 ? (evalCount / evalDurationNs) * 1e9 : undefined
+    const promptEvalMs = data.prompt_eval_duration !== undefined ? Math.round(data.prompt_eval_duration / 1e6) : undefined
+    const modelLoadMs = data.load_duration !== undefined ? Math.round(data.load_duration / 1e6) : undefined
+
     return {
       content: sanitizeContent(data.message.content),
       generationMs,
       tokensUsed: {
         prompt: data.prompt_eval_count ?? 0,
-        completion: data.eval_count ?? 0,
+        completion: evalCount,
       },
       toolCalls: nativeToolCalls,
+      tokensPerSecond,
+      promptEvalMs,
+      modelLoadMs,
     }
   }
 
@@ -149,10 +186,12 @@ export const createOllamaProvider = (baseUrl: string): LLMProvider => {
       messages: request.messages.map(m => ({ role: m.role, content: m.content })),
       stream: true,
     }
-    if (request.temperature !== undefined) body.options = { temperature: request.temperature }
-    if (request.maxTokens !== undefined) {
-      body.options = { ...(body.options as Record<string, unknown> | undefined), num_predict: request.maxTokens }
+    const streamOpts: Record<string, unknown> = {
+      num_ctx: request.numCtx ?? DEFAULT_NUM_CTX,
     }
+    if (request.temperature !== undefined) streamOpts.temperature = request.temperature
+    if (request.maxTokens !== undefined) streamOpts.num_predict = request.maxTokens
+    body.options = streamOpts
 
     const controller = new AbortController()
     let idleTimer = setTimeout(() => controller.abort(), STREAM_IDLE_TIMEOUT_MS)
@@ -230,6 +269,11 @@ export const createOllamaProvider = (baseUrl: string): LLMProvider => {
   }
 
   const runningModels = async (): Promise<string[]> => {
+    const data = await runningModelsDetailed()
+    return data.map(m => m.name)
+  }
+
+  const runningModelsDetailed = async (): Promise<ReadonlyArray<OllamaPsModel>> => {
     const response = await fetchWithTimeout(
       `${baseUrl}/api/ps`,
       {},
@@ -242,8 +286,43 @@ export const createOllamaProvider = (baseUrl: string): LLMProvider => {
     }
 
     const data = (await response.json()) as OllamaPsResponse
-    return data.models.map(m => m.name)
+    return data.models
   }
 
-  return { chat, stream, models, runningModels }
+  const loadModel = async (name: string, keepAlive = '30m'): Promise<void> => {
+    const response = await fetchWithTimeout(
+      `${baseUrl}/api/generate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: name, keep_alive: keepAlive }),
+      },
+      CHAT_TIMEOUT_MS,
+    )
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`Ollama load model error ${response.status}: ${text}`)
+    }
+    // Consume response body
+    await response.text()
+  }
+
+  const unloadModel = async (name: string): Promise<void> => {
+    const response = await fetchWithTimeout(
+      `${baseUrl}/api/generate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: name, keep_alive: 0 }),
+      },
+      TAGS_TIMEOUT_MS,
+    )
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`Ollama unload model error ${response.status}: ${text}`)
+    }
+    await response.text()
+  }
+
+  return { chat, stream, models, runningModels, runningModelsDetailed, loadModel, unloadModel, baseUrl }
 }

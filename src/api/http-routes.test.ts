@@ -8,7 +8,7 @@ import { createHouse } from '../core/house.ts'
 import { createTeam } from '../agents/team.ts'
 import { createToolRegistry } from '../core/tool-registry.ts'
 import { createTaskListArtifactType } from '../core/artifact-types/task-list.ts'
-import type { DeliverFn, LLMProvider, WSOutbound } from '../core/types.ts'
+import type { DeliverFn, WSOutbound } from '../core/types.ts'
 import type { System } from '../main.ts'
 
 // === Helpers ===
@@ -22,10 +22,18 @@ const makeSystem = (): System => {
   house.artifactTypes.register(createTaskListArtifactType(house.artifacts))
   const team = createTeam()
   const toolRegistry = createToolRegistry()
-  const ollama: LLMProvider = {
+  const ollama = {
     chat: async () => { throw new Error('Not available in tests') },
     models: async () => [],
     runningModels: async () => [],
+    getHealth: () => ({ status: 'healthy' as const, latencyMs: 0, loadedModels: [], availableModels: [], lastCheckedAt: 0 }),
+    getMetrics: () => ({ requestCount: 0, errorCount: 0, errorRate: 0, p50Latency: 0, p95Latency: 0, avgTokensPerSecond: 0, queueDepth: 0, concurrentRequests: 0, circuitState: 'closed' as const, shedCount: 0, windowMs: 300000 }),
+    getConfig: () => ({}),
+    updateConfig: () => {},
+    loadModel: async () => {},
+    unloadModel: async () => {},
+    onHealthChange: () => {},
+    dispose: () => {},
   }
   return {
     house, team, toolRegistry, ollama,

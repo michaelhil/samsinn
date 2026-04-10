@@ -5,11 +5,13 @@ export const houseRoutes: RouteEntry[] = [
   {
     method: 'GET',
     pattern: /^\/health$/,
-    handler: async (_req, _match, { system }) => {
-      let ollamaOk = false
-      try { await system.ollama.models(); ollamaOk = true } catch { /* offline */ }
+    handler: (_req, _match, { system }) => {
+      const health = system.ollama.getHealth()
       return json({
-        status: 'ok', ollama: ollamaOk,
+        status: 'ok',
+        ollama: health.status !== 'down',
+        ollamaStatus: health.status,
+        ollamaLatencyMs: health.latencyMs,
         rooms: system.house.listAllRooms().length,
         agents: system.team.listAgents().length,
       })

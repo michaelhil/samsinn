@@ -120,6 +120,7 @@ export interface BuildContextDeps {
   readonly responseFormat?: string
   readonly history: AgentHistory
   readonly toolDescriptions?: string
+  readonly getSkills?: (roomName: string) => string
   readonly historyLimit: number
   readonly resolveName: (senderId: string) => string
   readonly getArtifactsForScope?: (roomId: string) => ReadonlyArray<Artifact>
@@ -204,6 +205,14 @@ const buildSystemMessage = (
 
   sections.push(`=== YOUR IDENTITY ===\n${deps.systemPrompt}`)
 
+  if (deps.getSkills) {
+    const roomName = roomCtx?.profile.name ?? ''
+    const skillsSection = deps.getSkills(roomName)
+    if (skillsSection) {
+      sections.push(`=== SKILLS ===\n${skillsSection}`)
+    }
+  }
+
   const contextLines: string[] = []
 
   if (roomCtx) {
@@ -260,11 +269,22 @@ const buildSystemMessage = (
   return sections.join('\n\n')
 }
 
+// === Token estimation ===
+// Rough heuristic: ~4 characters per token for English text.
+// Tool definitions with JSON schema are denser; this is a conservative estimate.
+
+export const estimateTokens = (text: string): number => Math.ceil(text.length / 4)
+
 // === Build full LLM context ===
+
+// Default context budget: 2500 tokens for messages, leaving ~1000 for native tool definitions
+// and ~500 for generation, within 4096 num_ctx
+const DEFAULT_MAX_CONTEXT_TOKENS = 2500
 
 export const buildContext = (
   deps: BuildContextDeps,
   triggerRoomId: string,
+  maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
 ): ContextResult => {
   const flushIds = new Set<string>()
 
@@ -280,14 +300,48 @@ export const buildContext = (
   const fresh = deps.history.incoming.filter(m => m.roomId === triggerRoomId)
   const roomCompressedIds = deps.getCompressedIds?.(triggerRoomId)
 
+  // Format all candidate messages
+  const formattedOld: ChatRequest['messages'][number][] = []
   for (const msg of old) {
     const formatted = formatMessage(msg, '', deps.agentId, deps.resolveName, roomCompressedIds)
-    if (formatted) chatMessages.push(formatted)
+    if (formatted) formattedOld.push(formatted)
   }
+
+  const formattedFresh: Array<{ formatted: ChatRequest['messages'][number]; id: string }> = []
   for (const msg of fresh) {
     const formatted = formatMessage(msg, '[NEW] ', deps.agentId, deps.resolveName, roomCompressedIds)
-    if (formatted) chatMessages.push(formatted)
-    flushIds.add(msg.id)
+    if (formatted) formattedFresh.push({ formatted, id: msg.id })
+  }
+
+  // Context budget: system + fresh messages are mandatory; trim old messages to fit
+  const systemTokens = estimateTokens(systemContent)
+  const freshTokens = formattedFresh.reduce((sum, f) => sum + estimateTokens(f.formatted.content), 0)
+  const budgetForOld = maxContextTokens - systemTokens - freshTokens
+
+  let trimmedOld = formattedOld
+  if (budgetForOld > 0) {
+    // Trim from oldest (front) until within budget
+    let oldTokens = formattedOld.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+    while (trimmedOld.length > 0 && oldTokens > budgetForOld) {
+      const removed = trimmedOld.shift()
+      if (removed) oldTokens -= estimateTokens(removed.content)
+    }
+    if (trimmedOld.length < formattedOld.length) {
+      const dropped = formattedOld.length - trimmedOld.length
+      console.log(`[${deps.agentId.slice(0, 8)}] Context trimmed: dropped ${dropped} old messages (~${systemTokens + freshTokens + budgetForOld} → ~${maxContextTokens} tokens)`)
+    }
+  } else {
+    // System + fresh alone exceed budget — skip all old messages
+    trimmedOld = []
+    if (formattedOld.length > 0) {
+      console.log(`[${deps.agentId.slice(0, 8)}] Context budget exceeded by system+fresh alone — all old messages dropped`)
+    }
+  }
+
+  chatMessages.push(...trimmedOld)
+  for (const f of formattedFresh) {
+    chatMessages.push(f.formatted)
+    flushIds.add(f.id)
   }
 
   return {

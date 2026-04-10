@@ -50,6 +50,7 @@ export interface AIAgentOptions {
   readonly getArtifactsForScope?: (roomId: string) => ReadonlyArray<Artifact>
   readonly getArtifactTypeDef?: (type: string) => ArtifactTypeDefinition | undefined
   readonly getCompressedIds?: (roomId: string) => ReadonlySet<string>
+  readonly getSkills?: (roomName: string) => string
 }
 
 // === Factory ===
@@ -76,14 +77,15 @@ export const createAIAgent = (
   let currentModel: string = config.model
   const historyLimit = config.historyLimit ?? DEFAULTS.historyLimit
   const maxToolIterations = config.maxToolIterations ?? 5
-  const toolExecutor = options?.toolExecutor
-  const toolDescriptions = options?.toolDescriptions
-  const toolDefinitions = options?.toolDefinitions
+  let toolExecutor = options?.toolExecutor
+  let toolDescriptions = options?.toolDescriptions
+  let toolDefinitions = options?.toolDefinitions
   const getHousePrompt = options?.getHousePrompt
   const getResponseFormat = options?.getResponseFormat
   const getArtifactsForScope = options?.getArtifactsForScope
   const getArtifactTypeDef = options?.getArtifactTypeDef
   const getCompressedIds = options?.getCompressedIds
+  const getSkills = options?.getSkills
 
   // Agent-level compressed IDs — tracks messages replaced by LLM summaries.
   // Separate from room-level compressedIds (which tracks messages pruned by messageLimit).
@@ -112,6 +114,7 @@ export const createAIAgent = (
     resolveName,
     getArtifactsForScope,
     getArtifactTypeDef,
+    getSkills,
     // Merge room-level pruned IDs with agent-level compression IDs
     getCompressedIds: (roomId: string) => {
       const roomIds = getCompressedIds?.(roomId)
@@ -122,6 +125,11 @@ export const createAIAgent = (
   })
 
   // --- Evaluation loop: per-room generation with pending queue ---
+
+  // After an agent responds (not pass), delay pending re-evaluation by this amount.
+  // This lets other agents' responses coalesce into a single re-evaluation rather than
+  // triggering N separate evals. Major reduction in LLM calls for broadcast rooms.
+  const EVAL_COOLDOWN_MS = 500
 
   const tryEvaluate = (triggerRoomId: string): void => {
     if (cm.isGenerating(triggerRoomId)) {
@@ -140,12 +148,15 @@ export const createAIAgent = (
     // epoch guards: each cancelGeneration() increments generationEpoch so stale
     // in-flight results from a prior generation cycle are silently discarded.
     const run = async (): Promise<void> => {
+      let wasRespond = false
       try {
         const { decision, flushInfo } = await evaluate(
           contextResult, evalConfig, llmProvider, toolExecutor, maxToolIterations,
           triggerRoomId, toolDefinitions, inReplyTo,
         )
         if (!cm.isEpochCurrent(epoch)) return  // cancelled — discard stale result
+
+        wasRespond = decision.response.action === 'respond'
 
         // Flush incoming always — on both respond and pass.
         // On pass, the agent has consciously evaluated these messages; they belong in history.
@@ -158,7 +169,14 @@ export const createAIAgent = (
         if (cm.isEpochCurrent(epoch)) {
           cm.endGeneration(triggerRoomId)
           if (cm.consumePending(triggerRoomId)) {
-            tryEvaluate(triggerRoomId)
+            // After a respond, delay re-evaluation to let other agents' messages coalesce
+            if (wasRespond) {
+              setTimeout(() => {
+                if (cm.isEpochCurrent(epoch)) tryEvaluate(triggerRoomId)
+              }, EVAL_COOLDOWN_MS)
+            } else {
+              tryEvaluate(triggerRoomId)
+            }
           }
         }
       }
@@ -322,5 +340,10 @@ Respond with only the summary — no preamble or explanation.`
     getTools: () => config.tools,
     getConfig: () => ({ ...config, model: currentModel, systemPrompt: currentSystemPrompt }),
     cancelGeneration: cm.cancelAll,
+    refreshTools: (support) => {
+      if (support.toolExecutor !== undefined) toolExecutor = support.toolExecutor
+      if (support.toolDescriptions !== undefined) toolDescriptions = support.toolDescriptions
+      if (support.toolDefinitions !== undefined) toolDefinitions = support.toolDefinitions
+    },
   }
 }
