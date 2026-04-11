@@ -52,6 +52,8 @@ export interface SystemSnapshot {
   readonly rooms: ReadonlyArray<RoomSnapshot>
   readonly agents: ReadonlyArray<AgentSnapshot>
   readonly artifacts: ReadonlyArray<Artifact>
+  readonly ollamaUrls?: ReadonlyArray<string>
+  readonly ollamaUrl?: string
 }
 
 // --- Minimal System interface for serialization ---
@@ -70,6 +72,10 @@ interface SerializableSystem {
   readonly team: {
     readonly listAgents: () => ReadonlyArray<Agent>
     readonly getAgent: (idOrName: string) => Agent | undefined
+  }
+  readonly ollamaUrls?: {
+    readonly list: () => string[]
+    readonly getCurrent: () => string
   }
 }
 
@@ -121,6 +127,10 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
     rooms,
     agents,
     artifacts: [...artifacts],
+    ...(system.ollamaUrls ? {
+      ollamaUrls: system.ollamaUrls.list(),
+      ollamaUrl: system.ollamaUrls.getCurrent(),
+    } : {}),
   }
 }
 
@@ -177,6 +187,10 @@ interface RestorableSystem {
   readonly team?: {
     readonly getAgent: (idOrName: string) => { readonly id: string; readonly join: (room: Room) => Promise<void> } | undefined
   }
+  readonly ollamaUrls?: {
+    readonly add: (url: string) => void
+    readonly setCurrent: (url: string) => void
+  }
 }
 
 export const restoreFromSnapshot = async (
@@ -219,6 +233,12 @@ export const restoreFromSnapshot = async (
 
   // 5. Restore artifacts (all types, system-level)
   system.house.artifacts.restore(snapshot.artifacts ?? [])
+
+  // 6. Restore saved Ollama URLs
+  if (system.ollamaUrls && snapshot.ollamaUrls) {
+    for (const url of snapshot.ollamaUrls) system.ollamaUrls.add(url)
+    if (snapshot.ollamaUrl) system.ollamaUrls.setCurrent(snapshot.ollamaUrl)
+  }
 }
 
 // --- Auto-saver ---

@@ -1,4 +1,4 @@
-import { json, parseBody } from '../http-routes.ts'
+import { json, errorResponse, parseBody } from '../http-routes.ts'
 import type { RouteEntry } from './types.ts'
 
 export const houseRoutes: RouteEntry[] = [
@@ -70,6 +70,37 @@ export const houseRoutes: RouteEntry[] = [
         housePrompt: system.house.getHousePrompt(),
         responseFormat: system.house.getResponseFormat(),
       })
+    },
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/ollama\/urls$/,
+    handler: (_req, _match, { system }) =>
+      json({ current: system.ollamaUrls.getCurrent(), saved: system.ollamaUrls.list() }),
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/ollama\/urls$/,
+    handler: async (req, _match, { system }) => {
+      const body = await parseBody(req)
+      if (typeof body.url === 'string') {
+        system.ollamaUrls.setCurrent(body.url)
+        return json({ current: system.ollamaUrls.getCurrent(), saved: system.ollamaUrls.list() })
+      }
+      return errorResponse('url is required')
+    },
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/ollama\/urls$/,
+    handler: async (req, _match, { system }) => {
+      const body = await parseBody(req)
+      if (typeof body.url === 'string') {
+        if (body.url === system.ollamaUrls.getCurrent()) return errorResponse('Cannot delete the active URL')
+        system.ollamaUrls.remove(body.url)
+        return json({ saved: system.ollamaUrls.list() })
+      }
+      return errorResponse('url is required')
     },
   },
 ]

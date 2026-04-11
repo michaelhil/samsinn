@@ -7,7 +7,7 @@
 
 import { createWSClient, type WSClient } from './ws-client.ts'
 import {
-  renderRoomTabs,
+  renderRooms,
   renderAgents,
   renderMessage,
   renderArtifacts,
@@ -19,7 +19,7 @@ import {
   type ArtifactInfo,
   type ArtifactAction,
 } from './ui-renderer.ts'
-import { openTextEditorModal } from './modal.ts'
+import { openTextEditorModal, createModal, createButtonRow, createTextarea } from './modal.ts'
 import { createWorkspace } from './workspace.ts'
 
 // Lazy-loaded modals — only fetched on first use
@@ -81,9 +81,12 @@ const roomMembers = new Map<string, Set<string>>()  // roomId → Set<agentId>
 // === DOM refs ===
 
 const $ = (sel: string) => document.querySelector(sel)!
-const roomTabs = $('#room-tabs') as HTMLElement
-const roomTabsBar = $('#room-tabs-bar') as HTMLElement
+const roomList = $('#room-list') as HTMLElement
+const roomHeader = $('#room-header') as HTMLElement
+const roomNameEl = $('#room-name') as HTMLElement
 const roomInfoBar = $('#room-info-bar') as HTMLElement
+const roomsToggle = $('#rooms-toggle') as HTMLElement
+const roomsHeader = $('#rooms-header') as HTMLElement
 const agentList = $('#agent-list') as HTMLElement
 const noRoomState = $('#no-room-state') as HTMLElement
 const chatArea = $('#chat-area') as HTMLElement
@@ -138,12 +141,14 @@ const pinnedMessageData = new Map<string, { senderId: string; content: string; s
 
 const send = (data: unknown) => client?.send(data)
 
-const handleLeaveRoom = (roomId: string): void => {
-  const room = rooms.get(roomId)
-  if (!room) return
-  send({ type: 'remove_from_room', roomName: room.name, agentName: myName })
+const handleDeleteRoom = (roomId: string, roomName: string): void => {
+  if (!confirm(`Delete room "${roomName}"? This cannot be undone.`)) return
+  send({ type: 'delete_room', roomName })
 }
-const refreshRooms = () => renderRoomTabs(roomTabs, rooms, selectedRoomId, pausedRooms, selectRoom, handleLeaveRoom)
+const refreshRooms = () => {
+  renderRooms(roomList, rooms, selectedRoomId, pausedRooms, selectRoom, handleDeleteRoom)
+  roomsToggle.textContent = `▾ Rooms (${rooms.size})`
+}
 
 const refreshAgents = () => {
   const room = rooms.get(selectedRoomId)
@@ -276,7 +281,59 @@ settingsHeader.onclick = () => {
   settingsToggle.textContent = nowHidden ? '▸ Settings' : '▾ Settings'
 }
 
+// --- Ollama URL management ---
+const ollamaUrlSelect = $('#ollama-url-select') as HTMLSelectElement
+const ollamaUrlInput = $('#ollama-url-input') as HTMLInputElement
+const btnOllamaUrlAdd = $('#btn-ollama-url-add') as HTMLElement
+const btnOllamaUrlDelete = $('#btn-ollama-url-delete') as HTMLElement
+
+const refreshOllamaUrls = async (): Promise<void> => {
+  const data = await fetch('/api/ollama/urls').then(r => r.ok ? r.json() : null).catch(() => null) as { current: string; saved: string[] } | null
+  if (!data) return
+  ollamaUrlSelect.innerHTML = ''
+  for (const url of data.saved) {
+    const opt = document.createElement('option')
+    opt.value = url
+    opt.textContent = url
+    if (url === data.current) opt.selected = true
+    ollamaUrlSelect.appendChild(opt)
+  }
+}
+
+ollamaUrlSelect.onchange = async () => {
+  if (!ollamaUrlSelect.value) return
+  await fetch('/api/ollama/urls', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: ollamaUrlSelect.value }),
+  })
+}
+
+btnOllamaUrlAdd.onclick = async () => {
+  const url = ollamaUrlInput.value.trim()
+  if (!url) return
+  await fetch('/api/ollama/urls', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  ollamaUrlInput.value = ''
+  await refreshOllamaUrls()
+}
+
+btnOllamaUrlDelete.onclick = async () => {
+  const url = ollamaUrlSelect.value
+  if (!url) return
+  await fetch('/api/ollama/urls', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  await refreshOllamaUrls()
+}
+
 // --- Collapsible sidebar sections ---
+let roomsSectionExpanded = true
 let agentsSectionExpanded = true
 let toolsLoaded = false
 let skillsLoaded = false
@@ -299,6 +356,13 @@ const updateSkillsLabel = (expanded: boolean) => {
 // Fetch counts eagerly on load
 void fetch('/api/tools').then(r => r.ok ? r.json() : []).then((t: unknown[]) => { toolCount = t.length; updateToolsLabel(false) }).catch(() => {})
 void fetch('/api/skills').then(r => r.ok ? r.json() : []).then((s: unknown[]) => { skillCount = s.length; updateSkillsLabel(false) }).catch(() => {})
+
+roomsHeader.onclick = (e) => {
+  if ((e.target as HTMLElement).closest('button')) return // Don't toggle when clicking +
+  roomsSectionExpanded = !roomsSectionExpanded
+  roomList.classList.toggle('hidden', !roomsSectionExpanded)
+  roomsToggle.textContent = `${roomsSectionExpanded ? '▾' : '▸'} Rooms (${rooms.size})`
+}
 
 agentsHeader.onclick = () => {
   agentsSectionExpanded = !agentsSectionExpanded
@@ -396,6 +460,20 @@ const handlePin = (msgId: string, senderName: string, content: string): void => 
   refreshPinnedMessages()
 }
 
+const handleDeleteMessage = (msgId: string): void => {
+  const room = rooms.get(selectedRoomId)
+  if (!room) return
+  send({ type: 'delete_message', roomName: room.name, messageId: msgId })
+  // Remove from DOM immediately
+  const msgs = roomMessages.get(selectedRoomId)
+  if (msgs) {
+    const idx = msgs.findIndex(m => m.id === msgId)
+    if (idx !== -1) msgs.splice(idx, 1)
+  }
+  // Remove the message element from the DOM
+  messagesDiv.querySelector(`[data-msg-id="${msgId}"]`)?.remove()
+}
+
 const updateModeUI = () => {
   refreshModeSelector()
 
@@ -435,9 +513,10 @@ const selectRoom = (roomId: string) => {
 
   // Show chat UI, hide empty state
   noRoomState.classList.add('hidden')
-  roomTabsBar.classList.remove('hidden')
+  roomHeader.classList.remove('hidden')
   roomInfoBar.classList.remove('hidden')
   chatArea.classList.remove('hidden')
+  roomNameEl.textContent = room.name
 
   refreshRooms()
   updateModeUI()
@@ -447,7 +526,7 @@ const selectRoom = (roomId: string) => {
   messagesDiv.innerHTML = ''
   const cached = roomMessages.get(roomId)
   if (cached) {
-    for (const m of cached) renderMessage(messagesDiv, m, myAgentId, agents, handlePin)
+    for (const m of cached) renderMessage(messagesDiv, m, myAgentId, agents, handlePin, handleDeleteMessage)
   } else {
     fetchRoomMessages(room.name)
   }
@@ -462,7 +541,7 @@ const fetchRoomMessages = async (name: string) => {
     roomMessages.set(data.profile.id, data.messages)
     if (selectedRoomId === data.profile.id) {
       messagesDiv.innerHTML = ''
-      for (const m of data.messages) renderMessage(messagesDiv, m, myAgentId, agents, handlePin)
+      for (const m of data.messages) renderMessage(messagesDiv, m, myAgentId, agents, handlePin, handleDeleteMessage)
       messagesDiv.scrollTop = messagesDiv.scrollHeight
     }
   } catch { /* ignore */ }
@@ -493,8 +572,6 @@ const handleMessage = (raw: unknown) => {
         }
       }
       refreshRooms(); refreshAgents()
-      // Always show tabs bar when rooms exist
-      if (rooms.size > 0) roomTabsBar.classList.remove('hidden')
       if (!selectedRoomId && rooms.size > 0) {
         selectRoom(rooms.values().next().value!.id)
       }
@@ -525,7 +602,7 @@ const handleMessage = (raw: unknown) => {
         const senderAgent = agents.get(m.senderId)
         if (senderAgent && m.type === 'chat') hideThinking(senderAgent.name)
         if (roomId === selectedRoomId) {
-          renderMessage(messagesDiv, m, myAgentId, agents, handlePin)
+          renderMessage(messagesDiv, m, myAgentId, agents, handlePin, handleDeleteMessage)
           messagesDiv.scrollTop = messagesDiv.scrollHeight
         }
       }
@@ -544,8 +621,6 @@ const handleMessage = (raw: unknown) => {
     case 'room_created': {
       rooms.set(msg.profile.id, msg.profile)
       refreshRooms()
-      // Always show tabs bar when rooms exist
-      if (rooms.size > 0) roomTabsBar.classList.remove('hidden')
       // Auto-select if no room is currently selected
       if (!selectedRoomId) {
         selectRoom(msg.profile.id)
@@ -645,7 +720,7 @@ const handleMessage = (raw: unknown) => {
         if (selectedRoomId === deletedRoom.id) {
           selectedRoomId = ''
           noRoomState.classList.remove('hidden')
-          roomTabsBar.classList.add('hidden')
+          roomHeader.classList.add('hidden')
           roomInfoBar.classList.add('hidden')
           chatArea.classList.add('hidden')
           workspace.hide()
@@ -820,15 +895,86 @@ agentForm.onsubmit = (e) => {
 
 // === Prompt editing — house, room, response format ===
 
-const btnHousePrompt = $('#btn-house-prompt') as HTMLButtonElement
-btnHousePrompt.onclick = () => openTextEditorModal(
-  'House Rules', '/api/house/prompts', 'housePrompt', '/api/house/prompts',
-)
+const btnSystemPrompt = $('#btn-system-prompt') as HTMLButtonElement
+btnSystemPrompt.onclick = () => {
+  fetch('/api/house/prompts')
+    .then(r => r.ok ? r.json() : null)
+    .then((data: { housePrompt?: string; responseFormat?: string } | null) => {
+      if (!data) return
+      const modal = createModal({ title: '', width: 'max-w-2xl' })
+      // Replace the default title with a matching label style
+      const titleRow = modal.body.querySelector('div')
+      if (titleRow) {
+        const titleEl = titleRow.querySelector('h3')
+        if (titleEl) {
+          titleEl.className = 'text-xs font-semibold text-gray-400 uppercase tracking-wide'
+          titleEl.textContent = 'System Prompt'
+        }
+      }
 
-const btnResponseFormat = $('#btn-response-format') as HTMLButtonElement
-btnResponseFormat.onclick = () => openTextEditorModal(
-  'Response Format', '/api/house/prompts', 'responseFormat', '/api/house/prompts',
-)
+      const houseArea = createTextarea(data.housePrompt ?? '', 6)
+      modal.body.appendChild(houseArea)
+
+      const formatLabel = document.createElement('div')
+      formatLabel.className = 'text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-3'
+      formatLabel.textContent = 'Response Format'
+      modal.body.appendChild(formatLabel)
+
+      const formatArea = createTextarea(data.responseFormat ?? '', 6)
+      modal.body.appendChild(formatArea)
+
+      const btnRow = document.createElement('div')
+      btnRow.className = 'flex justify-end mt-3 relative'
+      const updateBtn = document.createElement('button')
+      updateBtn.className = 'text-xs px-3 py-1 bg-gray-300 text-white rounded cursor-not-allowed'
+      updateBtn.textContent = 'Update'
+      btnRow.appendChild(updateBtn)
+      modal.body.appendChild(btnRow)
+
+      let savedHouse = houseArea.value
+      let savedFormat = formatArea.value
+
+      const isDirty = () => houseArea.value !== savedHouse || formatArea.value !== savedFormat
+      const updateStyle = () => {
+        updateBtn.className = isDirty()
+          ? 'text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 cursor-pointer'
+          : 'text-xs px-3 py-1 bg-gray-300 text-white rounded cursor-not-allowed'
+      }
+      houseArea.oninput = updateStyle
+      formatArea.oninput = updateStyle
+
+      updateBtn.onclick = async () => {
+        if (!isDirty()) return
+        await fetch('/api/house/prompts', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ housePrompt: houseArea.value, responseFormat: formatArea.value }),
+        }).catch(() => {})
+        savedHouse = houseArea.value
+        savedFormat = formatArea.value
+        updateStyle()
+        const toast = document.createElement('div')
+        toast.className = 'absolute left-1/2 -translate-x-1/2 bg-green-600 text-white text-xs px-3 py-1 rounded shadow transition-opacity duration-700'
+        toast.style.bottom = '4px'
+        toast.textContent = 'Prompts updated'
+        btnRow.appendChild(toast)
+        setTimeout(() => { toast.style.opacity = '0' }, 2000)
+        setTimeout(() => { toast.remove() }, 3000)
+      }
+
+      document.body.appendChild(modal.overlay)
+    })
+}
+
+const btnClearMessages = $('#btn-clear-messages') as HTMLButtonElement
+btnClearMessages.onclick = () => {
+  const room = rooms.get(selectedRoomId)
+  if (!room) return
+  if (!confirm(`Clear all messages in "${room.name}"?`)) return
+  send({ type: 'clear_messages', roomName: room.name })
+  roomMessages.delete(selectedRoomId)
+  messagesDiv.innerHTML = ''
+}
 
 const btnRoomPrompt = $('#btn-room-prompt') as HTMLButtonElement
 btnRoomPrompt.onclick = () => {
@@ -922,6 +1068,7 @@ const updateOllamaMetricsUI = (metrics: Record<string, unknown>): void => {
 document.getElementById('btn-ollama-dashboard')!.onclick = async () => {
   ollamaDashboard.showModal()
   send({ type: 'subscribe_ollama_metrics' } as unknown as Parameters<typeof send>[0])
+  void refreshOllamaUrls()
 
   // Fetch initial data
   try {

@@ -25,14 +25,24 @@ export const createModal = (config: ModalConfig): ModalElements => {
   const card = document.createElement('div')
   card.className = `bg-white rounded-lg shadow-xl p-6 w-full ${config.width ?? 'max-w-lg'} mx-4`
 
+  const titleRow = document.createElement('div')
+  titleRow.className = 'flex items-center justify-between mb-3'
   const title = document.createElement('h3')
-  title.className = 'text-lg font-semibold mb-3'
+  title.className = 'text-lg font-semibold'
   title.textContent = config.title
-
-  card.appendChild(title)
-  overlay.appendChild(card)
+  titleRow.appendChild(title)
 
   const close = (): void => { overlay.remove() }
+
+  const closeBtn = document.createElement('button')
+  closeBtn.className = 'text-gray-400 hover:text-gray-600 text-lg leading-none'
+  closeBtn.textContent = '×'
+  closeBtn.onclick = close
+  titleRow.appendChild(closeBtn)
+
+  card.appendChild(titleRow)
+  overlay.appendChild(card)
+
   overlay.onclick = (e) => { if (e.target === overlay) close() }
 
   return { overlay, body: card, close }

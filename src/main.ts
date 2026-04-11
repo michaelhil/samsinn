@@ -54,6 +54,7 @@ export interface System {
   readonly skillStore: SkillStore
   readonly skillsDir: string
   readonly knowledgeDir: string
+  readonly ollamaUrls: { list: () => string[]; add: (url: string) => void; remove: (url: string) => void; getCurrent: () => string; setCurrent: (url: string) => void }
   readonly removeAgent: (id: string) => boolean
   readonly removeRoom: (roomId: string) => boolean
   readonly addAgentToRoom: (agentId: string, roomId: string, invitedBy?: string) => Promise<void>
@@ -99,6 +100,16 @@ export const createSystem = (ollamaUrl?: string): System => {
   const ollamaRaw = createOllamaProvider(resolvedOllamaUrl)
   const ollama = createLLMGateway(ollamaRaw)
   const toolCapabilityCache = createToolCapabilityCache(resolvedOllamaUrl)
+
+  // Saved Ollama URLs (persisted in snapshot)
+  const savedOllamaUrls = new Set<string>([resolvedOllamaUrl])
+  const ollamaUrls = {
+    list: () => [...savedOllamaUrls],
+    add: (url: string) => { savedOllamaUrls.add(url) },
+    remove: (url: string) => { savedOllamaUrls.delete(url) },
+    getCurrent: () => ollamaRaw.baseUrl,
+    setCurrent: (url: string) => { ollamaRaw.setBaseUrl(url); savedOllamaUrls.add(url) },
+  }
 
   const houseCallbacks: HouseCallbacks = {
     deliver,
@@ -260,6 +271,7 @@ export const createSystem = (ollamaUrl?: string): System => {
   return {
     house, team, routeMessage, ollama, toolRegistry, skillStore, skillsDir,
     knowledgeDir: join(homedir(), '.samsinn', 'knowledge'),
+    ollamaUrls,
     removeAgent,
     removeRoom: systemRemoveRoom,
     addAgentToRoom: systemAddAgentToRoom,

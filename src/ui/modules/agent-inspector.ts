@@ -88,11 +88,96 @@ export const openAgentInspector = (agentName: string): void => {
     }
     content.className = ''
 
-    // Header: model + state
-    const header = document.createElement('div')
-    header.className = 'text-sm text-gray-500 mb-4'
-    header.textContent = `Model: ${agentRes.model ?? 'n/a'}  ·  State: ${agentRes.state ?? 'unknown'}`
-    content.appendChild(header)
+    // Add model selector + state next to the title in the modal header
+    const titleEl = modal.body.querySelector('h3')
+    if (titleEl) {
+      const modelSelect = document.createElement('select')
+      modelSelect.className = 'text-sm text-gray-500 font-normal ml-2 border-none bg-transparent cursor-pointer hover:text-blue-500 focus:outline-none'
+      modelSelect.innerHTML = `<option value="">${agentRes.model ?? 'n/a'}</option>`
+
+      // Load models lazily on first click
+      let modelsLoaded = false
+      modelSelect.onfocus = async () => {
+        if (modelsLoaded) return
+        modelsLoaded = true
+        const data = await safeFetchJson<{ running: string[]; available: string[] }>('/api/models')
+        if (!data) return
+        modelSelect.innerHTML = ''
+        const allModels = [...(data.running ?? []), ...(data.available ?? [])]
+        for (const m of allModels) {
+          const opt = document.createElement('option')
+          opt.value = m
+          opt.textContent = m
+          if (m === agentRes.model) opt.selected = true
+          modelSelect.appendChild(opt)
+        }
+      }
+
+      modelSelect.onchange = async () => {
+        if (!modelSelect.value) return
+        await safeFetchJson(`/api/agents/${enc}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: modelSelect.value }),
+        })
+      }
+
+      const stateDot = document.createElement('span')
+      const isGenerating = agentRes.state === 'generating'
+      stateDot.className = `inline-block w-2.5 h-2.5 rounded-full ml-2 ${isGenerating ? 'bg-yellow-400 typing-indicator' : 'bg-green-400'}`
+      stateDot.title = String(agentRes.state ?? 'unknown')
+
+      titleEl.insertBefore(stateDot, titleEl.firstChild)
+      titleEl.appendChild(modelSelect)
+    }
+
+    const promptActions = document.createElement('div')
+    promptActions.className = 'flex items-center justify-between mb-1'
+    const promptLabel = document.createElement('span')
+    promptLabel.className = 'text-xs font-semibold text-gray-400 uppercase tracking-wide'
+    promptLabel.textContent = 'Agent prompt'
+    promptActions.appendChild(promptLabel)
+
+    const promptArea = document.createElement('textarea')
+    promptArea.className = 'w-full border rounded p-2 text-xs font-mono resize-y focus:outline-none focus:ring-2 focus:ring-blue-300 mb-3'
+    promptArea.style.height = '5rem'
+    promptArea.value = (agentRes.systemPrompt as string) ?? ''
+    const savePromptBtn = document.createElement('button')
+    savePromptBtn.className = 'text-xs px-3 py-1 bg-gray-300 text-white rounded cursor-not-allowed'
+    savePromptBtn.textContent = 'Update'
+    let savedPrompt = promptArea.value
+
+    const updateButtonStyle = (): void => {
+      const dirty = promptArea.value !== savedPrompt
+      savePromptBtn.className = dirty
+        ? 'text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 cursor-pointer'
+        : 'text-xs px-3 py-1 bg-gray-300 text-white rounded cursor-not-allowed'
+    }
+
+    promptArea.oninput = updateButtonStyle
+
+    savePromptBtn.onclick = async () => {
+      if (promptArea.value === savedPrompt) return
+      await safeFetchJson(`/api/agents/${enc}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ systemPrompt: promptArea.value }),
+      })
+      savedPrompt = promptArea.value
+      updateButtonStyle()
+      // Show confirmation toast overlay
+      const toast = document.createElement('div')
+      toast.className = 'absolute left-1/2 -translate-x-1/2 bg-green-600 text-white text-xs px-3 py-1 rounded shadow transition-opacity duration-700'
+      toast.style.bottom = '4px'
+      toast.textContent = 'Prompt updated'
+      promptActions.style.position = 'relative'
+      promptActions.appendChild(toast)
+      setTimeout(() => { toast.style.opacity = '0' }, 2000)
+      setTimeout(() => { toast.remove() }, 3000)
+    }
+    promptActions.appendChild(savePromptBtn)
+    content.appendChild(promptActions)
+    content.appendChild(promptArea)
 
     // Memory section label
     const sepLabel = document.createElement('div')

@@ -149,14 +149,33 @@ export const evaluate = async (
     flushInfo: contextResult.flushInfo,
   })
 
+  const LLM_RETRIES = 2
+  const LLM_RETRY_DELAY_MS = 1000
+
+  const chatWithRetry = async (messages: ReadonlyArray<{ role: string; content: string }>) => {
+    for (let attempt = 0; attempt <= LLM_RETRIES; attempt++) {
+      try {
+        return await llmProvider.chat({
+          model: config.model,
+          messages: messages as ReadonlyArray<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+          temperature: config.temperature,
+          tools: toolDefinitions,
+        })
+      } catch (err) {
+        if (attempt < LLM_RETRIES) {
+          console.warn(`[${config.name}] LLM call failed (attempt ${attempt + 1}/${LLM_RETRIES + 1}), retrying in ${LLM_RETRY_DELAY_MS}ms:`, err instanceof Error ? err.message : err)
+          await new Promise(r => setTimeout(r, LLM_RETRY_DELAY_MS))
+        } else {
+          throw err
+        }
+      }
+    }
+    throw new Error('Unreachable')
+  }
+
   try {
     for (let toolRound = 0; toolRound <= maxToolIterations; toolRound++) {
-      const chatResponse = await llmProvider.chat({
-        model: config.model,
-        messages: context,
-        temperature: config.temperature,
-        tools: toolDefinitions,
-      })
+      const chatResponse = await chatWithRetry(context)
 
       totalGenerationMs += chatResponse.generationMs
 

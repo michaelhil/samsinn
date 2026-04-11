@@ -59,7 +59,10 @@ const createToolExecutor = (
       }
 
       try {
-        const result = await tool.execute(call.arguments, callContext)
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Tool "${call.tool}" timed out after 30s`)), 30_000),
+        )
+        const result = await Promise.race([tool.execute(call.arguments, callContext), timeout])
         results.push(result)
       } catch (err) {
         results.push({ success: false, error: err instanceof Error ? err.message : 'Tool execution failed' })

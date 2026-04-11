@@ -63,6 +63,15 @@
         <button id="btn-collapse-sidebar" class="text-gray-400 hover:text-gray-600 w-6 h-6 flex items-center justify-center text-xs" title="Toggle sidebar">◀</button>
       </div>
 
+      <!-- Rooms section -->
+      <div class="sidebar-content border-b">
+        <div id="rooms-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-gray-50">
+          <span id="rooms-toggle" class="text-xs font-medium text-gray-500 uppercase whitespace-nowrap">▾ Rooms</span>
+          <button id="btn-create-room" class="text-xs text-blue-500 hover:text-blue-700 font-bold" title="Create Room">+</button>
+        </div>
+        <div id="room-list" class="overflow-y-auto max-h-48"></div>
+      </div>
+
       <!-- Agents section -->
       <div class="sidebar-content border-b">
         <div id="agents-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-gray-50">
@@ -94,8 +103,7 @@
           <span id="settings-toggle" class="text-xs font-medium text-gray-500 uppercase whitespace-nowrap">▸ Settings</span>
         </div>
         <div id="settings-list" class="hidden">
-          <button id="btn-house-prompt" class="w-full text-left px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">System Prompt</button>
-          <button id="btn-response-format" class="w-full text-left px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">Format Prompt</button>
+          <button id="btn-system-prompt" class="w-full text-left px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">System Prompt</button>
           <button id="btn-ollama-dashboard" class="w-full text-left px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-1.5"><span id="ollama-status-dot" class="inline-block w-2 h-2 rounded-full bg-gray-400"></span>Ollama</button>
         </div>
       </div>
@@ -109,11 +117,11 @@
         Create a room to get started
       </div>
 
-      <!-- Room tabs bar -->
-      <div id="room-tabs-bar" class="border-b bg-white flex items-center hidden">
-        <div id="room-tabs" class="flex flex-1 overflow-x-auto"></div>
-        <button id="btn-create-room" class="text-xs text-blue-500 hover:text-blue-700 font-bold px-2 shrink-0" title="Create Room">+</button>
-        <div class="flex items-center gap-1 px-2 border-l shrink-0">
+      <!-- Room header -->
+      <div id="room-header" class="px-3 py-1.5 border-b bg-white flex items-center justify-between hidden">
+        <span id="room-name" class="text-sm font-medium text-gray-800"></span>
+        <div class="flex items-center gap-1">
+          <button id="btn-clear-messages" class="prompt-icon" title="Clear messages">🗑</button>
           <button id="btn-room-prompt" class="prompt-icon" title="Room Prompt">R</button>
           <button id="btn-pause-toggle" class="w-5 h-5 flex items-center justify-center text-xs rounded hover:bg-gray-200" title="Pause/Resume">▶</button>
           <select id="mode-selector" class="text-xs border rounded px-1 py-0.5 bg-gray-50">
@@ -202,12 +210,20 @@
       </div>
 
       <!-- Connection -->
-      <div class="border rounded p-3 space-y-1">
+      <div class="border rounded p-3 space-y-2">
         <div class="text-xs font-medium text-gray-500 uppercase">Connection</div>
         <div class="flex items-center gap-2">
           <span id="od-status-dot" class="inline-block w-3 h-3 rounded-full bg-gray-400"></span>
           <span id="od-status-text" class="text-sm font-medium">Unknown</span>
           <span id="od-latency" class="text-xs text-gray-400 ml-auto">-</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="ollama-url-select" class="flex-1 text-xs border rounded px-2 py-1 bg-white"></select>
+        </div>
+        <div class="flex gap-1">
+          <input id="ollama-url-input" type="text" placeholder="http://host:port" class="flex-1 text-xs border rounded px-2 py-1">
+          <button id="btn-ollama-url-add" class="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">Add</button>
+          <button id="btn-ollama-url-delete" class="text-xs px-2 py-1 bg-red-100 text-red-500 rounded hover:bg-red-200">Del</button>
         </div>
       </div>
 

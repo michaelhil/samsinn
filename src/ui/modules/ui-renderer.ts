@@ -65,45 +65,41 @@ export type ArtifactAction =
 
 // === Rendering ===
 
-export const renderRoomTabs = (
+export const renderRooms = (
   container: HTMLElement,
   rooms: Map<string, RoomProfile>,
   selectedRoomId: string,
   pausedRooms: Set<string>,
   onSelect: (roomId: string) => void,
-  onClose?: (roomId: string) => void,
+  onDelete?: (roomId: string, roomName: string) => void,
 ): void => {
   container.innerHTML = ''
   for (const room of rooms.values()) {
     const isPaused = pausedRooms.has(room.id)
-    const isActive = room.id === selectedRoomId
-    const tab = document.createElement('div')
-    tab.className = `flex items-center gap-1 px-3 py-1.5 text-xs cursor-pointer whitespace-nowrap border-b-2 shrink-0 ${
-      isActive ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-    }`
+    const isSelected = room.id === selectedRoomId
+    const div = document.createElement('div')
+    div.className = `px-3 py-1 cursor-pointer text-xs flex items-center gap-1.5 group relative ${isSelected ? 'bg-blue-50 font-semibold text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`
 
-    if (isPaused) {
-      const dot = document.createElement('span')
-      dot.className = 'w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0'
-      dot.title = 'Paused'
-      tab.appendChild(dot)
-    }
+    const dot = document.createElement('span')
+    dot.className = `inline-block w-1.5 h-1.5 rounded-full shrink-0 ${isPaused ? 'bg-gray-300' : 'bg-green-400'}`
+    div.appendChild(dot)
 
     const name = document.createElement('span')
+    name.className = 'truncate flex-1'
     name.textContent = room.name
-    tab.appendChild(name)
-    tab.onclick = () => onSelect(room.id)
+    div.appendChild(name)
 
-    if (onClose) {
-      const close = document.createElement('button')
-      close.className = 'text-gray-300 hover:text-red-500 ml-1 text-xs leading-none'
-      close.textContent = '×'
-      close.title = 'Leave room'
-      close.onclick = (e) => { e.stopPropagation(); onClose(room.id) }
-      tab.appendChild(close)
+    if (onDelete) {
+      const del = document.createElement('button')
+      del.className = 'text-red-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 shrink-0'
+      del.textContent = '×'
+      del.title = 'Delete room'
+      del.onclick = (e) => { e.stopPropagation(); onDelete(room.id, room.name) }
+      div.appendChild(del)
     }
 
-    container.appendChild(tab)
+    div.onclick = () => onSelect(room.id)
+    container.appendChild(div)
   }
 }
 
@@ -629,8 +625,10 @@ export const renderMessage = (
   myAgentId: string,
   agents: Map<string, AgentInfo>,
   onPin?: (msgId: string, senderName: string, content: string) => void,
+  onDelete?: (msgId: string) => void,
 ): void => {
   const div = document.createElement('div')
+  div.setAttribute('data-msg-id', msg.id)
   const isSystem = msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.senderId === 'system'
   const isPass = msg.type === 'pass'
   const isMute = msg.type === 'mute'
@@ -673,14 +671,29 @@ export const renderMessage = (
       header.appendChild(genEl)
     }
 
-    if (onPin) {
-      const pinBtn = document.createElement('button')
-      pinBtn.className = 'text-gray-300 hover:text-amber-500 text-xs opacity-0 group-hover:opacity-100 ml-auto'
-      pinBtn.textContent = '📌'
-      pinBtn.title = 'Pin message'
-      pinBtn.onclick = (e) => { e.stopPropagation(); onPin(msg.id, sender?.name ?? msg.senderId, msg.content) }
-      header.appendChild(pinBtn)
+    if (onPin || onDelete) {
+      const spacer = document.createElement('span')
+      spacer.className = 'ml-auto'
+      header.appendChild(spacer)
       div.className += ' group'
+
+      if (onPin) {
+        const pinBtn = document.createElement('button')
+        pinBtn.className = 'text-gray-300 hover:text-amber-500 text-xs opacity-0 group-hover:opacity-100'
+        pinBtn.textContent = '📌'
+        pinBtn.title = 'Pin message'
+        pinBtn.onclick = (e) => { e.stopPropagation(); onPin(msg.id, sender?.name ?? msg.senderId, msg.content) }
+        header.appendChild(pinBtn)
+      }
+
+      if (onDelete) {
+        const delBtn = document.createElement('button')
+        delBtn.className = 'text-gray-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100'
+        delBtn.textContent = '×'
+        delBtn.title = 'Delete message'
+        delBtn.onclick = (e) => { e.stopPropagation(); onDelete(msg.id) }
+        header.appendChild(delBtn)
+      }
     }
 
     const content = document.createElement('div')

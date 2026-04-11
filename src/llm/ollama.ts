@@ -99,9 +99,11 @@ export interface OllamaProviderExtended extends LLMProvider {
   readonly loadModel: (name: string, keepAlive?: string) => Promise<void>
   readonly unloadModel: (name: string) => Promise<void>
   readonly baseUrl: string
+  readonly setBaseUrl: (url: string) => void
 }
 
-export const createOllamaProvider = (baseUrl: string): OllamaProviderExtended => {
+export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExtended => {
+  let baseUrl = initialBaseUrl
   const chat = async (request: ChatRequest): Promise<ChatResponse> => {
     const startMs = performance.now()
 
@@ -324,5 +326,9 @@ export const createOllamaProvider = (baseUrl: string): OllamaProviderExtended =>
     await response.text()
   }
 
-  return { chat, stream, models, runningModels, runningModelsDetailed, loadModel, unloadModel, baseUrl }
+  return {
+    chat, stream, models, runningModels, runningModelsDetailed, loadModel, unloadModel,
+    get baseUrl() { return baseUrl },
+    setBaseUrl: (url: string) => { baseUrl = url },
+  }
 }
