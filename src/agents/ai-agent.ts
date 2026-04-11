@@ -345,5 +345,37 @@ Respond with only the summary — no preamble or explanation.`
       if (support.toolDescriptions !== undefined) toolDescriptions = support.toolDescriptions
       if (support.toolDefinitions !== undefined) toolDefinitions = support.toolDefinitions
     },
+    getHistory: (roomId: string) => [...(agentHistory.rooms.get(roomId)?.history ?? [])],
+    getIncoming: () => [...agentHistory.incoming],
+    getMemoryStats: () => ({
+      rooms: [...agentHistory.rooms.entries()].map(([roomId, ctx]) => ({
+        roomId,
+        roomName: ctx.profile.name,
+        messageCount: ctx.history.length,
+        lastActiveAt: ctx.lastActiveAt,
+      })),
+      incomingCount: agentHistory.incoming.length,
+      knownAgents: [...agentHistory.agentProfiles.values()].map(p => p.name),
+    }),
+    clearHistory: (roomId?: string) => {
+      if (roomId) {
+        const ctx = agentHistory.rooms.get(roomId)
+        if (ctx) ctx.history = []
+        const remaining = agentHistory.incoming.filter(m => m.roomId !== roomId)
+        agentHistory.incoming.length = 0
+        agentHistory.incoming.push(...remaining)
+      } else {
+        for (const ctx of agentHistory.rooms.values()) ctx.history = []
+        agentHistory.incoming.length = 0
+      }
+    },
+    deleteHistoryMessage: (roomId: string, messageId: string) => {
+      const ctx = agentHistory.rooms.get(roomId)
+      if (!ctx) return false
+      const idx = ctx.history.findIndex(m => m.id === messageId)
+      if (idx === -1) return false
+      ctx.history = [...ctx.history.slice(0, idx), ...ctx.history.slice(idx + 1)]
+      return true
+    },
   }
 }

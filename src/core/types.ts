@@ -319,6 +319,8 @@ export interface Room {
   readonly hasMember: (id: string) => boolean
   readonly getMessageCount: () => number
   readonly setRoomPrompt: (prompt: string) => void
+  readonly deleteMessage: (messageId: string) => boolean
+  readonly clearMessages: () => void
 
   // Delivery mode
   readonly deliveryMode: DeliveryMode
@@ -447,9 +449,26 @@ export interface AIAgent extends Agent {
   readonly getHistoryLimit: () => number | undefined
   readonly getTools: () => ReadonlyArray<string> | undefined
   readonly refreshTools?: (support: { toolExecutor?: ToolExecutor; toolDescriptions?: string; toolDefinitions?: ReadonlyArray<ToolDefinition> }) => void
+  // Memory introspection + management
+  readonly getHistory?: (roomId: string) => ReadonlyArray<Message>
+  readonly getIncoming?: () => ReadonlyArray<Message>
+  readonly getMemoryStats?: () => AgentMemoryStats
+  readonly clearHistory?: (roomId?: string) => void
+  readonly deleteHistoryMessage?: (roomId: string, messageId: string) => boolean
   // Returns a snapshot of the agent's current configuration (mutable fields resolved).
   // Use this when you need multiple config fields at once (e.g. for serialization).
   readonly getConfig: () => AIAgentConfig
+}
+
+export interface AgentMemoryStats {
+  readonly rooms: ReadonlyArray<{
+    readonly roomId: string
+    readonly roomName: string
+    readonly messageCount: number
+    readonly lastActiveAt?: number
+  }>
+  readonly incomingCount: number
+  readonly knownAgents: ReadonlyArray<string>
 }
 
 // === Team — agent collection (AI + human) ===
@@ -652,6 +671,10 @@ export type WSInbound =
   | { readonly type: 'update_artifact'; readonly artifactId: string; readonly title?: string; readonly body?: Record<string, unknown>; readonly resolution?: string }
   | { readonly type: 'remove_artifact'; readonly artifactId: string }
   | { readonly type: 'cast_vote'; readonly artifactId: string; readonly optionId: string }
+  // Room/message deletion
+  | { readonly type: 'delete_room'; readonly roomName: string }
+  | { readonly type: 'delete_message'; readonly roomName: string; readonly messageId: string }
+  | { readonly type: 'clear_messages'; readonly roomName: string }
 
 export type WSOutbound =
   | { readonly type: 'message'; readonly message: Message }
@@ -668,6 +691,8 @@ export type WSOutbound =
   | { readonly type: 'artifact_changed'; readonly action: 'added' | 'updated' | 'removed' | 'resolved'; readonly artifact: Artifact }
   | { readonly type: 'membership_changed'; readonly roomName: string; readonly agentName: string; readonly action: 'added' | 'removed' }
   | { readonly type: 'room_deleted'; readonly roomName: string }
+  | { readonly type: 'message_deleted'; readonly roomName: string; readonly messageId: string }
+  | { readonly type: 'messages_cleared'; readonly roomName: string }
   | { readonly type: 'ollama_health'; readonly health: Record<string, unknown> }
   | { readonly type: 'ollama_metrics'; readonly metrics: Record<string, unknown> }
 

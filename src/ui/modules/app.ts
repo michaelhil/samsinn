@@ -14,6 +14,7 @@ import {
   renderTypingIndicators,
   openPromptEditor,
   openModelEditor,
+  openAgentInspector,
   openFlowEditorModal,
   type UIMessage,
   type RoomProfile,
@@ -114,6 +115,7 @@ const refreshAgents = () => {
       if (room) send({ type: 'set_muted', roomName: room.name, agentName: name, muted })
     },
     (name) => { send({ type: 'cancel_generation', name }) },
+    (name) => openAgentInspector(name),
     (name) => openModelEditor(name, (data) => {
       send(data)
       const updated = (data as { model?: string }).model

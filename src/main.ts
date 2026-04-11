@@ -146,7 +146,16 @@ export const createSystem = (ollamaUrl?: string): System => {
     for (const agentId of room.getParticipantIds()) {
       team.getAgent(agentId)?.leave(roomId)
     }
-    return house.removeRoom(roomId)
+    const removed = house.removeRoom(roomId)
+    if (removed) {
+      // Clean up artifacts exclusively scoped to the deleted room
+      for (const artifact of house.artifacts.list({ scope: roomId })) {
+        if (artifact.scope.length === 1 && artifact.scope[0] === roomId) {
+          house.artifacts.remove(artifact.id)
+        }
+      }
+    }
+    return removed
   }
 
   const removeAgent = (id: string): boolean => {

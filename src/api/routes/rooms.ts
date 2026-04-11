@@ -50,6 +50,31 @@ export const roomRoutes: RouteEntry[] = [
     },
   },
   {
+    method: 'DELETE',
+    pattern: /^\/api\/rooms\/([^/]+)\/messages\/([^/]+)$/,
+    handler: (_req, match, { system }) => {
+      const name = decodeURIComponent(match[1]!)
+      const messageId = decodeURIComponent(match[2]!)
+      const room = system.house.getRoom(name)
+      if (!room) return errorResponse(`Room "${name}" not found`, 404)
+      const deleted = room.deleteMessage(messageId)
+      if (!deleted) return errorResponse(`Message "${messageId}" not found`, 404)
+      return json({ deleted: true, messageId })
+    },
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/rooms\/([^/]+)\/messages$/,
+    handler: (_req, match, { system }) => {
+      const name = decodeURIComponent(match[1]!)
+      const room = system.house.getRoom(name)
+      if (!room) return errorResponse(`Room "${name}" not found`, 404)
+      const count = room.getMessageCount()
+      room.clearMessages()
+      return json({ cleared: true, count })
+    },
+  },
+  {
     method: 'PUT',
     pattern: /^\/api\/rooms\/([^/]+)\/prompt$/,
     handler: async (req, match, { system }) => {

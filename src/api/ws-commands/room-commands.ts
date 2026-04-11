@@ -57,6 +57,26 @@ export const handleRoomCommand = async (msg: WSInbound, ctx: CommandContext): Pr
       broadcast({ type: 'mute_changed', roomName: room.profile.name, agentName: agent.name, muted: msg.muted })
       return true
     }
+    case 'delete_room': {
+      const room = requireRoom(ws, system, msg.roomName)
+      if (!room) return true
+      system.removeRoom(room.profile.id)
+      return true
+    }
+    case 'delete_message': {
+      const room = requireRoom(ws, system, msg.roomName)
+      if (!room) return true
+      const deleted = room.deleteMessage(msg.messageId)
+      if (deleted) broadcast({ type: 'message_deleted', roomName: room.profile.name, messageId: msg.messageId })
+      return true
+    }
+    case 'clear_messages': {
+      const room = requireRoom(ws, system, msg.roomName)
+      if (!room) return true
+      room.clearMessages()
+      broadcast({ type: 'messages_cleared', roomName: room.profile.name })
+      return true
+    }
     default:
       return false
   }

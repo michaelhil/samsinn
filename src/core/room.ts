@@ -335,6 +335,15 @@ export const createRoom = (
     setRoomPrompt: (prompt: string) => {
       profile = { ...profile, roomPrompt: prompt }
     },
+    deleteMessage: (messageId: string): boolean => {
+      const idx = messages.findIndex(m => m.id === messageId)
+      if (idx === -1) return false
+      messages.splice(idx, 1)
+      return true
+    },
+    clearMessages: (): void => {
+      messages.length = 0
+    },
 
     get deliveryMode() { return mode },
     setDeliveryMode,
