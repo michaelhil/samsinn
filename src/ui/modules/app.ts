@@ -411,7 +411,7 @@ const updateModeUI = () => {
 const showThinking = (agentName: string): void => {
   // Only show if agent is generating in the current room
   const state = agentStates.get(agentName)
-  if (!state || state.state !== 'generating' || state.context !== `room:${selectedRoomId}`) return
+  if (!state || state.state !== 'generating' || state.context !== selectedRoomId) return
   // Don't duplicate
   if (messagesDiv.querySelector(`[data-thinking-agent="${agentName}"]`)) return
   const { timer } = renderThinkingIndicator(messagesDiv, agentName, (name) => {
