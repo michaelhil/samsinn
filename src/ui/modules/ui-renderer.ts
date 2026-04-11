@@ -2,7 +2,6 @@
 // UI Renderer — DOM rendering functions for rooms, agents, and messages.
 // ============================================================================
 
-import { createModal, createButtonRow, createTextarea } from './modal.ts'
 
 // === Types (mirror of server-side, minimal) ===
 
@@ -66,31 +65,45 @@ export type ArtifactAction =
 
 // === Rendering ===
 
-export const renderRooms = (
+export const renderRoomTabs = (
   container: HTMLElement,
   rooms: Map<string, RoomProfile>,
   selectedRoomId: string,
   pausedRooms: Set<string>,
   onSelect: (roomId: string) => void,
+  onClose?: (roomId: string) => void,
 ): void => {
   container.innerHTML = ''
   for (const room of rooms.values()) {
     const isPaused = pausedRooms.has(room.id)
-    const isSelected = room.id === selectedRoomId
-    const div = document.createElement('div')
-    div.className = `px-3 py-2 cursor-pointer text-sm hover:bg-gray-100 flex items-center gap-1.5 ${isSelected ? 'bg-blue-50 font-medium' : ''} ${isPaused ? 'text-gray-400' : isSelected ? 'text-blue-700' : 'text-gray-700'}`
+    const isActive = room.id === selectedRoomId
+    const tab = document.createElement('div')
+    tab.className = `flex items-center gap-1 px-3 py-1.5 text-xs cursor-pointer whitespace-nowrap border-b-2 shrink-0 ${
+      isActive ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+    }`
 
-    const dot = document.createElement('span')
-    dot.className = `inline-block w-2 h-2 rounded-full flex-shrink-0 ${isPaused ? 'bg-gray-300' : 'bg-green-400'}`
-    dot.title = isPaused ? 'Paused' : 'Active'
+    if (isPaused) {
+      const dot = document.createElement('span')
+      dot.className = 'w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0'
+      dot.title = 'Paused'
+      tab.appendChild(dot)
+    }
 
-    const nameSpan = document.createElement('span')
-    nameSpan.textContent = room.name
+    const name = document.createElement('span')
+    name.textContent = room.name
+    tab.appendChild(name)
+    tab.onclick = () => onSelect(room.id)
 
-    div.appendChild(dot)
-    div.appendChild(nameSpan)
-    div.onclick = () => onSelect(room.id)
-    container.appendChild(div)
+    if (onClose) {
+      const close = document.createElement('button')
+      close.className = 'text-gray-300 hover:text-red-500 ml-1 text-xs leading-none'
+      close.textContent = '×'
+      close.title = 'Leave room'
+      close.onclick = (e) => { e.stopPropagation(); onClose(room.id) }
+      tab.appendChild(close)
+    }
+
+    container.appendChild(tab)
   }
 }
 
@@ -338,6 +351,33 @@ const renderDocumentArtifact = (artifact: ArtifactInfo, onAction: (action: Artif
   return wrap
 }
 
+const renderMermaidArtifact = (artifact: ArtifactInfo, onAction: (action: ArtifactAction) => void): HTMLElement => {
+  const div = document.createElement('div')
+  div.className = 'group relative'
+
+  const header = document.createElement('div')
+  header.className = 'flex items-center gap-2 mb-1'
+  const title = document.createElement('span')
+  title.className = 'text-xs font-medium text-teal-700'
+  title.textContent = artifact.title
+  header.appendChild(title)
+
+  const removeBtn = document.createElement('button')
+  removeBtn.className = 'text-xs text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 ml-auto'
+  removeBtn.textContent = '✕'
+  removeBtn.onclick = () => onAction({ kind: 'remove', artifactId: artifact.id })
+  header.appendChild(removeBtn)
+
+  const container = document.createElement('div')
+  container.className = 'overflow-x-auto bg-white rounded border p-2'
+  const source = (artifact.body as { source?: string })?.source ?? ''
+  void renderMermaidSource(container, source)
+
+  div.appendChild(header)
+  div.appendChild(container)
+  return div
+}
+
 const renderGenericArtifact = (artifact: ArtifactInfo, onAction: (action: ArtifactAction) => void): HTMLElement => {
   const wrap = document.createElement('div')
   wrap.className = 'group flex items-center gap-1 text-xs'
@@ -372,156 +412,66 @@ export const renderArtifacts = (
     else if (artifact.type === 'poll') inner = renderPollArtifact(artifact, myAgentId, onAction)
     else if (artifact.type === 'flow') inner = renderFlowArtifact(artifact, onAction)
     else if (artifact.type === 'document') inner = renderDocumentArtifact(artifact, onAction)
+    else if (artifact.type === 'mermaid') inner = renderMermaidArtifact(artifact, onAction)
     else inner = renderGenericArtifact(artifact, onAction)
     wrap.appendChild(inner)
     container.appendChild(wrap)
   }
 }
 
+// === Compact agent row (one line) ===
+
 const renderAgentRow = (
   agent: AgentInfo,
-  agentStates: Map<string, { state: string; context?: string }>,
-  mutedAgents: Set<string>,
-  onEditPrompt: (agentName: string) => void,
-  onRemove: (agentId: string, agentName: string) => void,
+  isInRoom: boolean,
+  isMuted: boolean,
+  isGenerating: boolean,
+  isSelf: boolean,
   onToggleMute: (agentName: string, muted: boolean) => void,
-  onCancelGeneration: (agentName: string) => void,
-  onEditModel: (agentName: string) => void,
   onInspect?: (agentName: string) => void,
-  roomAction?: { inRoom: boolean; onAddToRoom?: (id: string, name: string) => void; onRemoveFromRoom?: (id: string, name: string) => void },
+  roomAction?: { onAdd?: (id: string, name: string) => void; onRemove?: (id: string, name: string) => void },
 ): HTMLElement => {
-  const stateInfo = agentStates.get(agent.name)
-  const isGenerating = stateInfo?.state === 'generating'
-  const isMuted = mutedAgents.has(agent.name)
-
   const div = document.createElement('div')
-  div.className = `px-3 py-2 border-b border-gray-100 relative ${isMuted ? 'agent-muted' : ''}`
+  div.className = `px-3 py-1 flex items-center gap-1.5 group relative ${isMuted ? 'opacity-40' : ''} ${!isInRoom ? 'opacity-40' : ''}`
 
-  // Top-right action button: remove-from-room (in room) or add-to-room (available) or delete-agent (no room context)
-  if (roomAction) {
-    if (roomAction.inRoom && roomAction.onRemoveFromRoom) {
-      const leaveBtn = document.createElement('button')
-      leaveBtn.className = 'absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-orange-300 hover:text-orange-600 text-xs leading-none rounded-full hover:bg-orange-50'
-      leaveBtn.textContent = '✕'
-      leaveBtn.title = `Remove ${agent.name} from room`
-      leaveBtn.onclick = (e) => { e.stopPropagation(); roomAction.onRemoveFromRoom!(agent.id, agent.name) }
-      div.appendChild(leaveBtn)
-    } else if (!roomAction.inRoom && roomAction.onAddToRoom) {
-      const addBtn = document.createElement('button')
-      addBtn.className = 'absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-green-400 hover:text-green-700 text-xs leading-none rounded-full hover:bg-green-50'
-      addBtn.textContent = '+'
-      addBtn.title = `Add ${agent.name} to room`
-      addBtn.onclick = (e) => { e.stopPropagation(); roomAction.onAddToRoom!(agent.id, agent.name) }
-      div.appendChild(addBtn)
-    }
-  } else if (agent.kind === 'ai') {
-    const closeBtn = document.createElement('button')
-    closeBtn.className = 'absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-red-300 hover:text-red-600 text-xs leading-none rounded-full hover:bg-red-50'
-    closeBtn.textContent = '✕'
-    closeBtn.title = `Remove ${agent.name}`
-    closeBtn.onclick = (e) => {
-      e.stopPropagation()
-      if (confirm(`Remove agent "${agent.name}"? This cannot be undone.`)) {
-        onRemove(agent.id, agent.name)
-      }
-    }
-    div.appendChild(closeBtn)
-  }
-
-  const nameRow = document.createElement('div')
-  nameRow.className = 'text-sm font-medium text-gray-800 flex items-center gap-1'
+  // Dot: green=idle, yellow=generating, gray=muted
   const dot = document.createElement('span')
   const dotColor = isMuted ? 'bg-gray-300' : isGenerating ? 'bg-yellow-400 typing-indicator' : 'bg-green-400'
-  dot.className = `inline-block w-2.5 h-2.5 rounded-full ${dotColor}`
-  if (agent.kind !== 'human') {
+  dot.className = `inline-block w-2 h-2 rounded-full shrink-0 ${dotColor}`
+  if (agent.kind === 'ai') {
     dot.style.cursor = 'pointer'
     dot.title = isMuted ? `Unmute ${agent.name}` : `Mute ${agent.name}`
     dot.onclick = (e) => { e.stopPropagation(); onToggleMute(agent.name, !isMuted) }
   }
-  nameRow.appendChild(dot)
-  const nameText = document.createElement('span')
-  nameText.textContent = ` ${agent.name}`
-  if (isMuted) nameText.style.textDecoration = 'line-through'
+  div.appendChild(dot)
+
+  // Name: clickable for AI agents → inspector
+  const name = document.createElement('span')
+  name.className = `text-xs truncate ${isSelf ? 'font-bold' : 'font-medium'} ${isMuted ? 'line-through' : ''} text-gray-700`
+  name.textContent = agent.name
   if (onInspect && agent.kind === 'ai') {
-    nameText.style.cursor = 'pointer'
-    nameText.onclick = (e) => { e.stopPropagation(); onInspect(agent.name) }
+    name.style.cursor = 'pointer'
+    name.onclick = (e) => { e.stopPropagation(); onInspect(agent.name) }
   }
-  nameRow.appendChild(nameText)
+  div.appendChild(name)
 
-  if (agent.kind === 'ai') {
-    const promptWrapper = document.createElement('span')
-    promptWrapper.style.position = 'relative'
-    promptWrapper.style.display = 'inline-flex'
-
-    const promptIcon = document.createElement('span')
-    promptIcon.className = 'prompt-icon'
-    promptIcon.textContent = '?'
-    promptIcon.title = ''
-    promptIcon.onclick = (e) => { e.stopPropagation(); onEditPrompt(agent.name) }
-
-    const tooltip = document.createElement('div')
-    tooltip.className = 'prompt-tooltip'
-    tooltip.textContent = agent.kind
-    promptIcon.onmouseenter = () => {
-      fetch(`/api/agents/${encodeURIComponent(agent.name)}`)
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (data?.systemPrompt) {
-            const text = data.systemPrompt as string
-            tooltip.textContent = text.length > 200 ? text.slice(0, 200) + '…' : text
-          }
-        })
-        .catch(() => {})
+  // Action button (hover-visible): + to add, × to remove
+  if (roomAction) {
+    if (isInRoom && roomAction.onRemove) {
+      const btn = document.createElement('button')
+      btn.className = 'absolute right-1 text-orange-300 hover:text-orange-600 text-xs opacity-0 group-hover:opacity-100'
+      btn.textContent = '×'
+      btn.title = `Remove ${agent.name} from room`
+      btn.onclick = (e) => { e.stopPropagation(); roomAction.onRemove!(agent.id, agent.name) }
+      div.appendChild(btn)
+    } else if (!isInRoom && roomAction.onAdd) {
+      const btn = document.createElement('button')
+      btn.className = 'absolute right-1 text-green-400 hover:text-green-700 text-xs opacity-0 group-hover:opacity-100'
+      btn.textContent = '+'
+      btn.title = `Add ${agent.name} to room`
+      btn.onclick = (e) => { e.stopPropagation(); roomAction.onAdd!(agent.id, agent.name) }
+      div.appendChild(btn)
     }
-
-    promptWrapper.appendChild(promptIcon)
-    promptWrapper.appendChild(tooltip)
-    nameRow.appendChild(promptWrapper)
-  }
-
-  const kindRow = document.createElement('div')
-  kindRow.className = 'text-xs text-gray-400 flex items-center gap-1'
-
-  if (agent.kind === 'ai') {
-    const kindLabel = document.createElement('span')
-    kindLabel.textContent = isGenerating ? 'ai — thinking...' : 'ai'
-    kindRow.appendChild(kindLabel)
-
-    if (agent.model) {
-      const modelLabel = document.createElement('span')
-      modelLabel.className = 'text-gray-300 cursor-pointer hover:text-purple-400 hover:underline ml-1 truncate max-w-[90px]'
-      modelLabel.textContent = `· ${agent.model}`
-      modelLabel.title = `Model: ${agent.model} (click to change)`
-      modelLabel.onclick = (e) => { e.stopPropagation(); onEditModel(agent.name) }
-      kindRow.appendChild(modelLabel)
-    }
-
-    if (isGenerating) {
-      const stopBtn = document.createElement('button')
-      stopBtn.className = 'text-red-400 hover:text-red-600 text-xs font-medium ml-1'
-      stopBtn.textContent = '■ stop'
-      stopBtn.title = `Cancel ${agent.name}'s generation`
-      stopBtn.onclick = (e) => { e.stopPropagation(); onCancelGeneration(agent.name) }
-      kindRow.appendChild(stopBtn)
-    }
-  } else {
-    kindRow.textContent = agent.kind
-  }
-
-  div.appendChild(nameRow)
-  div.appendChild(kindRow)
-
-  if (agent.tags && agent.tags.length > 0) {
-    const tagRow = document.createElement('div')
-    tagRow.className = 'flex flex-wrap gap-1 mt-0.5'
-    for (const tag of agent.tags) {
-      const chip = document.createElement('span')
-      chip.className = 'text-xs bg-purple-900/40 text-purple-300 px-1.5 py-0 rounded cursor-default'
-      chip.title = `Tag: ${tag} — address with [[tag:${tag}]]`
-      chip.textContent = tag
-      tagRow.appendChild(chip)
-    }
-    div.appendChild(tagRow)
   }
 
   return div
@@ -532,11 +482,8 @@ export const renderAgents = (
   agents: Map<string, AgentInfo>,
   agentStates: Map<string, { state: string; context?: string }>,
   mutedAgents: Set<string>,
-  onEditPrompt: (agentName: string) => void,
-  onRemove: (agentId: string, agentName: string) => void,
+  myAgentId: string,
   onToggleMute: (agentName: string, muted: boolean) => void,
-  onCancelGeneration: (agentName: string) => void,
-  onEditModel: (agentName: string) => void,
   onInspect?: (agentName: string) => void,
   roomMemberIds?: Set<string>,
   onAddToRoom?: (agentId: string, agentName: string) => void,
@@ -544,46 +491,123 @@ export const renderAgents = (
 ): void => {
   container.innerHTML = ''
 
-  if (roomMemberIds) {
-    // Room-aware mode: split into two sections
-    const inRoom = [...agents.values()].filter(a => roomMemberIds.has(a.id))
-    const available = [...agents.values()].filter(a => !roomMemberIds.has(a.id))
+  // Flat list: in-room agents first, then not-in-room (greyed out)
+  const allAgents = [...agents.values()]
+  const inRoom = roomMemberIds ? allAgents.filter(a => roomMemberIds.has(a.id)) : allAgents
+  const notInRoom = roomMemberIds ? allAgents.filter(a => !roomMemberIds.has(a.id)) : []
 
-    const makeHeader = (text: string): HTMLElement => {
-      const h = document.createElement('div')
-      h.className = 'px-3 py-1 text-xs font-semibold text-gray-400 uppercase tracking-wide bg-gray-50 border-b border-gray-100'
-      h.textContent = text
-      return h
-    }
+  for (const agent of [...inRoom, ...notInRoom]) {
+    const isIn = !roomMemberIds || roomMemberIds.has(agent.id)
+    const isMuted = mutedAgents.has(agent.name)
+    const isGenerating = agentStates.get(agent.name)?.state === 'generating'
+    const isSelf = agent.id === myAgentId
+    container.appendChild(renderAgentRow(
+      agent, isIn, isMuted, isGenerating, isSelf, onToggleMute, onInspect,
+      roomMemberIds ? { onAdd: !isIn ? onAddToRoom : undefined, onRemove: isIn ? onRemoveFromRoom : undefined } : undefined,
+    ))
+  }
+}
 
-    container.appendChild(makeHeader(`In room (${inRoom.length})`))
-    for (const agent of inRoom) {
-      container.appendChild(renderAgentRow(
-        agent, agentStates, mutedAgents,
-        onEditPrompt, onRemove, onToggleMute, onCancelGeneration, onEditModel, onInspect,
-        { inRoom: true, onRemoveFromRoom },
-      ))
-    }
+// === Thinking indicator (in-message) ===
 
-    container.appendChild(makeHeader(`Available (${available.length})`))
-    for (const agent of available) {
-      container.appendChild(renderAgentRow(
-        agent, agentStates, mutedAgents,
-        onEditPrompt, onRemove, onToggleMute, onCancelGeneration, onEditModel, onInspect,
-        { inRoom: false, onAddToRoom },
-      ))
-    }
-  } else {
-    for (const agent of agents.values()) {
-      container.appendChild(renderAgentRow(
-        agent, agentStates, mutedAgents,
-        onEditPrompt, onRemove, onToggleMute, onCancelGeneration, onEditModel, onInspect,
-      ))
+export const renderThinkingIndicator = (
+  container: HTMLElement,
+  agentName: string,
+  onStop: (agentName: string) => void,
+): { element: HTMLElement; timer: number } => {
+  const div = document.createElement('div')
+  div.className = 'flex items-center gap-2 px-3 py-1.5 text-xs text-yellow-600'
+  div.setAttribute('data-thinking-agent', agentName)
+
+  const dot = document.createElement('span')
+  dot.className = 'inline-block w-2 h-2 rounded-full bg-yellow-400 typing-indicator shrink-0'
+  div.appendChild(dot)
+
+  const label = document.createElement('span')
+  label.className = 'flex-1'
+  let seconds = 0
+  label.textContent = `${agentName} is thinking...`
+  div.appendChild(label)
+
+  const stopBtn = document.createElement('button')
+  stopBtn.className = 'text-red-400 hover:text-red-600 font-medium'
+  stopBtn.textContent = '■ stop'
+  stopBtn.onclick = (e) => { e.stopPropagation(); onStop(agentName) }
+  div.appendChild(stopBtn)
+
+  const timer = window.setInterval(() => {
+    seconds++
+    label.textContent = `${agentName} is thinking... (${seconds}s)`
+  }, 1000)
+
+  container.appendChild(div)
+  container.scrollTop = container.scrollHeight
+  return { element: div, timer }
+}
+
+export const removeThinkingIndicator = (container: HTMLElement, agentName: string): void => {
+  const el = container.querySelector(`[data-thinking-agent="${agentName}"]`)
+  el?.remove()
+}
+
+// === Mermaid rendering ===
+// Lazy-loads mermaid.js on first encounter. Replaces ```mermaid code blocks with rendered SVG.
+
+let mermaidReady: Promise<void> | null = null
+let mermaidRenderCount = 0
+
+const ensureMermaid = (): Promise<void> => {
+  if (mermaidReady) return mermaidReady
+  mermaidReady = import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs')
+    .then((m: { default: { initialize: (config: Record<string, unknown>) => void } }) => {
+      m.default.initialize({ startOnLoad: false, theme: 'neutral' })
+    })
+  return mermaidReady
+}
+
+const renderMermaidBlocks = async (container: HTMLElement): Promise<void> => {
+  const blocks = container.querySelectorAll('code.language-mermaid')
+  if (blocks.length === 0) return
+
+  await ensureMermaid()
+  const mermaidApi = (globalThis as Record<string, unknown>).mermaid as {
+    render: (id: string, source: string) => Promise<{ svg: string }>
+  }
+
+  for (const block of blocks) {
+    const pre = block.parentElement
+    if (!pre) continue
+    try {
+      const id = `mermaid-${++mermaidRenderCount}`
+      const { svg } = await mermaidApi.render(id, block.textContent ?? '')
+      const wrapper = document.createElement('div')
+      wrapper.className = 'my-2 overflow-x-auto'
+      wrapper.innerHTML = svg
+      pre.replaceWith(wrapper)
+    } catch {
+      // Leave as code block if mermaid can't parse it
     }
   }
 }
 
+// Render mermaid source into a container element (for artifact rendering)
+export const renderMermaidSource = async (container: HTMLElement, source: string): Promise<void> => {
+  await ensureMermaid()
+  const mermaidApi = (globalThis as Record<string, unknown>).mermaid as {
+    render: (id: string, source: string) => Promise<{ svg: string }>
+  }
+  try {
+    const id = `mermaid-${++mermaidRenderCount}`
+    const { svg } = await mermaidApi.render(id, source)
+    container.innerHTML = svg
+  } catch {
+    container.textContent = `Mermaid error:\n${source}`
+    container.className = 'text-xs text-red-500 font-mono whitespace-pre'
+  }
+}
+
 // Render Markdown content safely. Falls back to textContent if libraries not loaded.
+// Post-processes mermaid code blocks into rendered diagrams.
 const renderMarkdownContent = (el: HTMLElement, text: string): void => {
   const w = globalThis as unknown as Record<string, unknown>
   const markedLib = w.marked as { parse?: (src: string) => string } | undefined
@@ -592,6 +616,8 @@ const renderMarkdownContent = (el: HTMLElement, text: string): void => {
   if (markedLib?.parse && purifyLib?.sanitize) {
     el.className += ' msg-prose'
     el.innerHTML = purifyLib.sanitize(markedLib.parse(text))
+    // Post-process: render mermaid code blocks as diagrams
+    void renderMermaidBlocks(el)
   } else {
     el.textContent = text
   }
@@ -602,6 +628,7 @@ export const renderMessage = (
   msg: UIMessage,
   myAgentId: string,
   agents: Map<string, AgentInfo>,
+  onPin?: (msgId: string, senderName: string, content: string) => void,
 ): void => {
   const div = document.createElement('div')
   const isSystem = msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.senderId === 'system'
@@ -646,6 +673,16 @@ export const renderMessage = (
       header.appendChild(genEl)
     }
 
+    if (onPin) {
+      const pinBtn = document.createElement('button')
+      pinBtn.className = 'text-gray-300 hover:text-amber-500 text-xs opacity-0 group-hover:opacity-100 ml-auto'
+      pinBtn.textContent = '📌'
+      pinBtn.title = 'Pin message'
+      pinBtn.onclick = (e) => { e.stopPropagation(); onPin(msg.id, sender?.name ?? msg.senderId, msg.content) }
+      header.appendChild(pinBtn)
+      div.className += ' group'
+    }
+
     const content = document.createElement('div')
     content.className = 'text-gray-700'
     renderMarkdownContent(content, msg.content)
@@ -657,500 +694,7 @@ export const renderMessage = (
   container.appendChild(div)
 }
 
-export const renderTypingIndicators = (
-  container: HTMLElement,
-  agentStates: Map<string, { state: string; context?: string }>,
-  selectedRoomId: string,
-): void => {
-  const currentRoomKey = `room:${selectedRoomId}`
-  const typing: string[] = []
 
-  for (const [agentName, info] of agentStates) {
-    if (info.state === 'generating' && info.context === currentRoomKey) {
-      typing.push(agentName)
-    }
-  }
 
-  container.textContent = typing.length > 0
-    ? `${typing.join(', ')} ${typing.length === 1 ? 'is' : 'are'} thinking...`
-    : ''
-}
 
-export const openPromptEditor = (
-  agentName: string,
-  send: (data: unknown) => void,
-): void => {
-  fetch(`/api/agents/${encodeURIComponent(agentName)}`)
-    .then(res => res.ok ? res.json() : null)
-    .then(data => {
-      if (!data) return
-      const modal = createModal({ title: `System Prompt — ${agentName}` })
-      const textarea = createTextarea(data.systemPrompt ?? '')
-      const buttons = createButtonRow(
-        modal.close,
-        () => { send({ type: 'update_agent', name: agentName, systemPrompt: textarea.value }); modal.close() },
-      )
-      modal.body.appendChild(textarea)
-      modal.body.appendChild(buttons)
-      document.body.appendChild(modal.overlay)
-      textarea.focus()
-    })
-}
-
-export const openModelEditor = (
-  agentName: string,
-  send: (data: unknown) => void,
-): void => {
-  const modal = createModal({ title: `Model — ${agentName}` })
-
-  const select = document.createElement('select')
-  select.className = 'w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-300'
-  select.innerHTML = '<option value="">Loading models…</option>'
-  modal.body.appendChild(select)
-
-  const buttons = createButtonRow(
-    modal.close,
-    () => {
-      if (select.value) {
-        send({ type: 'update_agent', name: agentName, model: select.value })
-      }
-      modal.close()
-    },
-    'Change Model',
-  )
-  modal.body.appendChild(buttons)
-  document.body.appendChild(modal.overlay)
-
-  // Fetch current model + available models in parallel
-  Promise.all([
-    fetch(`/api/agents/${encodeURIComponent(agentName)}`).then(r => r.ok ? r.json() : null),
-    fetch('/api/models').then(r => r.ok ? r.json() : { running: [], available: [] }),
-  ]).then(([agentData, modelsData]: [{ model?: string } | null, { running: string[]; available: string[] }]) => {
-    select.innerHTML = ''
-    const { running = [], available = [] } = modelsData
-    const allModels = [...running, ...available]
-    // If agent has a model, select it; otherwise prefer lightweight default
-    const preferredDefaults = ['llama3.2:latest', 'qwen3:4b', 'llama3.2:3b']
-    const selectedModel = agentData?.model ?? preferredDefaults.find(p => allModels.includes(p)) ?? allModels[0] ?? ''
-    if (running.length > 0) {
-      const group = document.createElement('optgroup')
-      group.label = 'Running'
-      for (const m of running) {
-        const opt = document.createElement('option')
-        opt.value = m; opt.textContent = m
-        if (m === selectedModel) opt.selected = true
-        group.appendChild(opt)
-      }
-      select.appendChild(group)
-    }
-    if (available.length > 0) {
-      const group = document.createElement('optgroup')
-      group.label = 'Available'
-      for (const m of available) {
-        const opt = document.createElement('option')
-        opt.value = m; opt.textContent = m
-        if (m === selectedModel) opt.selected = true
-        group.appendChild(opt)
-      }
-      select.appendChild(group)
-    }
-    if (allModels.length === 0) {
-      select.innerHTML = '<option value="">No models found</option>'
-    }
-  }).catch(() => {
-    select.innerHTML = '<option value="">Failed to load models</option>'
-  })
-}
-
-// === Flow Editor Modal ===
-// Full editor: name the flow, add ordered steps with agent selection + step prompts,
-// toggle loop, reorder with up/down buttons. Saves via callback.
-
-interface FlowStepInput {
-  agentId: string
-  agentName: string
-  stepPrompt: string
-}
-
-export const openFlowEditorModal = (
-  agents: Map<string, AgentInfo>,
-  myAgentId: string,
-  onSave: (name: string, steps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>, loop: boolean, description?: string) => void,
-  existingName?: string,
-  existingSteps?: ReadonlyArray<FlowStepInput>,
-  existingLoop?: boolean,
-  existingDescription?: string,
-): void => {
-  const steps: FlowStepInput[] = existingSteps
-    ? existingSteps.map(s => ({ ...s }))
-    : [...agents.values()].map(a => ({ agentId: a.id, agentName: a.name, stepPrompt: '' }))
-
-  const { overlay, body: modal, close } = createModal({
-    title: existingName ? `Edit Flow: ${existingName}` : 'Create Flow',
-  })
-  // Override card style for scrollable flow content
-  modal.className = 'bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] flex flex-col'
-  modal.onclick = (e) => e.stopPropagation()
-
-  // Flow name
-  const nameInput = document.createElement('input')
-  nameInput.className = 'w-full px-3 py-2 border rounded text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-purple-300'
-  nameInput.placeholder = 'Flow name'
-  nameInput.value = existingName ?? ''
-
-  // Description
-  const descInput = document.createElement('input')
-  descInput.className = 'w-full px-3 py-2 border rounded text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-purple-300'
-  descInput.placeholder = 'Description / goal (optional)'
-  descInput.value = existingDescription ?? ''
-
-  // Loop toggle
-  const loopRow = document.createElement('label')
-  loopRow.className = 'flex items-center gap-2 text-sm mb-3 cursor-pointer'
-  const loopCheckbox = document.createElement('input')
-  loopCheckbox.type = 'checkbox'
-  loopCheckbox.checked = existingLoop ?? false
-  loopRow.appendChild(loopCheckbox)
-  loopRow.appendChild(document.createTextNode('Loop (repeat continuously)'))
-
-  // Steps list
-  const stepsContainer = document.createElement('div')
-  stepsContainer.className = 'flex-1 overflow-y-auto space-y-2 mb-3 min-h-0'
-
-  const renderSteps = (): void => {
-    stepsContainer.innerHTML = ''
-    steps.forEach((step, i) => {
-      const row = document.createElement('div')
-      row.className = 'flex gap-2 items-start bg-gray-50 rounded p-2'
-
-      // Step number
-      const num = document.createElement('span')
-      num.className = 'text-xs text-gray-400 font-mono pt-2 w-5 text-right shrink-0'
-      num.textContent = `${i + 1}.`
-
-      // Agent selector
-      const select = document.createElement('select')
-      select.className = 'text-sm border rounded px-2 py-1 bg-white shrink-0'
-      for (const agent of agents.values()) {
-        const opt = document.createElement('option')
-        opt.value = agent.id
-        opt.textContent = agent.name
-        if (agent.id === step.agentId) opt.selected = true
-        select.appendChild(opt)
-      }
-      select.onchange = () => {
-        const selectedAgent = [...agents.values()].find(a => a.id === select.value)
-        if (selectedAgent) { step.agentId = selectedAgent.id; step.agentName = selectedAgent.name }
-      }
-
-      // Step prompt
-      const promptInput = document.createElement('input')
-      promptInput.className = 'flex-1 text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-300'
-      promptInput.placeholder = 'Step prompt (optional)'
-      promptInput.value = step.stepPrompt
-      promptInput.oninput = () => { step.stepPrompt = promptInput.value }
-
-      // Up/Down/Remove buttons
-      const controls = document.createElement('div')
-      controls.className = 'flex flex-col gap-0.5 shrink-0'
-
-      const upBtn = document.createElement('button')
-      upBtn.type = 'button'
-      upBtn.className = 'text-xs text-gray-400 hover:text-gray-700 leading-none'
-      upBtn.textContent = '▲'
-      upBtn.onclick = () => {
-        if (i > 0) { [steps[i - 1]!, steps[i]!] = [steps[i]!, steps[i - 1]!]; renderSteps() }
-      }
-
-      const downBtn = document.createElement('button')
-      downBtn.type = 'button'
-      downBtn.className = 'text-xs text-gray-400 hover:text-gray-700 leading-none'
-      downBtn.textContent = '▼'
-      downBtn.onclick = () => {
-        if (i < steps.length - 1) { [steps[i]!, steps[i + 1]!] = [steps[i + 1]!, steps[i]!]; renderSteps() }
-      }
-
-      const dupBtn = document.createElement('button')
-      dupBtn.type = 'button'
-      dupBtn.className = 'text-xs text-purple-400 hover:text-purple-600 leading-none'
-      dupBtn.title = 'Duplicate step'
-      dupBtn.textContent = '⧉'
-      dupBtn.onclick = () => { steps.splice(i + 1, 0, { ...step, stepPrompt: step.stepPrompt }); renderSteps() }
-
-      const removeBtn = document.createElement('button')
-      removeBtn.type = 'button'
-      removeBtn.className = 'text-xs text-red-400 hover:text-red-600 leading-none'
-      removeBtn.textContent = '✕'
-      removeBtn.onclick = () => { steps.splice(i, 1); renderSteps() }
-
-      controls.appendChild(upBtn)
-      controls.appendChild(downBtn)
-      controls.appendChild(dupBtn)
-      controls.appendChild(removeBtn)
-
-      row.appendChild(num)
-      row.appendChild(select)
-      row.appendChild(promptInput)
-      row.appendChild(controls)
-      stepsContainer.appendChild(row)
-    })
-
-    if (steps.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'text-sm text-gray-400 text-center py-4'
-      empty.textContent = 'No steps yet. Click "+ Add Step" to start building your flow.'
-      stepsContainer.appendChild(empty)
-    }
-  }
-
-  // Add step button
-  const addStepBtn = document.createElement('button')
-  addStepBtn.type = 'button'
-  addStepBtn.className = 'text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded hover:bg-purple-200 mb-3'
-  addStepBtn.textContent = '+ Add Step'
-  addStepBtn.onclick = () => {
-    const defaultAgent = [...agents.values()].find(a => a.kind === 'ai') ?? [...agents.values()][0]
-    if (!defaultAgent) return
-    steps.push({ agentId: defaultAgent.id, agentName: defaultAgent.name, stepPrompt: '' })
-    renderSteps()
-    stepsContainer.scrollTop = stepsContainer.scrollHeight
-  }
-
-  // Bottom buttons
-  const btnRow = createButtonRow(
-    close,
-    () => {
-      const flowName = nameInput.value.trim()
-      if (!flowName) { nameInput.focus(); return }
-      if (steps.length === 0) return
-      const cleanSteps = steps.map(s => ({
-        agentName: s.agentName,
-        ...(s.stepPrompt.trim() ? { stepPrompt: s.stepPrompt.trim() } : {}),
-      }))
-      const desc = descInput.value.trim() || undefined
-      onSave(flowName, cleanSteps, loopCheckbox.checked, desc)
-      close()
-    },
-    'Save Flow',
-    'bg-purple-500 hover:bg-purple-600',
-  )
-
-  modal.appendChild(nameInput)
-  modal.appendChild(descInput)
-  modal.appendChild(loopRow)
-  modal.appendChild(stepsContainer)
-  modal.appendChild(addStepBtn)
-  modal.appendChild(btnRow)
-  overlay.appendChild(modal)
-  document.body.appendChild(overlay)
-
-  renderSteps()
-  nameInput.focus()
-}
-
-// === Agent Inspector Modal ===
-// Memory inspection + management: stats, room histories, clear, delete.
-
-interface MemoryStats {
-  rooms: Array<{ roomId: string; roomName: string; messageCount: number; lastActiveAt?: number }>
-  incomingCount: number
-  knownAgents: string[]
-}
-
-export const openAgentInspector = (agentName: string): void => {
-  const enc = encodeURIComponent(agentName)
-
-  const modal = createModal({ title: agentName, width: 'max-w-2xl' })
-  const content = document.createElement('div')
-  content.innerHTML = '<div class="text-sm text-gray-400">Loading…</div>'
-  modal.body.appendChild(content)
-  document.body.appendChild(modal.overlay)
-
-  const fetchStats = async (): Promise<MemoryStats | null> => {
-    const res = await fetch(`/api/agents/${enc}/memory`)
-    return res.ok ? await res.json() as MemoryStats : null
-  }
-
-  const renderInspector = async (): Promise<void> => {
-    // Fetch agent info + memory stats in parallel
-    const [agentRes, stats] = await Promise.all([
-      fetch(`/api/agents/${enc}`).then(r => r.ok ? r.json() : null),
-      fetchStats(),
-    ])
-
-    content.innerHTML = ''
-    if (!agentRes || !stats) {
-      content.innerHTML = '<div class="text-sm text-red-500">Failed to load agent data</div>'
-      return
-    }
-
-    // Header: model + state
-    const header = document.createElement('div')
-    header.className = 'text-sm text-gray-500 mb-4'
-    header.textContent = `Model: ${agentRes.model ?? 'n/a'}  ·  State: ${agentRes.state ?? 'unknown'}`
-    content.appendChild(header)
-
-    // Separator
-    const sep = document.createElement('div')
-    sep.className = 'border-t border-gray-200 pt-3 mb-3'
-    const sepLabel = document.createElement('div')
-    sepLabel.className = 'text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2'
-    sepLabel.textContent = 'Memory'
-    sep.appendChild(sepLabel)
-    content.appendChild(sep)
-
-    // Summary line + clear all button
-    const summaryRow = document.createElement('div')
-    summaryRow.className = 'flex items-center justify-between mb-3'
-    const summaryText = document.createElement('span')
-    summaryText.className = 'text-sm text-gray-600'
-    const totalMsgs = stats.rooms.reduce((sum, r) => sum + r.messageCount, 0)
-    summaryText.textContent = `${totalMsgs} messages across ${stats.rooms.length} rooms · ${stats.incomingCount} incoming`
-    if (stats.knownAgents.length > 0) {
-      summaryText.textContent += ` · Knows: ${stats.knownAgents.join(', ')}`
-    }
-    summaryRow.appendChild(summaryText)
-
-    if (totalMsgs > 0 || stats.incomingCount > 0) {
-      const clearAllBtn = document.createElement('button')
-      clearAllBtn.className = 'text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50'
-      clearAllBtn.textContent = 'Clear All'
-      clearAllBtn.onclick = async () => {
-        await fetch(`/api/agents/${enc}/memory`, { method: 'DELETE' })
-        await renderInspector()
-      }
-      summaryRow.appendChild(clearAllBtn)
-    }
-    content.appendChild(summaryRow)
-
-    // Room list
-    for (const room of stats.rooms) {
-      const roomDiv = document.createElement('div')
-      roomDiv.className = 'border border-gray-100 rounded mb-2'
-
-      // Room header (clickable to expand)
-      const roomHeader = document.createElement('div')
-      roomHeader.className = 'flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-50'
-
-      const roomLabel = document.createElement('span')
-      roomLabel.className = 'text-sm font-medium text-gray-700'
-      const ago = room.lastActiveAt ? formatTimeAgo(room.lastActiveAt) : 'never'
-      roomLabel.textContent = `▸ ${room.roomName} (${room.messageCount} msgs, ${ago})`
-      roomHeader.appendChild(roomLabel)
-
-      if (room.messageCount > 0) {
-        const clearBtn = document.createElement('button')
-        clearBtn.className = 'text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50'
-        clearBtn.textContent = 'Clear'
-        clearBtn.onclick = async (e) => {
-          e.stopPropagation()
-          await fetch(`/api/agents/${enc}/memory/${encodeURIComponent(room.roomId)}`, { method: 'DELETE' })
-          await renderInspector()
-        }
-        roomHeader.appendChild(clearBtn)
-      }
-
-      const messagesContainer = document.createElement('div')
-      messagesContainer.className = 'hidden'
-
-      let expanded = false
-      roomHeader.onclick = async () => {
-        if (expanded) {
-          messagesContainer.className = 'hidden'
-          roomLabel.textContent = `▸ ${room.roomName} (${room.messageCount} msgs, ${ago})`
-          expanded = false
-          return
-        }
-        expanded = true
-        roomLabel.textContent = `▾ ${room.roomName} (${room.messageCount} msgs, ${ago})`
-        messagesContainer.className = 'border-t border-gray-100 max-h-64 overflow-y-auto'
-        messagesContainer.innerHTML = '<div class="px-3 py-2 text-xs text-gray-400">Loading…</div>'
-
-        const res = await fetch(`/api/agents/${enc}/memory/${encodeURIComponent(room.roomId)}`)
-        if (!res.ok) {
-          messagesContainer.innerHTML = '<div class="px-3 py-2 text-xs text-red-400">Failed to load</div>'
-          return
-        }
-        const messages = await res.json() as Array<{ id: string; senderName?: string; content: string; timestamp: number }>
-        messagesContainer.innerHTML = ''
-
-        // Show last 10, with load-more
-        const toShow = messages.slice(-10)
-        const hasMore = messages.length > 10
-
-        if (hasMore) {
-          const loadMore = document.createElement('div')
-          loadMore.className = 'px-3 py-1 text-xs text-blue-500 cursor-pointer hover:bg-blue-50'
-          loadMore.textContent = `Load ${messages.length - 10} more…`
-          loadMore.onclick = () => {
-            loadMore.remove()
-            const older = messages.slice(0, -10)
-            const fragment = document.createDocumentFragment()
-            for (const msg of older) fragment.appendChild(renderMemoryMessage(msg, enc, room.roomId, renderInspector))
-            messagesContainer.insertBefore(fragment, messagesContainer.firstChild)
-          }
-          messagesContainer.appendChild(loadMore)
-        }
-
-        for (const msg of toShow) {
-          messagesContainer.appendChild(renderMemoryMessage(msg, enc, room.roomId, renderInspector))
-        }
-      }
-
-      roomDiv.appendChild(roomHeader)
-      roomDiv.appendChild(messagesContainer)
-      content.appendChild(roomDiv)
-    }
-
-    if (stats.rooms.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'text-sm text-gray-400 italic'
-      empty.textContent = 'No room history'
-      content.appendChild(empty)
-    }
-  }
-
-  void renderInspector()
-}
-
-const renderMemoryMessage = (
-  msg: { id: string; senderName?: string; content: string; timestamp: number },
-  agentEnc: string,
-  roomId: string,
-  onRefresh: () => Promise<void>,
-): HTMLElement => {
-  const row = document.createElement('div')
-  row.className = 'px-3 py-1.5 text-xs border-b border-gray-50 flex items-start gap-2 group hover:bg-gray-50'
-
-  const text = document.createElement('div')
-  text.className = 'flex-1 min-w-0'
-  const sender = msg.senderName ?? 'unknown'
-  const preview = msg.content.length > 120 ? msg.content.slice(0, 120) + '…' : msg.content
-  text.innerHTML = `<span class="font-medium text-gray-600">[${sender}]</span> <span class="text-gray-500">${escapeHtml(preview)}</span>`
-  row.appendChild(text)
-
-  const delBtn = document.createElement('button')
-  delBtn.className = 'text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 flex-shrink-0 text-xs'
-  delBtn.textContent = '×'
-  delBtn.title = 'Delete from agent memory'
-  delBtn.onclick = async (e) => {
-    e.stopPropagation()
-    await fetch(`/api/agents/${agentEnc}/memory/${encodeURIComponent(roomId)}/${encodeURIComponent(msg.id)}`, { method: 'DELETE' })
-    await onRefresh()
-  }
-  row.appendChild(delBtn)
-
-  return row
-}
-
-const escapeHtml = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-
-const formatTimeAgo = (timestamp: number): string => {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000)
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-  return `${Math.floor(seconds / 86400)}d ago`
-}
 

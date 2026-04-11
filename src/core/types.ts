@@ -689,7 +689,7 @@ export type WSOutbound =
   | { readonly type: 'turn_changed'; readonly roomName: string; readonly agentName?: string; readonly waitingForHuman?: boolean }
   | { readonly type: 'flow_event'; readonly roomName: string; readonly event: 'started' | 'step' | 'completed' | 'cancelled'; readonly detail?: Record<string, unknown> }
   | { readonly type: 'artifact_changed'; readonly action: 'added' | 'updated' | 'removed' | 'resolved'; readonly artifact: Artifact }
-  | { readonly type: 'membership_changed'; readonly roomName: string; readonly agentName: string; readonly action: 'added' | 'removed' }
+  | { readonly type: 'membership_changed'; readonly roomId: string; readonly roomName: string; readonly agentId: string; readonly agentName: string; readonly action: 'added' | 'removed' }
   | { readonly type: 'room_deleted'; readonly roomName: string }
   | { readonly type: 'message_deleted'; readonly roomName: string; readonly messageId: string }
   | { readonly type: 'messages_cleared'; readonly roomName: string }

@@ -25,6 +25,16 @@ export const houseRoutes: RouteEntry[] = [
   },
   {
     method: 'GET',
+    pattern: /^\/api\/skills$/,
+    handler: (_req, _match, { system }) =>
+      json(system.skillStore.list().map(s => ({
+        name: s.name, description: s.description,
+        scope: s.scope.length > 0 ? s.scope : 'global',
+        tools: s.tools,
+      }))),
+  },
+  {
+    method: 'GET',
     pattern: /^\/api\/models$/,
     handler: async (_req, _match, { system }) => {
       try {

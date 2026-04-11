@@ -39,6 +39,7 @@ import { createTaskListArtifactType } from './core/artifact-types/task-list.ts'
 import { pollArtifactType } from './core/artifact-types/poll.ts'
 import { createFlowArtifactType } from './core/artifact-types/flow.ts'
 import { documentArtifactType } from './core/artifact-types/document.ts'
+import { mermaidArtifactType } from './core/artifact-types/mermaid.ts'
 import { createToolCapabilityCache } from './llm/tool-capability.ts'
 import { createSkillStore, type SkillStore } from './skills/loader.ts'
 import { homedir } from 'node:os'
@@ -121,6 +122,7 @@ export const createSystem = (ollamaUrl?: string): System => {
   house.artifactTypes.register(pollArtifactType)
   house.artifactTypes.register(createFlowArtifactType(team))
   house.artifactTypes.register(documentArtifactType)
+  house.artifactTypes.register(mermaidArtifactType)
 
 
   // System-level membership operations
@@ -138,6 +140,10 @@ export const createSystem = (ollamaUrl?: string): System => {
     if (!agent || !room) return
     removeAgentFromRoom(agentId, agent.name, roomId, removedBy, team, routeMessage, house)
     membershipChanged.proxy(roomId, room.profile.name, agentId, agent.name, 'removed')
+    // Auto-delete room if last member left
+    if (room.getParticipantIds().length === 0) {
+      systemRemoveRoom(roomId)
+    }
   }
 
   const systemRemoveRoom = (roomId: string): boolean => {

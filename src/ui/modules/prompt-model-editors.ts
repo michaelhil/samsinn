@@ -1,0 +1,89 @@
+// ============================================================================
+// Prompt & Model Editor Modals — Edit agent system prompt and model.
+// ============================================================================
+
+import { createModal, createButtonRow, createTextarea } from './modal.ts'
+
+export const openPromptEditor = (
+  agentName: string,
+  send: (data: unknown) => void,
+): void => {
+  fetch(`/api/agents/${encodeURIComponent(agentName)}`)
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      if (!data) return
+      const modal = createModal({ title: `System Prompt — ${agentName}` })
+      const textarea = createTextarea(data.systemPrompt ?? '')
+      const buttons = createButtonRow(
+        modal.close,
+        () => { send({ type: 'update_agent', name: agentName, systemPrompt: textarea.value }); modal.close() },
+      )
+      modal.body.appendChild(textarea)
+      modal.body.appendChild(buttons)
+      document.body.appendChild(modal.overlay)
+      textarea.focus()
+    })
+}
+
+export const openModelEditor = (
+  agentName: string,
+  send: (data: unknown) => void,
+): void => {
+  const modal = createModal({ title: `Model — ${agentName}` })
+
+  const select = document.createElement('select')
+  select.className = 'w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-300'
+  select.innerHTML = '<option value="">Loading models…</option>'
+  modal.body.appendChild(select)
+
+  const buttons = createButtonRow(
+    modal.close,
+    () => {
+      if (select.value) {
+        send({ type: 'update_agent', name: agentName, model: select.value })
+      }
+      modal.close()
+    },
+    'Change Model',
+  )
+  modal.body.appendChild(buttons)
+  document.body.appendChild(modal.overlay)
+
+  Promise.all([
+    fetch(`/api/agents/${encodeURIComponent(agentName)}`).then(r => r.ok ? r.json() : null),
+    fetch('/api/models').then(r => r.ok ? r.json() : { running: [], available: [] }),
+  ]).then(([agentData, modelsData]: [{ model?: string } | null, { running: string[]; available: string[] }]) => {
+    select.innerHTML = ''
+    const { running = [], available = [] } = modelsData
+    const allModels = [...running, ...available]
+    const preferredDefaults = ['llama3.2:latest', 'qwen3:4b', 'llama3.2:3b']
+    const selectedModel = agentData?.model ?? preferredDefaults.find(p => allModels.includes(p)) ?? allModels[0] ?? ''
+    if (running.length > 0) {
+      const group = document.createElement('optgroup')
+      group.label = 'Running'
+      for (const m of running) {
+        const opt = document.createElement('option')
+        opt.value = m; opt.textContent = m
+        if (m === selectedModel) opt.selected = true
+        group.appendChild(opt)
+      }
+      select.appendChild(group)
+    }
+    if (available.length > 0) {
+      const group = document.createElement('optgroup')
+      group.label = 'Available'
+      for (const m of available) {
+        const opt = document.createElement('option')
+        opt.value = m; opt.textContent = m
+        if (m === selectedModel) opt.selected = true
+        group.appendChild(opt)
+      }
+      select.appendChild(group)
+    }
+    if (allModels.length === 0) {
+      select.innerHTML = '<option value="">No models found</option>'
+    }
+  }).catch(() => {
+    select.innerHTML = '<option value="">Failed to load models</option>'
+  })
+}

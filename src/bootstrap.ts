@@ -48,7 +48,13 @@ export const bootstrap = async (): Promise<void> => {
     await restoreFromSnapshot(system, snapshot)
     console.log(`Restored from snapshot: ${snapshot.rooms.length} rooms, ${snapshot.agents.length} agents`)
   } else {
-    console.log('Fresh start — no snapshot found. Create rooms and agents from the UI.')
+    console.log('Fresh start — no snapshot found.')
+  }
+
+  // Ensure at least one room always exists
+  if (system.house.listAllRooms().length === 0) {
+    system.house.createRoomSafe({ name: 'general', createdBy: 'system' })
+    console.log('Created default room: general')
   }
 
   // Register MCP client tools from config (external tool servers)

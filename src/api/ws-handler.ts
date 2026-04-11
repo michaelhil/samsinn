@@ -69,8 +69,8 @@ export const createWSManager = (system: System): WSManager => {
   system.setOnRoomDeleted((_roomId, roomName) => {
     broadcast({ type: 'room_deleted', roomName })
   })
-  system.setOnMembershipChanged((_roomId, roomName, _agentId, agentName, action) => {
-    broadcast({ type: 'membership_changed', roomName, agentName, action })
+  system.setOnMembershipChanged((roomId, roomName, agentId, agentName, action) => {
+    broadcast({ type: 'membership_changed', roomId, roomName, agentId, agentName, action })
   })
 
   // Wire gateway health changes → broadcast to all clients

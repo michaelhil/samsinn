@@ -7,15 +7,12 @@
 
 import { createWSClient, type WSClient } from './ws-client.ts'
 import {
-  renderRooms,
+  renderRoomTabs,
   renderAgents,
   renderMessage,
   renderArtifacts,
-  renderTypingIndicators,
-  openPromptEditor,
-  openModelEditor,
-  openAgentInspector,
-  openFlowEditorModal,
+  renderThinkingIndicator,
+  removeThinkingIndicator,
   type UIMessage,
   type RoomProfile,
   type AgentInfo,
@@ -23,6 +20,20 @@ import {
   type ArtifactAction,
 } from './ui-renderer.ts'
 import { openTextEditorModal } from './modal.ts'
+import { createWorkspace } from './workspace.ts'
+
+// Lazy-loaded modals — only fetched on first use
+const lazyFlowEditor = async (
+  agents: Map<string, AgentInfo>, myAgentId: string,
+  onSave: (name: string, steps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>, loop: boolean, description?: string) => void,
+) => {
+  const { openFlowEditorModal } = await import('./flow-editor.ts')
+  openFlowEditorModal(agents, myAgentId, onSave)
+}
+const lazyAgentInspector = async (name: string) => {
+  const { openAgentInspector } = await import('./agent-inspector.ts')
+  openAgentInspector(name)
+}
 
 // === WS Protocol Types ===
 
@@ -39,13 +50,14 @@ type WSOutbound =
   | { type: 'turn_changed'; roomName: string; agentName?: string; waitingForHuman?: boolean }
   | { type: 'flow_event'; roomName: string; event: string; detail?: Record<string, unknown> }
   | { type: 'artifact_changed'; action: 'added' | 'updated' | 'removed'; artifact: ArtifactInfo }
-  | { type: 'membership_changed'; roomName: string; agentName: string; action: 'added' | 'removed' }
+  | { type: 'membership_changed'; roomId: string; roomName: string; agentId: string; agentName: string; action: 'added' | 'removed' }
   | { type: 'room_deleted'; roomName: string }
 
 // === State ===
 
 let client: WSClient | null = null
 let myAgentId = ''
+let myName = ''
 let sessionToken = localStorage.getItem('ta_session') ?? ''
 let selectedRoomId = ''
 let currentDeliveryMode = 'broadcast'
@@ -69,24 +81,26 @@ const roomMembers = new Map<string, Set<string>>()  // roomId → Set<agentId>
 // === DOM refs ===
 
 const $ = (sel: string) => document.querySelector(sel)!
-const roomList = $('#room-list') as HTMLElement
+const roomTabs = $('#room-tabs') as HTMLElement
+const roomTabsBar = $('#room-tabs-bar') as HTMLElement
+const roomInfoBar = $('#room-info-bar') as HTMLElement
 const agentList = $('#agent-list') as HTMLElement
 const noRoomState = $('#no-room-state') as HTMLElement
-const artifactPanel = $('#artifact-panel') as HTMLElement
-const artifactToggle = $('#artifact-toggle') as HTMLElement
-const artifactHeader = $('#artifact-header') as HTMLElement
-const artifactCount = $('#artifact-count') as HTMLElement
-const artifactListEl = $('#artifact-list') as HTMLElement
-const artifactAddRow = $('#artifact-add-row') as HTMLElement
+const chatArea = $('#chat-area') as HTMLElement
+const pinnedMessagesDiv = $('#pinned-messages') as HTMLElement
+const workspaceBar = $('#workspace-bar') as HTMLElement
+const workspacePane = $('#workspace-pane') as HTMLElement
+const workspaceContent = $('#workspace-content') as HTMLElement
+const workspaceLabel = $('#workspace-label') as HTMLElement
+const workspaceAddRow = $('#workspace-add-row') as HTMLElement
 const artifactInput = $('#artifact-input') as HTMLInputElement
 const btnArtifactSubmit = $('#btn-artifact-submit') as HTMLElement
-const roomHeader = $('#room-header') as HTMLElement
 const messagesDiv = $('#messages') as HTMLElement
 const chatForm = $('#chat-form') as HTMLFormElement
 const chatInput = $('#chat-input') as HTMLInputElement
-const roomName = $('#room-name') as HTMLElement
-const typingIndicators = $('#typing-indicators') as HTMLElement
-const connectionStatus = $('#connection-status') as HTMLElement
+// Thinking indicator timers (for cleanup)
+const thinkingTimers = new Map<string, number>()
+// Connection status removed — user identified by bold name in agent list
 const modeSelector = $('#mode-selector') as HTMLSelectElement
 const pauseToggle = $('#btn-pause-toggle') as HTMLButtonElement
 const roomModeInfo = $('#room-mode-info') as HTMLElement
@@ -98,38 +112,53 @@ const roomForm = $('#room-form') as HTMLFormElement
 const agentModal = $('#agent-modal') as HTMLDialogElement
 const agentForm = $('#agent-form') as HTMLFormElement
 
+// Sidebar
+const sidebar = $('#sidebar') as HTMLElement
+const btnCollapseSidebar = $('#btn-collapse-sidebar') as HTMLElement
+const settingsHeader = $('#settings-header') as HTMLElement
+const settingsToggle = $('#settings-toggle') as HTMLElement
+const settingsList = $('#settings-list') as HTMLElement
+const agentsHeader = $('#agents-header') as HTMLElement
+const agentsToggle = $('#agents-toggle') as HTMLElement
+const toolsHeader = $('#tools-header') as HTMLElement
+const toolsToggle = $('#tools-toggle') as HTMLElement
+const toolsList = $('#tools-list') as HTMLElement
+const skillsHeader = $('#skills-header') as HTMLElement
+const skillsToggle = $('#skills-toggle') as HTMLElement
+const skillsList = $('#skills-list') as HTMLElement
+
+// Workspace
+const workspace = createWorkspace({ bar: workspaceBar, pane: workspacePane, chatArea, label: workspaceLabel })
+
+// Pinned messages state
+const pinnedMessageIds = new Set<string>()
+const pinnedMessageData = new Map<string, { senderId: string; content: string; senderName?: string }>()
+
 // === Render helpers (delegate to ui-renderer) ===
 
 const send = (data: unknown) => client?.send(data)
 
-const refreshRooms = () => renderRooms(roomList, rooms, selectedRoomId, pausedRooms, selectRoom)
+const handleLeaveRoom = (roomId: string): void => {
+  const room = rooms.get(roomId)
+  if (!room) return
+  send({ type: 'remove_from_room', roomName: room.name, agentName: myName })
+}
+const refreshRooms = () => renderRoomTabs(roomTabs, rooms, selectedRoomId, pausedRooms, selectRoom, handleLeaveRoom)
 
 const refreshAgents = () => {
   const room = rooms.get(selectedRoomId)
   const memberIds = room ? roomMembers.get(room.id) : undefined
   renderAgents(
-    agentList, agents, agentStates, mutedAgents,
-    (name) => openPromptEditor(name, send),
-    (id, name) => { send({ type: 'remove_agent', name }); agents.delete(id); refreshAgents() },
+    agentList, agents, agentStates, mutedAgents, myAgentId,
     (name, muted) => {
       if (room) send({ type: 'set_muted', roomName: room.name, agentName: name, muted })
     },
-    (name) => { send({ type: 'cancel_generation', name }) },
-    (name) => openAgentInspector(name),
-    (name) => openModelEditor(name, (data) => {
-      send(data)
-      const updated = (data as { model?: string }).model
-      if (updated) {
-        for (const [id, a] of agents) {
-          if (a.name === name) { agents.set(id, { ...a, model: updated }); break }
-        }
-        refreshAgents()
-      }
-    }),
+    (name) => lazyAgentInspector(name),
     memberIds,
-    room ? (agentId, agentName) => send({ type: 'add_to_room', roomName: room.name, agentName }) : undefined,
+    room ? (_agentId, agentName) => send({ type: 'add_to_room', roomName: room.name, agentName }) : undefined,
     room ? (_agentId, agentName) => send({ type: 'remove_from_room', roomName: room.name, agentName }) : undefined,
   )
+  updateAgentsLabel()
 }
 
 const refreshModeSelector = (): void => {
@@ -190,37 +219,34 @@ const fetchArtifactsForRoom = async (room: RoomProfile): Promise<void> => {
     if (!res.ok) return
     const artifacts = await res.json() as ArtifactInfo[]
     for (const a of artifacts) allArtifacts.set(a.id, a)
-    refreshArtifactPanel(room)
+    refreshWorkspace(room)
     refreshModeSelector()
   } catch { /* ignore */ }
 }
 
-let artifactExpanded = false
+const handleArtifactAction = (action: ArtifactAction): void => {
+  if (action.kind === 'add_task') {
+    send({ type: 'update_artifact', artifactId: action.artifactId, body: { op: 'add_task', taskContent: action.content } })
+  } else if (action.kind === 'complete_task') {
+    send({ type: 'update_artifact', artifactId: action.artifactId, body: { op: action.completed ? 'complete_task' : 'update_task', taskId: action.taskId, status: action.completed ? 'completed' : 'pending' } })
+  } else if (action.kind === 'cast_vote') {
+    send({ type: 'cast_vote', artifactId: action.artifactId, optionId: action.optionId })
+  } else if (action.kind === 'remove') {
+    send({ type: 'remove_artifact', artifactId: action.artifactId })
+  }
+}
 
-const refreshArtifactPanel = (room: RoomProfile): void => {
+const refreshWorkspace = (room: RoomProfile): void => {
   const artifacts = getArtifactsForRoom(room.id)
+  workspace.setCount(artifacts.length)
+  workspace.show()
+  workspaceAddRow.classList.toggle('hidden', workspace.getMode() === 'collapsed')
 
-  artifactPanel.classList.toggle('hidden', !selectedRoomId)
-  artifactCount.textContent = artifacts.length > 0 ? `(${artifacts.length})` : ''
-  artifactToggle.textContent = artifactExpanded ? '▼' : '▶'
-  artifactListEl.classList.toggle('hidden', !artifactExpanded)
-  artifactAddRow.classList.toggle('hidden', !artifactExpanded)
-
-  if (artifactExpanded) {
+  if (workspace.getMode() !== 'collapsed') {
     if (artifacts.length > 0) {
-      renderArtifacts(artifactListEl, artifacts, myAgentId, (action: ArtifactAction) => {
-        if (action.kind === 'add_task') {
-          send({ type: 'update_artifact', artifactId: action.artifactId, body: { op: 'add_task', taskContent: action.content } })
-        } else if (action.kind === 'complete_task') {
-          send({ type: 'update_artifact', artifactId: action.artifactId, body: { op: action.completed ? 'complete_task' : 'update_task', taskId: action.taskId, status: action.completed ? 'completed' : 'pending' } })
-        } else if (action.kind === 'cast_vote') {
-          send({ type: 'cast_vote', artifactId: action.artifactId, optionId: action.optionId })
-        } else if (action.kind === 'remove') {
-          send({ type: 'remove_artifact', artifactId: action.artifactId })
-        }
-      })
+      renderArtifacts(workspaceContent, artifacts, myAgentId, handleArtifactAction)
     } else {
-      artifactListEl.innerHTML = '<p class="text-xs text-gray-400 italic py-0.5">No artifacts yet</p>'
+      workspaceContent.innerHTML = '<p class="text-xs text-gray-400 italic py-0.5">No artifacts yet</p>'
     }
   }
 }
@@ -234,13 +260,6 @@ const submitArtifact = (): void => {
   artifactInput.value = ''
 }
 
-artifactHeader.onclick = () => {
-  artifactExpanded = !artifactExpanded
-  const room = rooms.get(selectedRoomId)
-  if (room) refreshArtifactPanel(room)
-  if (artifactExpanded) setTimeout(() => artifactInput.focus(), 50)
-}
-
 btnArtifactSubmit.onclick = (e) => {
   e.stopPropagation()
   submitArtifact()
@@ -249,6 +268,132 @@ btnArtifactSubmit.onclick = (e) => {
 artifactInput.onkeydown = (e) => {
   if (e.key === 'Enter') { e.preventDefault(); submitArtifact() }
   if (e.key === 'Escape') { artifactInput.value = ''; artifactInput.blur() }
+}
+
+// --- Settings section ---
+settingsHeader.onclick = () => {
+  const nowHidden = settingsList.classList.toggle('hidden')
+  settingsToggle.textContent = nowHidden ? '▸ Settings' : '▾ Settings'
+}
+
+// --- Collapsible sidebar sections ---
+let agentsSectionExpanded = true
+let toolsLoaded = false
+let skillsLoaded = false
+let toolCount = 0
+let skillCount = 0
+
+const updateAgentsLabel = () => {
+  const arrow = agentsSectionExpanded ? '▾' : '▸'
+  agentsToggle.textContent = `${arrow} Agents (${agents.size})`
+}
+
+const updateToolsLabel = (expanded: boolean) => {
+  toolsToggle.textContent = `${expanded ? '▾' : '▸'} Tools${toolCount > 0 ? ` (${toolCount})` : ''}`
+}
+
+const updateSkillsLabel = (expanded: boolean) => {
+  skillsToggle.textContent = `${expanded ? '▾' : '▸'} Skills${skillCount > 0 ? ` (${skillCount})` : ''}`
+}
+
+// Fetch counts eagerly on load
+void fetch('/api/tools').then(r => r.ok ? r.json() : []).then((t: unknown[]) => { toolCount = t.length; updateToolsLabel(false) }).catch(() => {})
+void fetch('/api/skills').then(r => r.ok ? r.json() : []).then((s: unknown[]) => { skillCount = s.length; updateSkillsLabel(false) }).catch(() => {})
+
+agentsHeader.onclick = () => {
+  agentsSectionExpanded = !agentsSectionExpanded
+  agentList.classList.toggle('hidden', !agentsSectionExpanded)
+  updateAgentsLabel()
+}
+
+toolsHeader.onclick = async () => {
+  const nowHidden = toolsList.classList.toggle('hidden')
+  updateToolsLabel(!nowHidden)
+  if (!nowHidden && !toolsLoaded) {
+    toolsLoaded = true
+    const tools = await fetch('/api/tools').then(r => r.ok ? r.json() : []).catch(() => []) as Array<{ name: string; description: string }>
+    toolCount = tools.length
+    updateToolsLabel(true)
+    toolsList.innerHTML = ''
+    for (const t of tools) {
+      const row = document.createElement('div')
+      row.className = 'text-xs text-gray-600 py-0.5 px-3 hover:bg-gray-50 cursor-default truncate'
+      row.title = t.description
+      row.textContent = t.name
+      toolsList.appendChild(row)
+    }
+    if (tools.length === 0) toolsList.innerHTML = '<div class="text-xs text-gray-400 px-3 py-1">No tools</div>'
+  }
+}
+
+skillsHeader.onclick = async () => {
+  const nowHidden = skillsList.classList.toggle('hidden')
+  updateSkillsLabel(!nowHidden)
+  if (!nowHidden && !skillsLoaded) {
+    skillsLoaded = true
+    const skills = await fetch('/api/skills').then(r => r.ok ? r.json() : []).catch(() => []) as Array<{ name: string; description: string; tools: string[] }>
+    skillCount = skills.length
+    updateSkillsLabel(true)
+    skillsList.innerHTML = ''
+    for (const s of skills) {
+      const row = document.createElement('div')
+      row.className = 'px-3 py-1'
+      const name = document.createElement('div')
+      name.className = 'text-xs font-medium text-gray-700'
+      name.textContent = s.name
+      const desc = document.createElement('div')
+      desc.className = 'text-xs text-gray-400 truncate'
+      desc.textContent = s.description
+      row.appendChild(name)
+      row.appendChild(desc)
+      skillsList.appendChild(row)
+    }
+    if (skills.length === 0) skillsList.innerHTML = '<div class="text-xs text-gray-400 px-3 py-1">No skills</div>'
+  }
+}
+
+// --- Sidebar collapse ---
+const initSidebarCollapse = (): void => {
+  const collapsed = localStorage.getItem('samsinn-sidebar-collapsed') === 'true'
+  if (collapsed) sidebar.classList.add('sidebar-collapsed')
+
+  btnCollapseSidebar.onclick = () => {
+    sidebar.classList.toggle('sidebar-collapsed')
+    const isCollapsed = sidebar.classList.contains('sidebar-collapsed')
+    btnCollapseSidebar.textContent = isCollapsed ? '▶' : '◀'
+    localStorage.setItem('samsinn-sidebar-collapsed', String(isCollapsed))
+  }
+}
+initSidebarCollapse()
+
+// --- Message pinning ---
+const refreshPinnedMessages = (): void => {
+  if (pinnedMessageIds.size === 0) {
+    pinnedMessagesDiv.classList.add('hidden')
+    return
+  }
+  pinnedMessagesDiv.classList.remove('hidden')
+  pinnedMessagesDiv.innerHTML = ''
+  for (const id of pinnedMessageIds) {
+    const data = pinnedMessageData.get(id)
+    if (!data) continue
+    const row = document.createElement('div')
+    row.className = 'px-3 py-1 text-xs flex items-center gap-2 border-b border-amber-100'
+    const preview = data.content.length > 100 ? data.content.slice(0, 100) + '…' : data.content
+    row.innerHTML = `<span class="text-amber-600">📌</span> <span class="font-medium">${data.senderName ?? 'unknown'}:</span> <span class="text-gray-600 flex-1 truncate">${preview}</span>`
+    const unpin = document.createElement('button')
+    unpin.className = 'text-amber-400 hover:text-amber-600 text-xs'
+    unpin.textContent = '✕'
+    unpin.onclick = () => { pinnedMessageIds.delete(id); pinnedMessageData.delete(id); refreshPinnedMessages() }
+    row.appendChild(unpin)
+    pinnedMessagesDiv.appendChild(row)
+  }
+}
+
+const handlePin = (msgId: string, senderName: string, content: string): void => {
+  pinnedMessageIds.add(msgId)
+  pinnedMessageData.set(msgId, { senderId: '', content, senderName })
+  refreshPinnedMessages()
 }
 
 const updateModeUI = () => {
@@ -263,7 +408,23 @@ const updateModeUI = () => {
   }
 }
 
-const refreshTyping = () => renderTypingIndicators(typingIndicators, agentStates, selectedRoomId)
+const showThinking = (agentName: string): void => {
+  // Only show if agent is generating in the current room
+  const state = agentStates.get(agentName)
+  if (!state || state.state !== 'generating' || state.context !== `room:${selectedRoomId}`) return
+  // Don't duplicate
+  if (messagesDiv.querySelector(`[data-thinking-agent="${agentName}"]`)) return
+  const { timer } = renderThinkingIndicator(messagesDiv, agentName, (name) => {
+    send({ type: 'cancel_generation', name })
+  })
+  thinkingTimers.set(agentName, timer)
+}
+
+const hideThinking = (agentName: string): void => {
+  removeThinkingIndicator(messagesDiv, agentName)
+  const timer = thinkingTimers.get(agentName)
+  if (timer) { clearInterval(timer); thinkingTimers.delete(agentName) }
+}
 
 // === Room selection ===
 
@@ -274,20 +435,19 @@ const selectRoom = (roomId: string) => {
 
   // Show chat UI, hide empty state
   noRoomState.classList.add('hidden')
-  roomHeader.classList.remove('hidden')
-  messagesDiv.classList.remove('hidden')
-  chatForm.classList.remove('hidden')
+  roomTabsBar.classList.remove('hidden')
+  roomInfoBar.classList.remove('hidden')
+  chatArea.classList.remove('hidden')
 
-  roomName.textContent = room.name
   refreshRooms()
   updateModeUI()
-  refreshArtifactPanel(room)
+  refreshWorkspace(room)
   fetchArtifactsForRoom(room)
 
   messagesDiv.innerHTML = ''
   const cached = roomMessages.get(roomId)
   if (cached) {
-    for (const m of cached) renderMessage(messagesDiv, m, myAgentId, agents)
+    for (const m of cached) renderMessage(messagesDiv, m, myAgentId, agents, handlePin)
   } else {
     fetchRoomMessages(room.name)
   }
@@ -302,7 +462,7 @@ const fetchRoomMessages = async (name: string) => {
     roomMessages.set(data.profile.id, data.messages)
     if (selectedRoomId === data.profile.id) {
       messagesDiv.innerHTML = ''
-      for (const m of data.messages) renderMessage(messagesDiv, m, myAgentId, agents)
+      for (const m of data.messages) renderMessage(messagesDiv, m, myAgentId, agents, handlePin)
       messagesDiv.scrollTop = messagesDiv.scrollHeight
     }
   } catch { /* ignore */ }
@@ -332,7 +492,9 @@ const handleMessage = (raw: unknown) => {
           if (rs.members) roomMembers.set(roomId, new Set(rs.members))
         }
       }
-      refreshRooms(); refreshAgents(); refreshTyping()
+      refreshRooms(); refreshAgents()
+      // Always show tabs bar when rooms exist
+      if (rooms.size > 0) roomTabsBar.classList.remove('hidden')
       if (!selectedRoomId && rooms.size > 0) {
         selectRoom(rooms.values().next().value!.id)
       }
@@ -359,8 +521,11 @@ const handleMessage = (raw: unknown) => {
       const msgs = roomMessages.get(roomId)!
       if (!msgs.some(existing => existing.id === m.id)) {
         msgs.push(m)
+        // Hide thinking indicator when agent's message arrives
+        const senderAgent = agents.get(m.senderId)
+        if (senderAgent && m.type === 'chat') hideThinking(senderAgent.name)
         if (roomId === selectedRoomId) {
-          renderMessage(messagesDiv, m, myAgentId, agents)
+          renderMessage(messagesDiv, m, myAgentId, agents, handlePin)
           messagesDiv.scrollTop = messagesDiv.scrollHeight
         }
       }
@@ -368,12 +533,19 @@ const handleMessage = (raw: unknown) => {
     }
     case 'agent_state': {
       agentStates.set(msg.agentName, { state: msg.state, context: msg.context })
-      refreshAgents(); refreshTyping()
+      if (msg.state === 'generating') {
+        showThinking(msg.agentName)
+      } else {
+        hideThinking(msg.agentName)
+      }
+      refreshAgents()
       break
     }
     case 'room_created': {
       rooms.set(msg.profile.id, msg.profile)
       refreshRooms()
+      // Always show tabs bar when rooms exist
+      if (rooms.size > 0) roomTabsBar.classList.remove('hidden')
       // Auto-select if no room is currently selected
       if (!selectedRoomId) {
         selectRoom(msg.profile.id)
@@ -390,7 +562,7 @@ const handleMessage = (raw: unknown) => {
         if (agent.name === msg.agentName) { agents.delete(id); break }
       }
       agentStates.delete(msg.agentName)
-      refreshAgents(); refreshTyping()
+      refreshAgents()
       break
     }
     case 'delivery_mode_changed': {
@@ -450,26 +622,18 @@ const handleMessage = (raw: unknown) => {
       // Refresh if current room is affected
       const affectedRoom = rooms.get(selectedRoomId)
       if (affectedRoom && (artifact.scope.length === 0 || artifact.scope.includes(selectedRoomId))) {
-        refreshArtifactPanel(affectedRoom)
+        refreshWorkspace(affectedRoom)
         refreshModeSelector()
       }
       break
     }
     case 'membership_changed': {
-      const changedRoom = [...rooms.values()].find(r => r.name === msg.roomName)
-      if (changedRoom) {
-        if (!roomMembers.has(changedRoom.id)) roomMembers.set(changedRoom.id, new Set())
-        const memberSet = roomMembers.get(changedRoom.id)!
-        // Find agent by name to get their ID
-        for (const [agentId, agent] of agents) {
-          if (agent.name === msg.agentName) {
-            if (msg.action === 'added') memberSet.add(agentId)
-            else memberSet.delete(agentId)
-            break
-          }
-        }
-        if (changedRoom.id === selectedRoomId) refreshAgents()
-      }
+      // Use IDs directly — no fragile name-based lookups
+      if (!roomMembers.has(msg.roomId)) roomMembers.set(msg.roomId, new Set())
+      const memberSet = roomMembers.get(msg.roomId)!
+      if (msg.action === 'added') memberSet.add(msg.agentId)
+      else memberSet.delete(msg.agentId)
+      if (msg.roomId === selectedRoomId) refreshAgents()
       break
     }
     case 'room_deleted': {
@@ -481,10 +645,10 @@ const handleMessage = (raw: unknown) => {
         if (selectedRoomId === deletedRoom.id) {
           selectedRoomId = ''
           noRoomState.classList.remove('hidden')
-          roomHeader.classList.add('hidden')
-          messagesDiv.classList.add('hidden')
-          chatForm.classList.add('hidden')
-          artifactPanel.classList.add('hidden')
+          roomTabsBar.classList.add('hidden')
+          roomInfoBar.classList.add('hidden')
+          chatArea.classList.add('hidden')
+          workspace.hide()
         }
       }
       refreshRooms()
@@ -511,8 +675,7 @@ const handleMessage = (raw: unknown) => {
 
 const connect = (name: string) => {
   client = createWSClient(name, sessionToken, handleMessage, (connected) => {
-    connectionStatus.textContent = connected ? `Connected as ${name}` : 'Disconnected — reconnecting...'
-    connectionStatus.className = `text-sm ${connected ? 'text-green-600' : 'text-red-500'}`
+    // Connection state visible through agent list + Ollama indicator
     chatInput.disabled = !connected
     if (connected) chatForm.querySelector('button')!.removeAttribute('disabled')
   })
@@ -599,7 +762,7 @@ modeSelector.onchange = () => {
   // Create flow
   if (val === '__create_flow__') {
     refreshModeSelector()  // revert selector to current state
-    openFlowEditorModal(agents, myAgentId, (name, steps, loop, description) => {
+    lazyFlowEditor(agents, myAgentId, (name, steps, loop, description) => {
       send({ type: 'add_artifact', artifactType: 'flow', title: name, body: { steps, loop }, scope: [room.name], ...(description !== undefined ? { description } : {}) })
     })
     return
@@ -818,12 +981,14 @@ nameForm.onsubmit = (e) => {
   e.preventDefault()
   const name = (new FormData(nameForm).get('name') as string).trim()
   if (!name) return
+  myName = name
   localStorage.setItem('ta_name', name)
   nameModal.close()
   connect(name)
 }
 
 if (savedName) {
+  myName = savedName
   connect(savedName)
 } else {
   nameModal.showModal()

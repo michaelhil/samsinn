@@ -44,90 +44,114 @@
     .mute-btn:hover { background: #fee2e2; border-color: #fca5a5; }
     .mute-btn.muted { background: #fecaca; color: #991b1b; border-color: #fca5a5; }
     .agent-muted { opacity: 0.5; }
+    .sidebar-collapsed { width: 32px !important; min-width: 32px !important; max-width: 32px !important; overflow: hidden; }
+    .sidebar-collapsed .sidebar-content { display: none; }
+    .workspace-handle { cursor: row-resize; }
+    .workspace-handle:active { background: #dbeafe; }
   </style>
 </head>
 <body class="bg-gray-50 h-screen flex flex-col">
-  <!-- Header -->
-  <header class="bg-white border-b px-4 py-2 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <h1 class="text-lg font-semibold text-gray-800">samsinn</h1>
-      <button id="btn-house-prompt" class="prompt-icon" title="House Rules">H</button>
-      <button id="btn-response-format" class="prompt-icon" title="Response Format">F</button>
-      <button id="btn-ollama-dashboard" class="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-gray-100" title="Ollama Dashboard">
-        <span id="ollama-status-dot" class="inline-block w-2 h-2 rounded-full bg-gray-400"></span>
-        <span class="text-gray-500">Ollama</span>
-      </button>
-    </div>
-    <div id="connection-status" class="text-sm text-gray-500">Connecting...</div>
-  </header>
 
-  <!-- Main layout: sidebar + chat + agent panel -->
+  <!-- No header — app name + settings in sidebar -->
+
   <main class="flex flex-1 overflow-hidden">
-    <!-- Room sidebar -->
-    <aside id="room-sidebar" class="w-40 shrink-0 bg-white border-r flex flex-col">
-      <div class="p-3 border-b flex items-center justify-between">
-        <span class="text-sm font-medium text-gray-600">Rooms</span>
-        <button id="btn-create-room" class="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">+ Room</button>
+    <!-- Sidebar (left, only sidebar) -->
+    <aside id="sidebar" class="shrink-0 bg-white border-r flex flex-col transition-all" style="width: fit-content; min-width: 120px; max-width: 200px">
+      <!-- Sidebar header -->
+      <div class="p-2 border-b flex items-center justify-between gap-2">
+        <span class="sidebar-content text-sm font-semibold text-gray-700 whitespace-nowrap">samsinn</span>
+        <button id="btn-collapse-sidebar" class="text-gray-400 hover:text-gray-600 w-6 h-6 flex items-center justify-center text-xs" title="Toggle sidebar">◀</button>
       </div>
-      <div id="room-list" class="flex-1 overflow-y-auto"></div>
+
+      <!-- Agents section -->
+      <div class="sidebar-content border-b">
+        <div id="agents-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-gray-50">
+          <span id="agents-toggle" class="text-xs font-medium text-gray-500 uppercase whitespace-nowrap">▾ Agents</span>
+          <button id="btn-create-agent" class="text-xs text-green-500 hover:text-green-700 font-bold" title="Create Agent">+</button>
+        </div>
+        <div id="agent-list" class="overflow-y-auto max-h-72"></div>
+      </div>
+
+      <!-- Tools section (collapsed by default) -->
+      <div class="sidebar-content border-b">
+        <div id="tools-header" class="px-3 py-1.5 cursor-pointer hover:bg-gray-50">
+          <span id="tools-toggle" class="text-xs font-medium text-gray-500 uppercase whitespace-nowrap">▸ Tools</span>
+        </div>
+        <div id="tools-list" class="overflow-y-auto max-h-48 hidden"></div>
+      </div>
+
+      <!-- Skills section (collapsed by default) -->
+      <div class="sidebar-content border-b">
+        <div id="skills-header" class="px-3 py-1.5 cursor-pointer hover:bg-gray-50">
+          <span id="skills-toggle" class="text-xs font-medium text-gray-500 uppercase whitespace-nowrap">▸ Skills</span>
+        </div>
+        <div id="skills-list" class="overflow-y-auto max-h-48 hidden"></div>
+      </div>
+
+      <!-- Settings section (collapsed by default) -->
+      <div class="sidebar-content">
+        <div id="settings-header" class="px-3 py-1.5 cursor-pointer hover:bg-gray-50">
+          <span id="settings-toggle" class="text-xs font-medium text-gray-500 uppercase whitespace-nowrap">▸ Settings</span>
+        </div>
+        <div id="settings-list" class="hidden">
+          <button id="btn-house-prompt" class="w-full text-left px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">System Prompt</button>
+          <button id="btn-response-format" class="w-full text-left px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">Format Prompt</button>
+          <button id="btn-ollama-dashboard" class="w-full text-left px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-1.5"><span id="ollama-status-dot" class="inline-block w-2 h-2 rounded-full bg-gray-400"></span>Ollama</button>
+        </div>
+      </div>
+
     </aside>
 
-    <!-- Chat area -->
+    <!-- Center section -->
     <section class="flex-1 flex flex-col min-w-0">
-      <!-- Empty state (no room selected) -->
+      <!-- Empty state -->
       <div id="no-room-state" class="flex-1 flex items-center justify-center text-gray-400 text-sm">
         Create a room to get started
       </div>
-      <!-- Room header -->
-      <div id="room-header" class="px-4 py-2 border-b bg-white hidden">
-        <div class="flex items-center gap-2">
-          <div id="room-name" class="font-medium text-gray-800"></div>
+
+      <!-- Room tabs bar -->
+      <div id="room-tabs-bar" class="border-b bg-white flex items-center hidden">
+        <div id="room-tabs" class="flex flex-1 overflow-x-auto"></div>
+        <button id="btn-create-room" class="text-xs text-blue-500 hover:text-blue-700 font-bold px-2 shrink-0" title="Create Room">+</button>
+        <div class="flex items-center gap-1 px-2 border-l shrink-0">
           <button id="btn-room-prompt" class="prompt-icon" title="Room Prompt">R</button>
-          <div class="ml-auto flex items-center gap-1">
-            <button id="btn-pause-toggle" class="w-6 h-6 flex items-center justify-center text-sm rounded hover:bg-gray-200" title="Pause/Resume">▶</button>
-            <select id="mode-selector" class="text-xs border rounded px-2 py-1 bg-gray-50">
-              <option value="broadcast">Broadcast</option>
-            </select>
-          </div>
+          <button id="btn-pause-toggle" class="w-5 h-5 flex items-center justify-center text-xs rounded hover:bg-gray-200" title="Pause/Resume">▶</button>
+          <select id="mode-selector" class="text-xs border rounded px-1 py-0.5 bg-gray-50">
+            <option value="broadcast">Broadcast</option>
+          </select>
         </div>
-        <div id="room-mode-info" class="text-xs text-gray-400 h-4"></div>
-        <div id="typing-indicators" class="text-xs text-blue-500 h-4"></div>
       </div>
 
-      <!-- Artifact panel (collapsible) -->
-      <div id="artifact-panel" class="border-b bg-gray-50 hidden">
-        <div id="artifact-header" class="px-4 py-1.5 flex items-center gap-2 cursor-pointer hover:bg-gray-100">
-          <span id="artifact-toggle" class="text-xs text-gray-400">▶</span>
-          <span class="text-xs font-medium text-gray-600">Artifacts</span>
-          <span id="artifact-count" class="text-xs text-gray-400"></span>
-        </div>
-        <div id="artifact-list" class="px-4 pt-1 pb-1 space-y-1 hidden"></div>
-        <div id="artifact-add-row" class="px-4 pb-2 flex gap-2 hidden">
+      <!-- Room info bar (mode info) -->
+      <div id="room-info-bar" class="px-3 flex items-center gap-3 h-5 hidden">
+        <div id="room-mode-info" class="text-xs text-gray-400"></div>
+      </div>
+
+      <!-- Chat area (messages + pinned + input) -->
+      <div id="chat-area" class="flex-1 flex flex-col min-h-0 overflow-hidden hidden">
+        <div id="pinned-messages" class="border-b bg-amber-50 max-h-32 overflow-y-auto hidden"></div>
+        <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
+        <form id="chat-form" class="p-3 border-t bg-white flex gap-2">
+          <input id="chat-input" type="text" placeholder="Type a message..."
+                 class="flex-1 px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                 autocomplete="off" disabled>
+          <button type="submit" id="btn-send" class="px-4 py-2 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 disabled:opacity-50" disabled>Send</button>
+        </form>
+      </div>
+
+      <!-- Workspace bar (clickable toggle) -->
+      <div id="workspace-bar" class="h-7 bg-gray-100 border-t flex items-center justify-center cursor-pointer hover:bg-gray-200 select-none hidden">
+        <span id="workspace-label" class="text-xs text-gray-500 font-medium">▲ Workspace</span>
+      </div>
+      <!-- Workspace pane (resizable) -->
+      <div id="workspace-pane" class="border-t overflow-y-auto hidden">
+        <div id="workspace-content" class="p-3 space-y-2"></div>
+        <div id="workspace-add-row" class="px-3 pb-2 flex gap-2 hidden">
           <input id="artifact-input" type="text" placeholder="New task list..." class="flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300">
           <button id="btn-artifact-submit" type="button" class="text-xs text-blue-500 hover:text-blue-700 font-medium">Add</button>
         </div>
       </div>
-
-      <!-- Messages -->
-      <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-2 hidden"></div>
-
-      <!-- Chat input -->
-      <form id="chat-form" class="p-3 border-t bg-white flex gap-2 hidden">
-        <input id="chat-input" type="text" placeholder="Type a message..."
-               class="flex-1 px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-               autocomplete="off" disabled>
-        <button type="submit" id="btn-send" class="px-4 py-2 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 disabled:opacity-50" disabled>Send</button>
-      </form>
     </section>
-
-    <!-- Agent panel -->
-    <aside id="agent-panel" class="w-40 shrink-0 bg-white border-l flex flex-col">
-      <div class="p-3 border-b flex items-center justify-between">
-        <span class="text-sm font-medium text-gray-600">Agents</span>
-        <button id="btn-create-agent" class="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600">+ Agent</button>
-      </div>
-      <div id="agent-list" class="flex-1 overflow-y-auto"></div>
-    </aside>
   </main>
 
   <!-- Create Room Modal -->
