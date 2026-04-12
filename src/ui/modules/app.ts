@@ -470,8 +470,9 @@ $selectedRoomId.listen((roomId, prevRoomId) => {
     // Fetch artifacts
     fetchArtifactsForRoom(roomId, room.name)
 
-    // Render messages
+    // Render messages — stamp roomId on the container for defensive checks
     messagesDiv.innerHTML = ''
+    messagesDiv.setAttribute('data-room-id', roomId)
     messagesDiv.style.scrollBehavior = 'auto'
     const cached = $roomMessages.get()[roomId]
     if (cached) {
@@ -523,7 +524,9 @@ $selectedAgentId.listen(async (agentId) => {
 
 // --- New messages in current room: append to DOM ---
 $roomMessages.listen((allMessages, _old, changedRoomId) => {
+  // Double-check: both the store and the DOM container must agree on which room is displayed
   if (!changedRoomId || changedRoomId !== $selectedRoomId.get()) return
+  if (messagesDiv.getAttribute('data-room-id') !== changedRoomId) return
   // The subscription fires after setKey. We need to render only new messages.
   // Since we replace the full array in the store, we compare with what's in the DOM.
   const msgs = allMessages[changedRoomId] ?? []
@@ -541,6 +544,9 @@ $roomMessages.listen((allMessages, _old, changedRoomId) => {
       messagesDiv.querySelector(`[data-msg-id="${id}"]`)?.remove()
     }
   }
+  // Ensure thinking indicators stay at the bottom (after newly appended messages)
+  syncThinkingIndicators()
+
   // Scroll to bottom if near bottom
   if (messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < 100) {
     messagesDiv.scrollTop = messagesDiv.scrollHeight
@@ -569,28 +575,43 @@ const clearThinkingIndicator = (agentId: string): void => {
   firstChunkSeen.delete(agentId)
 }
 
-$agents.listen((agents, _old, changedId) => {
+// Sync thinking indicators: clear stale ones, ensure active ones are at the bottom.
+// Called after any change to agents, messages, or room selection.
+const syncThinkingIndicators = (): void => {
   const selectedRoom = $selectedRoomId.get()
   if (!selectedRoom) return
+  const agents = $agents.get()
 
-  if (!changedId) {
-    // Full set (snapshot) — clear all ephemeral thinking indicators.
-    // Real-time agent_state events will recreate them as needed.
-    for (const [id] of thinkingState) clearThinkingIndicator(id)
-    return
+  // Determine which agents should have indicators in this room
+  const shouldShow = new Set<string>()
+  for (const [id, agent] of Object.entries(agents)) {
+    if (agent.state === 'generating' && agent.context === selectedRoom) {
+      shouldShow.add(id)
+    }
   }
 
-  // Single agent changed
-  const agent = agents[changedId]
-  if (!agent) {
-    clearThinkingIndicator(changedId)
-    return
+  // Clear indicators that shouldn't be showing
+  for (const [id] of thinkingState) {
+    if (!shouldShow.has(id)) clearThinkingIndicator(id)
   }
-  if (agent.state === 'generating' && agent.context === selectedRoom) {
-    ensureThinkingIndicator(changedId, agent.name)
-  } else {
-    clearThinkingIndicator(changedId)
+
+  // Ensure indicators for active agents are at the bottom of messagesDiv
+  for (const id of shouldShow) {
+    const agent = agents[id]!
+    const existing = messagesDiv.querySelector(`[data-thinking-agent="${agent.name}"]`)
+    if (existing) {
+      // Move to bottom if not already last child
+      if (existing !== messagesDiv.lastElementChild) {
+        messagesDiv.appendChild(existing)
+      }
+    } else {
+      ensureThinkingIndicator(id, agent.name)
+    }
   }
+}
+
+$agents.listen((_agents, _old, _changedId) => {
+  syncThinkingIndicators()
 })
 
 // --- Thinking preview content ---
