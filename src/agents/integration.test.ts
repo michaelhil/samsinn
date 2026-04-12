@@ -565,7 +565,7 @@ describe('Integration — Full message lifecycle', () => {
 
     expect(agent.state.get()).toBe('idle')
     expect(states).toHaveLength(2)
-    expect(states[1]).toEqual({ state: 'idle', context: intro.profile.id })
+    expect(states[1]).toEqual({ state: 'idle', context: undefined })
   })
 })
 

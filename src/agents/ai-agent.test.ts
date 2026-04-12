@@ -504,9 +504,8 @@ describe('Agent state', () => {
     const blockingProvider: LLMProvider = {
       chat: () => new Promise(resolve => {
         resolveChat = () => resolve({
-          content: '::PASS:: done',
-          generationMs: 100,
-          tokensUsed: { prompt: 10, completion: 5 },
+          content: '', generationMs: 100, tokensUsed: { prompt: 10, completion: 5 },
+          toolCalls: makePassToolCalls('done'),
         })
       }),
       models: async () => [],
@@ -529,7 +528,7 @@ describe('Agent state', () => {
 
     expect(agent.state.get()).toBe('idle')
     expect(states).toHaveLength(2)
-    expect(states[1]).toEqual({ state: 'idle', context: 'room-1' })
+    expect(states[1]).toEqual({ state: 'idle', context: undefined })
   })
 
   test('unsubscribe stops notifications', async () => {

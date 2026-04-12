@@ -135,7 +135,7 @@ export const createAIAgent = (
   const EVAL_COOLDOWN_MS = 500
 
   const tryEvaluate = (triggerRoomId: string): void => {
-    if (cm.isGenerating(triggerRoomId)) {
+    if (cm.isBusy()) {
       cm.addPending(triggerRoomId)
       return
     }
@@ -195,14 +195,19 @@ export const createAIAgent = (
       } finally {
         if (cm.isEpochCurrent(epoch)) {
           cm.endGeneration(triggerRoomId)
-          if (cm.consumePending(triggerRoomId)) {
+          // Check for pending work: same room first, then any other room
+          const nextRoom = cm.consumePending(triggerRoomId)
+            ? triggerRoomId
+            : cm.nextPending() ?? undefined
+          if (nextRoom) {
+            if (nextRoom !== triggerRoomId) cm.consumePending(nextRoom)
             // After a respond, delay re-evaluation to let other agents' messages coalesce
             if (wasRespond) {
               setTimeout(() => {
-                if (cm.isEpochCurrent(epoch)) tryEvaluate(triggerRoomId)
+                if (cm.isEpochCurrent(epoch)) tryEvaluate(nextRoom)
               }, EVAL_COOLDOWN_MS)
             } else {
-              tryEvaluate(triggerRoomId)
+              tryEvaluate(nextRoom)
             }
           }
         }

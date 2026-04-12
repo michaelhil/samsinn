@@ -1,13 +1,17 @@
 // ============================================================================
 // ConcurrencyManager — Per-agent concurrency and state tracking.
 //
-// Owns: generatingContexts, pendingContexts, idleResolvers, stateSubscribers,
-// and generationEpoch. Extracted from ai-agent.ts to keep that file focused
-// on context building and evaluation.
+// One evaluation at a time per agent. If a message arrives in room B while
+// the agent is generating for room A, room B is queued. When room A finishes,
+// the agent picks up pending rooms in order.
 //
-// whenIdle() waits for both the generation loop and pending queue to drain.
-// cancelAll() clears generation state — the generationEpoch guard ensures
-// in-flight results from cancelled generations are silently discarded.
+// State model: exactly one of { idle } or { generating, context: roomId }.
+// No ambiguity, no multi-room parallelism. The LLM processes one request
+// at a time anyway (gateway semaphore), so parallel evals would just queue
+// at the LLM layer and complicate the state model for no benefit.
+//
+// generationEpoch: incremented on cancelAll(). In-flight async results from
+// a cancelled epoch are silently discarded.
 // ============================================================================
 
 import type { AgentState, StateSubscriber, StateValue } from '../core/types.ts'
@@ -16,11 +20,14 @@ const AGENT_TIMEOUT_MS = 30_000
 
 export interface ConcurrencyManager {
   readonly state: AgentState
-  readonly isGenerating: (key: string) => boolean
-  readonly startGeneration: (key: string) => void
-  readonly endGeneration: (key: string) => void
-  readonly addPending: (key: string) => void
-  readonly consumePending: (key: string) => boolean
+  readonly isBusy: () => boolean
+  readonly getActiveRoom: () => string | undefined
+  readonly startGeneration: (roomId: string) => void
+  readonly endGeneration: (roomId: string) => void
+  readonly addPending: (roomId: string) => void
+  readonly consumePending: (roomId: string) => boolean
+  readonly hasPending: () => boolean
+  readonly nextPending: () => string | undefined
   readonly epochAtStart: () => number
   readonly isEpochCurrent: (epoch: number) => boolean
   readonly whenIdle: (timeoutMs?: number) => Promise<void>
@@ -29,21 +36,18 @@ export interface ConcurrencyManager {
 }
 
 export const createConcurrencyManager = (agentId: string): ConcurrencyManager => {
-  const generatingContexts = new Set<string>()
-  const pendingContexts = new Set<string>()
+  let activeRoom: string | undefined      // the ONE room currently generating
+  const pendingRooms = new Set<string>()   // rooms waiting for their turn
   let idleResolvers: Array<() => void> = []
   const stateSubscribers = new Set<StateSubscriber>()
   let generationEpoch = 0
-
-  // Track which room the agent is currently generating in
-  let generatingContext: string | undefined
 
   const notifyState = (value: StateValue, context?: string): void => {
     for (const fn of stateSubscribers) fn(value, agentId, context)
   }
 
   const checkIdle = (): void => {
-    if (generatingContexts.size === 0 && pendingContexts.size === 0) {
+    if (!activeRoom && pendingRooms.size === 0) {
       const resolvers = idleResolvers
       idleResolvers = []
       for (const resolve of resolvers) resolve()
@@ -51,8 +55,8 @@ export const createConcurrencyManager = (agentId: string): ConcurrencyManager =>
   }
 
   const state: AgentState = {
-    get: () => generatingContexts.size > 0 ? 'generating' : 'idle',
-    getContext: () => generatingContext,
+    get: () => activeRoom ? 'generating' : 'idle',
+    getContext: () => activeRoom,
     subscribe: (fn: StateSubscriber) => {
       stateSubscribers.add(fn)
       return () => { stateSubscribers.delete(fn) }
@@ -60,9 +64,7 @@ export const createConcurrencyManager = (agentId: string): ConcurrencyManager =>
   }
 
   const whenIdle = (timeoutMs = AGENT_TIMEOUT_MS): Promise<void> => {
-    if (generatingContexts.size === 0 && pendingContexts.size === 0) {
-      return Promise.resolve()
-    }
+    if (!activeRoom && pendingRooms.size === 0) return Promise.resolve()
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error(`whenIdle timed out after ${timeoutMs}ms`)),
@@ -74,28 +76,32 @@ export const createConcurrencyManager = (agentId: string): ConcurrencyManager =>
 
   return {
     state,
-    isGenerating: (key: string) => generatingContexts.has(key),
-    startGeneration: (key: string) => { generatingContexts.add(key); generatingContext = key },
-    endGeneration: (key: string) => {
-      generatingContexts.delete(key)
-      if (generatingContexts.size === 0) generatingContext = undefined
-      notifyState('idle', key)
+    isBusy: () => activeRoom !== undefined,
+    getActiveRoom: () => activeRoom,
+    startGeneration: (roomId: string) => { activeRoom = roomId },
+    endGeneration: (_roomId: string) => {
+      activeRoom = undefined
+      notifyState('idle')
       checkIdle()
     },
-    addPending: (key: string) => { pendingContexts.add(key) },
-    consumePending: (key: string) => {
-      if (!pendingContexts.has(key)) return false
-      pendingContexts.delete(key)
+    addPending: (roomId: string) => { pendingRooms.add(roomId) },
+    consumePending: (roomId: string) => {
+      if (!pendingRooms.has(roomId)) return false
+      pendingRooms.delete(roomId)
       return true
+    },
+    hasPending: () => pendingRooms.size > 0,
+    nextPending: () => {
+      const first = pendingRooms.values().next()
+      return first.done ? undefined : first.value
     },
     epochAtStart: () => generationEpoch,
     isEpochCurrent: (epoch: number) => generationEpoch === epoch,
     whenIdle,
     cancelAll: () => {
       generationEpoch++
-      generatingContexts.clear()
-      pendingContexts.clear()
-      generatingContext = undefined
+      activeRoom = undefined
+      pendingRooms.clear()
       const resolvers = idleResolvers
       idleResolvers = []
       for (const resolve of resolvers) resolve()
