@@ -306,7 +306,7 @@ describe('AI Agent — unit tests', () => {
     const blockingProvider: LLMProvider = {
       chat: () => new Promise(resolve => {
         resolveChat = () => resolve({
-          content: '::PASS:: done',
+          content: '', toolCalls: makePassToolCalls('done'),
           generationMs: 100,
           tokensUsed: { prompt: 10, completion: 5 },
         })
@@ -339,7 +339,7 @@ describe('AI Agent — unit tests', () => {
         callCount++
         await new Promise(resolve => setTimeout(resolve, 20))
         return {
-          content: '::PASS:: done',
+          content: '', toolCalls: makePassToolCalls('done'),
           generationMs: 20,
           tokensUsed: { prompt: 10, completion: 5 },
         }
@@ -367,7 +367,7 @@ describe('[NEW] message tagging', () => {
       chat: async (req) => {
         capturedMessages = req.messages
         return {
-          content: '::PASS:: done',
+          content: '', toolCalls: makePassToolCalls('done'),
           generationMs: 10,
           tokensUsed: { prompt: 10, completion: 5 },
         }
@@ -431,7 +431,7 @@ describe('[NEW] message tagging', () => {
       chat: async (req) => {
         capturedMessages = req.messages
         return {
-          content: '::PASS:: done',
+          content: '', toolCalls: makePassToolCalls('done'),
           generationMs: 10,
           tokensUsed: { prompt: 10, completion: 5 },
         }
@@ -464,7 +464,7 @@ describe('[NEW] message tagging', () => {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
         return {
-          content: '::PASS:: done',
+          content: '', toolCalls: makePassToolCalls('done'),
           generationMs: 10,
           tokensUsed: { prompt: 10, completion: 5 },
         }
