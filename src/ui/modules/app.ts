@@ -563,6 +563,27 @@ const ensureThinkingIndicator = (agentId: string, agentName: string): void => {
     send({ type: 'cancel_generation', name })
   })
   thinkingState.set(agentId, { timer, name: agentName })
+
+  // Set label to match current known phase (not always "Building context")
+  const ctx = $agentContexts.get()[agentId]
+  const toolText = $thinkingTools.get()[agentId] ?? ''
+  if (toolText === '__thinking__') {
+    updateThinkingLabel(messagesDiv, agentName, `${agentName}: Thinking...`)
+    updateThinkingPreviewStyle(messagesDiv, agentName, true)
+  } else if (ctx) {
+    // Context ready, possibly generating
+    if (firstChunkSeen.has(agentId) || toolText) {
+      updateThinkingLabel(messagesDiv, agentName, `${agentName}: Generating...`)
+    } else {
+      updateThinkingLabel(messagesDiv, agentName, `${agentName}: Waiting for ${ctx.model}...`)
+    }
+    showContextIcon(messagesDiv, agentName, () => showContextModal(ctx, $agentWarnings.get()[agentId]))
+  }
+  // If no context yet, default "Building context..." from renderThinkingIndicator is correct
+
+  // Restore preview text if available
+  const preview = $thinkingPreviews.get()[agentId]
+  if (preview) updateThinkingPreview(messagesDiv, agentName, preview)
 }
 
 const clearThinkingIndicator = (agentId: string): void => {
