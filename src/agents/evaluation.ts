@@ -110,6 +110,9 @@ const streamWithRetry = async (
       return { content: response.content, toolCalls: response.toolCalls, durationMs: response.generationMs }
     } catch (err) {
       if (signal?.aborted) throw err  // Don't retry if cancelled
+      // Don't retry permanent errors (model not found, bad config)
+      const { OllamaError } = await import('../llm/ollama.ts')
+      if (err instanceof OllamaError && err.isPermanent) throw err
       const errMsg = err instanceof Error ? err.message : String(err)
       if (attempt < LLM_RETRIES) {
         onEvent?.({ kind: 'warning', message: `LLM call failed (attempt ${attempt + 1}/${LLM_RETRIES + 1}), retrying: ${errMsg}` })
@@ -197,8 +200,11 @@ export const evaluate = async (
     // Max iterations reached
     return makeResult({ response: { action: 'pass', reason: `Tool call loop exceeded ${maxToolIterations} iterations` }, generationMs: totalGenerationMs, triggerRoomId })
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'unknown'
-    onEvent?.({ kind: 'warning', message: `LLM error: ${errMsg}` })
+    const { OllamaError } = await import('../llm/ollama.ts')
+    const errMsg = err instanceof OllamaError && err.isPermanent
+      ? `Model error: ${err.message} — check agent config`
+      : err instanceof Error ? err.message : 'unknown'
+    onEvent?.({ kind: 'warning', message: errMsg })
     return makeResult({ response: { action: 'pass', reason: `LLM error: ${errMsg}` }, generationMs: totalGenerationMs, triggerRoomId })
   }
 }

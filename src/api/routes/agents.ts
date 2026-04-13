@@ -55,10 +55,16 @@ export const agentRoutes: RouteEntry[] = [
       if (!body.name || !body.model || !body.systemPrompt) {
         return errorResponse('name, model, and systemPrompt are required')
       }
+      // Best-effort model validation — warn but don't block
+      const available = system.ollama.getHealth().availableModels
+      const requestedModel = body.model as string
+      if (available.length > 0 && !available.includes(requestedModel)) {
+        console.warn(`[agents] Model "${requestedModel}" not in available models: ${available.join(', ')}`)
+      }
       try {
         const agent = await system.spawnAIAgent({
           name: body.name as string,
-          model: body.model as string,
+          model: requestedModel,
           systemPrompt: body.systemPrompt as string,
           temperature: body.temperature as number | undefined,
           historyLimit: body.historyLimit as number | undefined,

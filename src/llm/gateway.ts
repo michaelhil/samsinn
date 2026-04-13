@@ -104,6 +104,7 @@ export interface LLMGateway extends LLMProvider {
   readonly unloadModel: (name: string) => Promise<void>
   readonly onHealthChange: (cb: HealthChangeCallback) => void
   readonly resetCircuitBreaker: () => void
+  readonly refreshHealth: () => void
   readonly dispose: () => void
 }
 
@@ -404,7 +405,11 @@ export const createLLMGateway = (
 
       return response
     } catch (err) {
-      recordFailure()
+      // Don't trip circuit breaker on permanent errors (4xx = config problem, not infra)
+      const { OllamaError } = await import('./ollama.ts')
+      if (!(err instanceof OllamaError && err.isPermanent)) {
+        recordFailure()
+      }
 
       const durationMs = Math.round(performance.now() - startMs)
       metrics.push({
@@ -452,7 +457,10 @@ export const createLLMGateway = (
         timestamp: Date.now(),
       })
     } catch (err) {
-      recordFailure()
+      const { OllamaError } = await import('./ollama.ts')
+      if (!(err instanceof OllamaError && err.isPermanent)) {
+        recordFailure()
+      }
       metrics.push({
         model: request.model,
         promptTokens: 0,
@@ -556,6 +564,7 @@ export const createLLMGateway = (
     unloadModel,
     onHealthChange,
     resetCircuitBreaker: resetCircuit,
+    refreshHealth: () => { void pollHealth() },
     dispose,
   }
 }

@@ -1,5 +1,18 @@
 import type { LLMProvider, ChatRequest, ChatResponse, StreamChunk } from '../core/types.ts'
 
+/** Typed error from Ollama — carries HTTP status for error classification. */
+export class OllamaError extends Error {
+  constructor(
+    readonly status: number,    // HTTP status (0 for network/timeout errors)
+    message: string,
+  ) {
+    super(message)
+    this.name = 'OllamaError'
+  }
+  /** 4xx errors are permanent (model not found, bad request). Don't retry, don't trip circuit breaker. */
+  get isPermanent(): boolean { return this.status >= 400 && this.status < 500 }
+}
+
 interface OllamaToolCall {
   readonly function: {
     readonly name: string
@@ -70,11 +83,11 @@ const validateChatResponse = (data: unknown): OllamaChatResponse => {
     !('message' in data) ||
     typeof (data as Record<string, unknown>).message !== 'object'
   ) {
-    throw new Error(`Ollama returned unexpected response shape: ${JSON.stringify(data).slice(0, 200)}`)
+    throw new OllamaError(0, `Ollama returned unexpected response shape: ${JSON.stringify(data).slice(0, 200)}`)
   }
   const msg = (data as Record<string, unknown>).message as Record<string, unknown>
   if (typeof msg.content !== 'string') {
-    throw new Error(`Ollama response missing message.content: ${JSON.stringify(data).slice(0, 200)}`)
+    throw new OllamaError(0, `Ollama response missing message.content: ${JSON.stringify(data).slice(0, 200)}`)
   }
   return data as OllamaChatResponse
 }
@@ -150,7 +163,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
 
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`Ollama API error ${response.status}: ${text}`)
+      throw new OllamaError(response.status, `Ollama API error ${response.status}: ${text}`)
     }
 
     const raw = await response.json()
@@ -219,13 +232,13 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
     if (!response.ok) {
       clearTimeout(idleTimer)
       const text = await response.text()
-      throw new Error(`Ollama stream error ${response.status}: ${text}`)
+      throw new OllamaError(response.status, `Ollama stream error ${response.status}: ${text}`)
     }
 
     const reader = response.body?.getReader()
     if (!reader) {
       clearTimeout(idleTimer)
-      throw new Error('Ollama stream: no response body')
+      throw new OllamaError(0, 'Ollama stream: no response body')
     }
 
     const decoder = new TextDecoder()
@@ -279,7 +292,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
 
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`Ollama API error ${response.status}: ${text}`)
+      throw new OllamaError(response.status, `Ollama API error ${response.status}: ${text}`)
     }
 
     const data = (await response.json()) as OllamaTagsResponse
@@ -300,7 +313,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
 
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`Ollama API error ${response.status}: ${text}`)
+      throw new OllamaError(response.status, `Ollama API error ${response.status}: ${text}`)
     }
 
     const data = (await response.json()) as OllamaPsResponse
@@ -319,7 +332,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
     )
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`Ollama load model error ${response.status}: ${text}`)
+      throw new OllamaError(response.status, `Ollama load model error ${response.status}: ${text}`)
     }
     // Consume response body
     await response.text()
@@ -337,7 +350,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
     )
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`Ollama unload model error ${response.status}: ${text}`)
+      throw new OllamaError(response.status, `Ollama unload model error ${response.status}: ${text}`)
     }
     await response.text()
   }

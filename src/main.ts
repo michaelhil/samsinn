@@ -108,7 +108,12 @@ export const createSystem = (ollamaUrl?: string): System => {
     add: (url: string) => { savedOllamaUrls.add(url) },
     remove: (url: string) => { savedOllamaUrls.delete(url) },
     getCurrent: () => ollamaRaw.baseUrl,
-    setCurrent: (url: string) => { ollamaRaw.setBaseUrl(url); savedOllamaUrls.add(url) },
+    setCurrent: (url: string) => {
+      ollamaRaw.setBaseUrl(url)
+      savedOllamaUrls.add(url)
+      ollama.resetCircuitBreaker()
+      ollama.refreshHealth()
+    },
   }
 
   const houseCallbacks: HouseCallbacks = {
