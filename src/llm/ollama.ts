@@ -245,7 +245,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
 
         for (const line of lines) {
           if (!line.trim()) continue
-          let parsed: { message?: { content?: string; tool_calls?: ReadonlyArray<OllamaToolCall> }; done?: boolean; thinking?: string }
+          let parsed: { message?: { content?: string; tool_calls?: ReadonlyArray<OllamaToolCall> }; done?: boolean; thinking?: string; prompt_eval_count?: number; eval_count?: number }
           try { parsed = JSON.parse(line) } catch { continue }
           // qwen3 thinking mode: tokens arrive in 'thinking' field before 'content'
           const thinking = (parsed as Record<string, unknown>).thinking as string | undefined
@@ -254,7 +254,10 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
           const toolCalls = isDone && parsed.message?.tool_calls?.length
             ? parsed.message.tool_calls.map(tc => ({ function: { name: tc.function.name, arguments: tc.function.arguments } }))
             : undefined
-          yield { delta, done: isDone, thinking, ...(toolCalls ? { toolCalls } : {}) }
+          const tokensUsed = isDone && (parsed.prompt_eval_count !== undefined || parsed.eval_count !== undefined)
+            ? { prompt: parsed.prompt_eval_count ?? 0, completion: parsed.eval_count ?? 0 }
+            : undefined
+          yield { delta, done: isDone, thinking, ...(toolCalls ? { toolCalls } : {}), ...(tokensUsed ? { tokensUsed } : {}) }
           if (isDone) return
         }
       }

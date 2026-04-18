@@ -20,6 +20,7 @@ export interface Decision {
   readonly generationMs: number
   readonly triggerRoomId: string
   readonly inReplyTo?: ReadonlyArray<string>
+  readonly metrics?: LLMCallMetrics
 }
 
 export type OnDecision = (decision: Decision) => void
@@ -65,13 +66,20 @@ const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/g
 const LLM_RETRIES = 2
 const LLM_RETRY_DELAY_MS = 1000
 
+export interface LLMCallMetrics {
+  readonly promptTokens?: number
+  readonly completionTokens?: number
+  readonly contextMax?: number
+  readonly provider?: string
+}
+
 const streamWithRetry = async (
   provider: LLMProvider,
   config: AIAgentConfig,
   request: ChatRequest,
   onEvent?: (e: EvalEvent) => void,
   signal?: AbortSignal,
-): Promise<{ content: string; toolCalls?: ReadonlyArray<NativeToolCall>; durationMs: number }> => {
+): Promise<{ content: string; toolCalls?: ReadonlyArray<NativeToolCall>; durationMs: number; metrics: LLMCallMetrics }> => {
   for (let attempt = 0; attempt <= LLM_RETRIES; attempt++) {
     try {
       const startMs = performance.now()
@@ -79,6 +87,7 @@ const streamWithRetry = async (
       if (provider.stream) {
         let content = ''
         let toolCalls: ReadonlyArray<NativeToolCall> | undefined
+        let metrics: LLMCallMetrics = {}
         for await (const chunk of provider.stream(request, signal)) {
           if (chunk.thinking) {
             onEvent?.({ kind: 'thinking', delta: chunk.thinking })
@@ -87,19 +96,35 @@ const streamWithRetry = async (
             content += chunk.delta
             onEvent?.({ kind: 'chunk', delta: chunk.delta })
           }
-          if (chunk.done && chunk.toolCalls?.length) {
-            toolCalls = chunk.toolCalls
+          if (chunk.done) {
+            if (chunk.toolCalls?.length) toolCalls = chunk.toolCalls
+            metrics = {
+              promptTokens: chunk.tokensUsed?.prompt,
+              completionTokens: chunk.tokensUsed?.completion,
+              contextMax: chunk.contextMax,
+              provider: chunk.provider,
+            }
           }
         }
         // Strip think blocks and trim
         content = content.replace(THINK_BLOCK_RE, '').trim()
-        return { content, toolCalls, durationMs: Math.round(performance.now() - startMs) }
+        return { content, toolCalls, durationMs: Math.round(performance.now() - startMs), metrics }
       }
 
       // Fallback: provider doesn't support streaming — use chat()
       const response = await provider.chat(request)
       onEvent?.({ kind: 'chunk', delta: response.content })
-      return { content: response.content, toolCalls: response.toolCalls, durationMs: response.generationMs }
+      return {
+        content: response.content,
+        toolCalls: response.toolCalls,
+        durationMs: response.generationMs,
+        metrics: {
+          promptTokens: response.tokensUsed.prompt,
+          completionTokens: response.tokensUsed.completion,
+          contextMax: response.contextMax,
+          provider: response.provider,
+        },
+      }
     } catch (err) {
       if (signal?.aborted) throw err  // Don't retry if cancelled
       // Don't retry permanent errors (model not found, bad config)
@@ -136,11 +161,15 @@ export const evaluate = async (
 ): Promise<EvalResult> => {
   const context = [...contextResult.messages]
   let totalGenerationMs = 0
+  let lastMetrics: LLMCallMetrics = {}
   const maxToolResultChars = config.maxToolResultChars ?? MAX_TOOL_RESULT_CHARS
   const { toolDefinitions, inReplyTo, onEvent, signal } = options ?? {}
 
   const makeResult = (decision: Decision): EvalResult => ({
-    decision: inReplyTo && inReplyTo.length > 0 ? { ...decision, inReplyTo } : decision,
+    decision: {
+      ...(inReplyTo && inReplyTo.length > 0 ? { ...decision, inReplyTo } : decision),
+      metrics: lastMetrics,
+    },
     flushInfo: contextResult.flushInfo,
   })
 
@@ -156,6 +185,7 @@ export const evaluate = async (
 
       const streamResult = await streamWithRetry(llmProvider, config, request, onEvent, signal)
       totalGenerationMs += streamResult.durationMs
+      lastMetrics = streamResult.metrics
 
       // Native tool calls
       if (streamResult.toolCalls && streamResult.toolCalls.length > 0) {

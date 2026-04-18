@@ -76,6 +76,31 @@ export const renderMessage = (
       header.appendChild(genEl)
     }
 
+    // Context usage badge: `prompt / max (pct%)` next to generation time.
+    // Shown only when we know at least prompt tokens. When contextMax is
+    // known, we colour the badge amber/red at 75/90% usage; unknown → grey.
+    if (msg.promptTokens !== undefined) {
+      const ctxEl = document.createElement('span')
+      const ctx = msg.contextMax ?? 0
+      const usage = msg.promptTokens
+      const pct = ctx > 0 ? (usage / ctx) * 100 : 0
+      let tone = 'text-gray-400'
+      if (ctx > 0) {
+        if (pct >= 90) tone = 'text-red-500'
+        else if (pct >= 75) tone = 'text-amber-500'
+        else tone = 'text-emerald-500'
+      }
+      ctxEl.className = `text-xs ${tone}`
+      if (ctx > 0) {
+        ctxEl.textContent = `${usage.toLocaleString()} / ${ctx.toLocaleString()} tok (${pct.toFixed(0)}%)`
+        ctxEl.title = `Prompt tokens used / model context window${msg.provider ? ` · via ${msg.provider}` : ''}`
+      } else {
+        ctxEl.textContent = `${usage.toLocaleString()} tok`
+        ctxEl.title = `Prompt tokens (context window unknown)${msg.provider ? ` · via ${msg.provider}` : ''}`
+      }
+      header.appendChild(ctxEl)
+    }
+
     if (onPin || onDelete || onViewContext) {
       const spacer = document.createElement('span')
       spacer.className = 'ml-auto'

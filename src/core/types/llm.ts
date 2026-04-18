@@ -84,6 +84,10 @@ export interface ChatResponse {
   readonly tokensPerSecond?: number
   readonly promptEvalMs?: number
   readonly modelLoadMs?: number
+  // Resolved after the call, attached by the router layer.
+  readonly contextMax?: number
+  readonly contextSource?: string
+  readonly provider?: string
 }
 
 // A single streamed token/delta from the LLM
@@ -92,6 +96,12 @@ export interface StreamChunk {
   readonly done: boolean
   readonly thinking?: string  // qwen3 CoT thinking tokens (before visible response)
   readonly toolCalls?: ReadonlyArray<NativeToolCall>  // native tool calls from final chunk
+  // Populated on the final done=true chunk when available (per-provider).
+  readonly tokensUsed?: { readonly prompt: number; readonly completion: number }
+  // Attached by the router on the final done=true chunk.
+  readonly provider?: string
+  readonly contextMax?: number
+  readonly contextSource?: string
 }
 
 export interface LLMProvider {

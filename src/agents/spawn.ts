@@ -143,6 +143,16 @@ export const spawnAIAgent = async (
 
   const onDecision = (decision: Decision): void => {
     const target: MessageTarget = { rooms: [decision.triggerRoomId] }
+    // Metrics — tokens, contextMax, provider — attached as message metadata
+    // so the UI can render usage/limit alongside generationMs. Undefined
+    // fields are omitted to keep the snapshot compact.
+    const m = decision.metrics ?? {}
+    const metricsMeta: Record<string, unknown> = {}
+    if (m.promptTokens !== undefined) metricsMeta.promptTokens = m.promptTokens
+    if (m.completionTokens !== undefined) metricsMeta.completionTokens = m.completionTokens
+    if (m.contextMax !== undefined && m.contextMax > 0) metricsMeta.contextMax = m.contextMax
+    if (m.provider) metricsMeta.provider = m.provider
+    const metadata = Object.keys(metricsMeta).length > 0 ? metricsMeta : undefined
 
     if (decision.response.action === 'respond') {
       routeMessage(target, {
@@ -152,6 +162,7 @@ export const spawnAIAgent = async (
         type: 'chat',
         generationMs: decision.generationMs,
         inReplyTo: decision.inReplyTo,
+        ...(metadata ? { metadata } : {}),
       })
     } else if (decision.response.action === 'pass') {
       // Post pass as a visible message so humans can see agent decisions
@@ -163,6 +174,7 @@ export const spawnAIAgent = async (
         type: 'pass',
         generationMs: decision.generationMs,
         inReplyTo: decision.inReplyTo,
+        ...(metadata ? { metadata } : {}),
       })
     }
   }

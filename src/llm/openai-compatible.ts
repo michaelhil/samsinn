@@ -120,7 +120,19 @@ const mapHttpError = (
       status, retryAfterMs,
     })
   }
-  // 4xx other than 401/403/429 — treat as bad_request (permanent, do not fall through).
+  // Context-length exceeded: per-model limitation, NOT a permanent config error.
+  // Other providers / models may serve the same request fine — classify as
+  // provider_down so the router falls through for bare model names. Prefix-
+  // pinned models still throw because the router doesn't fall back on pins.
+  const bodyLowerFull = body.toLowerCase()
+  if (bodyLowerFull.includes('context_length_exceeded') || bodyLowerFull.includes('maximum context length')) {
+    return createCloudProviderError({
+      code: 'provider_down', provider: providerName,
+      message: `${providerName} context-length exceeded: ${snippet}`,
+      status,
+    })
+  }
+  // Other 4xx — treat as bad_request (permanent, do not fall through).
   return createCloudProviderError({
     code: 'bad_request', provider: providerName, message: `${providerName} request error ${status}: ${snippet}`,
     status,
@@ -140,6 +152,9 @@ const buildOAIBody = (request: ChatRequest, stream: boolean): Record<string, unk
     messages: toOAIMessages(request),
     stream,
   }
+  // Ask providers to include a final usage frame (supported by OpenAI, Groq,
+  // Cerebras, OpenRouter). Providers that don't support it ignore the flag.
+  if (stream) body.stream_options = { include_usage: true }
   if (request.temperature !== undefined) body.temperature = request.temperature
   if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens
   if (request.jsonMode) body.response_format = { type: 'json_object' }
@@ -327,6 +342,25 @@ export const createOpenAICompatibleProvider = (config: OpenAICompatConfig): LLMP
       return out
     }
 
+    // Accumulators for final-chunk metadata (finish_reason may arrive before
+    // [DONE]; usage typically arrives AFTER finish_reason but BEFORE [DONE]).
+    let finishSeen = false
+    let usageTokens: { prompt: number; completion: number } | undefined
+
+    const emitFinal = (): StreamChunk => {
+      const toolCalls: NativeToolCall[] | undefined = toolAccum.length
+        ? toolAccum.map(t => ({
+            function: { name: t.name, arguments: parseArgs(t.argsBuffer) },
+          }))
+        : undefined
+      const chunk: StreamChunk = {
+        delta: '', done: true,
+        ...(toolCalls ? { toolCalls } : {}),
+        ...(usageTokens ? { tokensUsed: usageTokens } : {}),
+      }
+      return chunk
+    }
+
     try {
       while (true) {
         clearTimeout(idleTimer)
@@ -342,25 +376,26 @@ export const createOpenAICompatibleProvider = (config: OpenAICompatConfig): LLMP
           buffer = buffer.slice(sep + 2)
           sep = buffer.indexOf('\n\n')
 
-          // Each frame may have multiple "data:" lines; we take the last payload.
+          // Each frame may have multiple "data:" lines.
           const dataLines = frame.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim())
           for (const payload of dataLines) {
             if (payload === '[DONE]') {
-              // Emit final chunk with accumulated tool calls if any, and flush carry.
-              const toolCalls: NativeToolCall[] | undefined = toolAccum.length
-                ? toolAccum.map(t => ({
-                    function: { name: t.name, arguments: parseArgs(t.argsBuffer) },
-                  }))
-                : undefined
-              if (thinkCarry) {
-                yield { delta: thinkCarry, done: false }
-                thinkCarry = ''
-              }
-              yield { delta: '', done: true, ...(toolCalls ? { toolCalls } : {}) }
+              if (thinkCarry) { yield { delta: thinkCarry, done: false }; thinkCarry = '' }
+              yield emitFinal()
               return
             }
             let parsed: OAIStreamChunk
             try { parsed = JSON.parse(payload) } catch { continue }
+
+            // Final usage frame (OpenAI with include_usage: true; Groq,
+            // Cerebras follow the same convention). The frame carries an
+            // empty choices array + a `usage` field.
+            if (parsed.usage && (parsed.usage.prompt_tokens !== undefined || parsed.usage.completion_tokens !== undefined)) {
+              usageTokens = {
+                prompt: parsed.usage.prompt_tokens ?? 0,
+                completion: parsed.usage.completion_tokens ?? 0,
+              }
+            }
 
             const choice = parsed.choices?.[0]
             if (!choice) continue
@@ -383,30 +418,17 @@ export const createOpenAICompatibleProvider = (config: OpenAICompatConfig): LLMP
             }
 
             if (choice.finish_reason) {
-              // finish_reason present — assume stream ending even if [DONE] not seen yet.
-              const toolCalls: NativeToolCall[] | undefined = toolAccum.length
-                ? toolAccum.map(t => ({
-                    function: { name: t.name, arguments: parseArgs(t.argsBuffer) },
-                  }))
-                : undefined
-              if (thinkCarry) {
-                yield { delta: thinkCarry, done: false }
-                thinkCarry = ''
-              }
-              yield { delta: '', done: true, ...(toolCalls ? { toolCalls } : {}) }
-              return
+              // Mark finish but don't emit yet — wait one more frame in case
+              // usage arrives (it typically does on a subsequent SSE event).
+              finishSeen = true
             }
           }
         }
       }
-      // Reader closed without [DONE] or finish_reason. Emit a final chunk.
-      const toolCalls: NativeToolCall[] | undefined = toolAccum.length
-        ? toolAccum.map(t => ({
-            function: { name: t.name, arguments: parseArgs(t.argsBuffer) },
-          }))
-        : undefined
+      // Reader closed. Emit final chunk with whatever we've accumulated.
       if (thinkCarry) yield { delta: thinkCarry, done: false }
-      yield { delta: '', done: true, ...(toolCalls ? { toolCalls } : {}) }
+      yield emitFinal()
+      void finishSeen  // value consumed by the loop logic above
     } finally {
       clearTimeout(idleTimer)
       reader.releaseLock()

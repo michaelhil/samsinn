@@ -100,6 +100,11 @@ const {
   ollamaUrlSelect, ollamaUrlInput, btnOllamaUrlAdd, btnOllamaUrlDelete,
 } = domRefs
 
+// Shorthand for getting an element by selector. Used at several points below.
+// Previously broken — callers assumed a global `$` that didn't exist, silently
+// throwing ReferenceError at module load and halting handler wiring.
+const $ = (sel: string) => document.querySelector(sel)!
+
 const workspace = createWorkspace({ bar: workspaceBar, pane: workspacePane, chatArea, label: workspaceLabel })
 
 // === WS client ===

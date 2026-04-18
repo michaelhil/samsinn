@@ -10,6 +10,11 @@ export interface UIMessage {
   roomId?: string
   recipientId?: string
   generationMs?: number
+  // Tokens/context metrics forwarded via server message metadata.
+  promptTokens?: number
+  completionTokens?: number
+  contextMax?: number
+  provider?: string
 }
 
 export interface RoomProfile {

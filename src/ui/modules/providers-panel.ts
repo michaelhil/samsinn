@@ -162,6 +162,13 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
     const mcField = row.querySelector<HTMLInputElement>(`#prov-mc-${name}`)
     const enabledBox = row.querySelector<HTMLInputElement>(`#prov-enabled-${name}`)
 
+    // Pasting or typing a key → auto-enable (user almost always wants this).
+    keyField?.addEventListener('input', () => {
+      if (keyField.value.trim().length > 0 && enabledBox && !enabledBox.checked) {
+        enabledBox.checked = true
+      }
+    })
+
     row.querySelector<HTMLButtonElement>('.prov-save')?.addEventListener('click', async () => {
       const body: Record<string, unknown> = {}
       if (keyField && keyField.value.trim().length > 0) body.apiKey = keyField.value.trim()

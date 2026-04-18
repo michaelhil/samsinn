@@ -70,6 +70,10 @@ export interface RouterCallOptions extends ChatCallOptions {
 
 // === Config ===
 
+export interface ContextLookupFn {
+  (provider: string, model: string): Promise<{ contextMax: number; source: string }>
+}
+
 export interface ProviderRouterConfig {
   // Logical provider names (keys into providers map) in priority order.
   readonly order: ReadonlyArray<string>
@@ -81,6 +85,9 @@ export interface ProviderRouterConfig {
   readonly defaultProviderDownCooldownMs?: number
   // Test hook: provider name to force-fail (simulates errors for E2E).
   readonly forceFailProvider?: string | null
+  // Resolve the model's max context window. Results are consumed per call and
+  // attached to ChatResponse / the final StreamChunk.
+  readonly contextLookup?: ContextLookupFn
 }
 
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000          // 1 min
@@ -271,8 +278,17 @@ export const createProviderRouter = (
         continue
       }
       try {
-        const response = await callOnProvider(name, request, options, modelId)
+        const rawResponse = await callOnProvider(name, request, options, modelId)
         // Success — update soft preference + emit bound event if transition.
+        const ctx = config.contextLookup
+          ? await config.contextLookup(name, modelId).catch(() => ({ contextMax: 0, source: 'unknown' }))
+          : { contextMax: 0, source: 'unknown' }
+        const response: ChatResponse = {
+          ...rawResponse,
+          provider: name,
+          contextMax: ctx.contextMax,
+          contextSource: ctx.source,
+        }
         lastSuccessByModel.set(modelId, name)
         const key = agentKey(agentId, request.model)
         const prev = lastByAgentModel.get(key) ?? null
@@ -408,12 +424,29 @@ export const createProviderRouter = (
         })
       }
 
+      // Look up context window once per (provider, modelId); attach to final done chunk.
+      const ctxPromise = config.contextLookup
+        ? config.contextLookup(name, modelId).catch(() => ({ contextMax: 0, source: 'unknown' }))
+        : Promise.resolve({ contextMax: 0, source: 'unknown' })
+      const augmentDone = async (chunk: StreamChunk): Promise<StreamChunk> => {
+        if (!chunk.done) return chunk
+        const ctx = await ctxPromise
+        return {
+          ...chunk,
+          // Augment is additive — preserve provider/context if already set by
+          // a downstream layer (unlikely here, but safe).
+          ...(chunk as { provider?: string }).provider ? {} : { provider: name },
+          ...(chunk as { contextMax?: number }).contextMax !== undefined ? {} : { contextMax: ctx.contextMax },
+        } as StreamChunk
+      }
+
       try {
         if (firstChunk && !firstChunk.done) yield firstChunk.value
+        else if (firstChunk && firstChunk.done) { yield await augmentDone(firstChunk.value); return }
         while (true) {
           const r = await iter.next()
           if (r.done) return
-          yield r.value
+          yield await augmentDone(r.value)
         }
       } catch (err) {
         // Mid-stream failure — surface as event, no retry.

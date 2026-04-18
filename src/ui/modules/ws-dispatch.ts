@@ -44,15 +44,22 @@ import { showToast } from './ui-utils.ts'
 
 // === Mappers from server wire types → UI types ===
 
-const toUIMessage = (m: Message): UIMessage => ({
-  id: m.id,
-  senderId: m.senderId,
-  content: m.content,
-  timestamp: m.timestamp,
-  type: m.type,
-  roomId: m.roomId,
-  generationMs: m.generationMs,
-})
+const toUIMessage = (m: Message): UIMessage => {
+  const meta = (m.metadata ?? {}) as Record<string, unknown>
+  return {
+    id: m.id,
+    senderId: m.senderId,
+    content: m.content,
+    timestamp: m.timestamp,
+    type: m.type,
+    roomId: m.roomId,
+    generationMs: m.generationMs,
+    ...(typeof meta.promptTokens === 'number' ? { promptTokens: meta.promptTokens } : {}),
+    ...(typeof meta.completionTokens === 'number' ? { completionTokens: meta.completionTokens } : {}),
+    ...(typeof meta.contextMax === 'number' ? { contextMax: meta.contextMax } : {}),
+    ...(typeof meta.provider === 'string' ? { provider: meta.provider } : {}),
+  }
+}
 
 const toUIRoomProfile = (r: ServerRoomProfile): RoomProfile => ({
   id: r.id,

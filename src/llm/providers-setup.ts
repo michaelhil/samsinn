@@ -16,6 +16,7 @@ import type { ProviderRouter } from './router.ts'
 import { createProviderRouter } from './router.ts'
 import { isCloudProviderError } from './errors.ts'
 import { PROVIDER_PROFILES, type ProviderConfig, type CloudProviderName } from './providers-config.ts'
+import { getContextWindow } from './model-context.ts'
 
 export interface ProviderSetupResult {
   readonly router: ProviderRouter
@@ -59,9 +60,17 @@ export const buildProvidersFromConfig = (config: ProviderConfig): ProviderSetupR
     )
   }
 
+  const openrouterKey = config.cloud.openrouter?.apiKey
   const router = createProviderRouter(gateways, {
     order: config.order,
     forceFailProvider: config.forceFailProvider,
+    contextLookup: async (provider, model) => {
+      const info = await getContextWindow(provider, model, {
+        ollamaBaseUrl: config.ollamaUrl,
+        openrouterApiKey: openrouterKey,
+      })
+      return { contextMax: info.contextMax, source: info.source }
+    },
   })
 
   const dispose = (): void => {
