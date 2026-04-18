@@ -6,9 +6,17 @@
 // Portable to any TypeScript project using Ollama.
 // ============================================================================
 
-import type { LLMProvider, ChatRequest, ChatResponse, StreamChunk } from '../core/types/llm.ts'
+import type {
+  LLMProvider, ChatRequest, ChatResponse, StreamChunk,
+  CircuitState, RequestStatus, RequestRecord, GatewayMetrics, LoadedModel, OllamaHealth,
+} from '../core/types/llm.ts'
 import type { OllamaPsModel, OllamaProviderExtended } from './ollama.ts'
-import { createCircuitBreaker, type CircuitState } from './circuit-breaker.ts'
+import { createCircuitBreaker } from './circuit-breaker.ts'
+import { createGatewayError, isGatewayError, isOllamaError, isPermanent } from './errors.ts'
+import { createRingBuffer, createSemaphore } from './concurrency.ts'
+
+// Re-export for legacy import paths.
+export type { CircuitState, RequestStatus, RequestRecord, GatewayMetrics, LoadedModel, OllamaHealth }
 
 // === Configuration ===
 
@@ -34,53 +42,6 @@ export const GATEWAY_DEFAULTS: GatewayConfig = {
 
 // === Metrics ===
 
-export type RequestStatus = 'success' | 'error' | 'timeout' | 'circuit_open' | 'shed'
-
-export interface RequestRecord {
-  readonly model: string
-  readonly promptTokens: number
-  readonly completionTokens: number
-  readonly durationMs: number
-  readonly queueWaitMs: number
-  readonly tokensPerSecond: number
-  readonly status: RequestStatus
-  readonly timestamp: number
-}
-
-export interface GatewayMetrics {
-  readonly requestCount: number
-  readonly errorCount: number
-  readonly errorRate: number
-  readonly p50Latency: number
-  readonly p95Latency: number
-  readonly avgTokensPerSecond: number
-  readonly queueDepth: number
-  readonly concurrentRequests: number
-  readonly circuitState: CircuitState
-  readonly shedCount: number
-  readonly windowMs: number
-}
-
-// === Health ===
-
-export interface LoadedModel {
-  readonly name: string
-  readonly sizeVram: number
-  readonly details?: {
-    readonly parameterSize?: string
-    readonly quantizationLevel?: string
-  }
-  readonly expiresAt?: string
-}
-
-export interface OllamaHealth {
-  readonly status: 'healthy' | 'degraded' | 'down'
-  readonly latencyMs: number
-  readonly loadedModels: ReadonlyArray<LoadedModel>
-  readonly availableModels: ReadonlyArray<string>
-  readonly lastCheckedAt: number
-}
-
 // === Gateway Interface ===
 
 export type HealthChangeCallback = (health: OllamaHealth) => void
@@ -96,102 +57,6 @@ export interface LLMGateway extends LLMProvider {
   readonly resetCircuitBreaker: () => void
   readonly refreshHealth: () => void
   readonly dispose: () => void
-}
-
-// === Ring Buffer ===
-
-const createRingBuffer = <T>(capacity: number) => {
-  const items: T[] = []
-  let head = 0
-  let count = 0
-
-  const push = (item: T): void => {
-    if (count < capacity) {
-      items.push(item)
-      count++
-    } else {
-      items[head] = item
-      head = (head + 1) % capacity
-    }
-  }
-
-  const toArray = (): T[] => {
-    if (count < capacity) return items.slice()
-    return [...items.slice(head), ...items.slice(0, head)]
-  }
-
-  const clear = (): void => {
-    items.length = 0
-    head = 0
-    count = 0
-  }
-
-  return { push, toArray, clear, get count() { return count } }
-}
-
-// === Semaphore ===
-
-interface QueuedRequest {
-  readonly resolve: () => void
-  readonly reject: (err: Error) => void
-  readonly enqueuedAt: number
-}
-
-const createSemaphore = (max: number) => {
-  let active = 0
-  const queue: QueuedRequest[] = []
-
-  const acquire = async (timeoutMs: number, maxQueueDepth: number): Promise<number> => {
-    const enqueuedAt = performance.now()
-    if (active < max) {
-      active++
-      return 0 // no queue wait
-    }
-    if (queue.length >= maxQueueDepth) {
-      throw new GatewayError('queue_full', 'LLM gateway queue full — request shed')
-    }
-    return new Promise<number>((resolve, reject) => {
-      const entry: QueuedRequest = {
-        resolve: () => resolve(Math.round(performance.now() - enqueuedAt)),
-        reject,
-        enqueuedAt,
-      }
-      queue.push(entry)
-      setTimeout(() => {
-        const idx = queue.indexOf(entry)
-        if (idx !== -1) {
-          queue.splice(idx, 1)
-          reject(new GatewayError('queue_timeout', `LLM gateway queue timeout after ${timeoutMs}ms`))
-        }
-      }, timeoutMs)
-    })
-  }
-
-  const release = (): void => {
-    const next = queue.shift()
-    if (next) {
-      next.resolve()
-    } else {
-      active--
-    }
-  }
-
-  return {
-    acquire,
-    release,
-    get active() { return active },
-    get queueDepth() { return queue.length },
-    updateMax: (newMax: number) => { max = newMax },
-  }
-}
-
-// === Gateway Error ===
-
-export class GatewayError extends Error {
-  constructor(readonly code: 'circuit_open' | 'queue_full' | 'queue_timeout' | 'not_supported', message: string) {
-    super(message)
-    this.name = 'GatewayError'
-  }
 }
 
 // === Percentile Computation ===
@@ -310,7 +175,7 @@ export const createLLMGateway = (
         status: 'circuit_open',
         timestamp: Date.now(),
       })
-      throw new GatewayError('circuit_open', `Circuit breaker open — Ollama appears down (${cb.getConsecutiveFailures()} consecutive failures)`)
+      throw createGatewayError('circuit_open', `Circuit breaker open — Ollama appears down (${cb.getConsecutiveFailures()} consecutive failures)`)
     }
 
     let queueWaitMs: number
@@ -318,7 +183,7 @@ export const createLLMGateway = (
       queueWaitMs = await semaphore.acquire(config.queueTimeoutMs, config.maxQueueDepth)
     } catch (err) {
       shedCount++
-      const status: RequestStatus = err instanceof GatewayError && err.code === 'queue_full' ? 'shed' : 'timeout'
+      const status: RequestStatus = isGatewayError(err) && err.code === 'queue_full' ? 'shed' : 'timeout'
       metrics.push({
         model: request.model,
         promptTokens: 0,
@@ -358,8 +223,7 @@ export const createLLMGateway = (
       return response
     } catch (err) {
       // Don't trip circuit breaker on permanent errors (4xx = config problem, not infra)
-      const { OllamaError } = await import('./ollama.ts')
-      if (!(err instanceof OllamaError && err.isPermanent)) {
+      if (!(isOllamaError(err) && isPermanent(err))) {
         recordFailure()
       }
 
@@ -383,11 +247,11 @@ export const createLLMGateway = (
 
   // Wrapped stream — same semaphore + circuit breaker, but metrics recorded at end
   const stream = async function* (request: ChatRequest, signal?: AbortSignal): AsyncIterable<StreamChunk> {
-    if (!provider.stream) throw new GatewayError('not_supported', 'Provider does not support streaming')
+    if (!provider.stream) throw createGatewayError('not_supported', 'Provider does not support streaming')
 
     if (!shouldAllowRequest()) {
       shedCount++
-      throw new GatewayError('circuit_open', 'Circuit breaker open')
+      throw createGatewayError('circuit_open', 'Circuit breaker open')
     }
 
     const queueWaitMs = await semaphore.acquire(config.queueTimeoutMs, config.maxQueueDepth)
@@ -409,8 +273,7 @@ export const createLLMGateway = (
         timestamp: Date.now(),
       })
     } catch (err) {
-      const { OllamaError } = await import('./ollama.ts')
-      if (!(err instanceof OllamaError && err.isPermanent)) {
+      if (!(isOllamaError(err) && isPermanent(err))) {
         recordFailure()
       }
       metrics.push({

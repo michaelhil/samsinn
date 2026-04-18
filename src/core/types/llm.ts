@@ -2,6 +2,55 @@
 
 import type { ToolDefinition, NativeToolCall } from './tool.ts'
 
+// === Circuit breaker + gateway observability ===
+
+export type CircuitState = 'closed' | 'open' | 'half_open'
+
+export type RequestStatus = 'success' | 'error' | 'timeout' | 'circuit_open' | 'shed'
+
+export interface RequestRecord {
+  readonly model: string
+  readonly promptTokens: number
+  readonly completionTokens: number
+  readonly durationMs: number
+  readonly queueWaitMs: number
+  readonly tokensPerSecond: number
+  readonly status: RequestStatus
+  readonly timestamp: number
+}
+
+export interface GatewayMetrics {
+  readonly requestCount: number
+  readonly errorCount: number
+  readonly errorRate: number
+  readonly p50Latency: number
+  readonly p95Latency: number
+  readonly avgTokensPerSecond: number
+  readonly queueDepth: number
+  readonly concurrentRequests: number
+  readonly circuitState: CircuitState
+  readonly shedCount: number
+  readonly windowMs: number
+}
+
+export interface LoadedModel {
+  readonly name: string
+  readonly sizeVram: number
+  readonly details?: {
+    readonly parameterSize?: string
+    readonly quantizationLevel?: string
+  }
+  readonly expiresAt?: string
+}
+
+export interface OllamaHealth {
+  readonly status: 'healthy' | 'degraded' | 'down'
+  readonly latencyMs: number
+  readonly loadedModels: ReadonlyArray<LoadedModel>
+  readonly availableModels: ReadonlyArray<string>
+  readonly lastCheckedAt: number
+}
+
 export interface ChatRequest {
   readonly model: string
   readonly messages: ReadonlyArray<{

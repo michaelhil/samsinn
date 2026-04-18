@@ -2,7 +2,8 @@
 // Pure logic (no I/O). Used by the LLM gateway to short-circuit requests when the
 // provider is failing. Permanent errors (4xx config issues) do not count toward tripping.
 
-export type CircuitState = 'closed' | 'open' | 'half_open'
+import type { CircuitState } from '../core/types/llm.ts'
+export type { CircuitState }
 
 export interface CircuitBreakerConfig {
   readonly threshold: number
