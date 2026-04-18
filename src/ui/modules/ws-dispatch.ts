@@ -30,52 +30,67 @@ import {
   $messageWarnings,
   $ollamaHealth,
   $ollamaMetrics,
-  $connected,
   $roomIdByName,
   $agentIdByName,
   type AgentEntry,
-  type StateValue,
 } from './stores.ts'
-import type { UIMessage, RoomProfile, AgentInfo, ArtifactInfo } from './ui-renderer.ts'
+import type { UIMessage, RoomProfile, ArtifactInfo } from './render-types.ts'
+import type { WSOutbound } from '../../core/types/ws-protocol.ts'
+import type { Message, AgentProfile, RoomProfile as ServerRoomProfile } from '../../core/types/messaging.ts'
+import type { Artifact } from '../../core/types/artifact.ts'
 
-// === Snapshot sub-types ===
+// === Mappers from server wire types → UI types ===
 
-interface RoomState {
-  readonly mode: string
-  readonly paused: boolean
-  readonly muted: string[]
-  readonly members?: string[]
-}
-
-interface SnapshotMsg {
-  readonly type: 'snapshot'
-  readonly rooms: RoomProfile[]
-  readonly agents: AgentInfo[]
-  readonly agentId: string
-  readonly sessionToken?: string
-  readonly roomStates?: Record<string, RoomState>
-}
-
-// === Helpers ===
-
-/** Convert AgentInfo from server to our AgentEntry (with typed state). */
-const toAgentEntry = (a: AgentInfo): AgentEntry => ({
-  id: a.id,
-  name: a.name,
-  kind: a.kind as 'ai' | 'human',
-  model: a.model,
-  state: (a.state === 'generating' ? 'generating' : 'idle') as StateValue,
-  context: a.context,
+const toUIMessage = (m: Message): UIMessage => ({
+  id: m.id,
+  senderId: m.senderId,
+  content: m.content,
+  timestamp: m.timestamp,
+  type: m.type,
+  roomId: m.roomId,
+  generationMs: m.generationMs,
 })
 
-// === Dispatch table ===
+const toUIRoomProfile = (r: ServerRoomProfile): RoomProfile => ({
+  id: r.id,
+  name: r.name,
+})
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-export const wsDispatch: Record<string, (msg: any) => void> = {
+const toAgentEntry = (a: AgentProfile): AgentEntry => ({
+  id: a.id,
+  name: a.name,
+  kind: a.kind,
+  model: a.model,
+  state: 'idle',
+})
+
+const toUIArtifact = (a: Artifact): ArtifactInfo => ({
+  id: a.id,
+  type: a.type,
+  title: a.title,
+  description: a.description,
+  body: a.body,
+  scope: a.scope,
+  createdBy: a.createdBy,
+  createdAt: a.createdAt,
+  updatedAt: a.updatedAt,
+  resolution: a.resolution,
+  resolvedAt: a.resolvedAt,
+})
+
+// === Typed dispatch map ===
+
+type OutboundByType<K extends WSOutbound['type']> = Extract<WSOutbound, { readonly type: K }>
+
+type Handlers = {
+  readonly [K in WSOutbound['type']]?: (msg: OutboundByType<K>) => void
+}
+
+const handlers: Handlers = {
 
   // --- Snapshot (full state sync) ---
 
-  snapshot(msg: SnapshotMsg): void {
+  snapshot(msg) {
     if (msg.sessionToken) {
       $sessionToken.set(msg.sessionToken)
       localStorage.setItem('ta_session', msg.sessionToken)
@@ -84,14 +99,12 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
     // Populate rooms
     const roomMap: Record<string, RoomProfile> = {}
-    for (const r of msg.rooms) roomMap[r.id] = r
+    for (const r of msg.rooms) roomMap[r.id] = toUIRoomProfile(r)
     $rooms.set(roomMap)
 
-    // Populate agents (with state from snapshot)
+    // Populate agents
     const agentMap: Record<string, AgentEntry> = {}
-    for (const a of msg.agents) {
-      agentMap[a.id] = toAgentEntry(a)
-    }
+    for (const a of msg.agents) agentMap[a.id] = toAgentEntry(a)
     $agents.set(agentMap)
 
     // Room states: paused, members, muted
@@ -100,7 +113,7 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
     if (msg.roomStates) {
       for (const [roomId, rs] of Object.entries(msg.roomStates)) {
         if (rs.paused) paused.add(roomId)
-        if (rs.members) membersMap[roomId] = rs.members
+        if (rs.members) membersMap[roomId] = [...rs.members]
       }
     }
     $pausedRooms.set(paused)
@@ -131,7 +144,6 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
       $currentDeliveryMode.set(rs.mode)
       $roomPaused.set(rs.paused)
 
-      // Muted agents: snapshot stores agent IDs in muted array
       const muted = new Set<string>()
       for (const id of rs.muted) muted.add(id)
       $mutedAgents.set(muted)
@@ -140,32 +152,27 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Messages ---
 
-  message(msg: { message: UIMessage }): void {
-    const m = msg.message
+  message(msg) {
+    const m = toUIMessage(msg.message)
     const roomId = m.roomId ?? ''
     const current = $roomMessages.get()[roomId] ?? []
 
-    // Deduplicate
     if (current.some(existing => existing.id === m.id)) return
 
-    // Cap messages per room to prevent unbounded memory growth
     const updated = [...current, m]
     $roomMessages.setKey(roomId, updated.length > 200 ? updated.slice(-200) : updated)
 
-    // Increment unread if not the selected room
     if (roomId !== $selectedRoomId.get()) {
       const counts = $unreadCounts.get()
       $unreadCounts.setKey(roomId, (counts[roomId] ?? 0) + 1)
     }
 
-    // Clear thinking state for sender (their message arrived)
     if (m.type === 'chat') {
       const agents = $agents.get()
       const sender = agents[m.senderId]
       if (sender && sender.state === 'generating') {
-        $agents.setKey(m.senderId, { ...sender, state: 'idle' as StateValue, context: undefined })
+        $agents.setKey(m.senderId, { ...sender, state: 'idle', context: undefined })
       }
-      // Transfer prompt context + warnings from agent → message for post-generation inspection
       const agentCtx = $agentContexts.get()[m.senderId]
       if (agentCtx) {
         $messageContexts.setKey(m.id, agentCtx)
@@ -183,7 +190,7 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
     }
   },
 
-  message_deleted(msg: { roomName: string; messageId: string }): void {
+  message_deleted(msg) {
     const roomId = $roomIdByName.get()[msg.roomName]
     if (!roomId) return
     const msgs = $roomMessages.get()[roomId]
@@ -192,10 +199,9 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
     }
   },
 
-  messages_cleared(msg: { roomName: string }): void {
+  messages_cleared(msg) {
     const roomId = $roomIdByName.get()[msg.roomName]
     if (roomId) {
-      // Remove key entirely
       const all = { ...$roomMessages.get() }
       delete all[roomId]
       $roomMessages.set(all)
@@ -204,18 +210,17 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Agent state ---
 
-  agent_state(msg: { agentName: string; state: string; context?: string }): void {
+  agent_state(msg) {
     const id = $agentIdByName.get()[msg.agentName]
     if (!id) return
     const current = $agents.get()[id]
     if (!current) return
     $agents.setKey(id, {
       ...current,
-      state: (msg.state === 'generating' ? 'generating' : 'idle') as StateValue,
+      state: msg.state,
       context: msg.context,
     })
 
-    // Clear thinking state when agent goes idle
     if (msg.state !== 'generating') {
       const previews = { ...$thinkingPreviews.get() }
       delete previews[id]
@@ -232,25 +237,23 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
     }
   },
 
-  agent_activity(msg: { agentName: string; event: Record<string, unknown> }): void {
+  agent_activity(msg) {
     const id = $agentIdByName.get()[msg.agentName]
     if (!id) return
 
     const event = msg.event
     if (event.kind === 'thinking' && event.delta) {
-      // qwen3 CoT thinking tokens — accumulate in preview, label updates via app.ts
       const prev = $thinkingPreviews.get()[id] ?? ''
-      $thinkingPreviews.setKey(id, prev + (event.delta as string))
-      $thinkingTools.setKey(id, '__thinking__')  // signal to UI for label
+      $thinkingPreviews.setKey(id, prev + event.delta)
+      $thinkingTools.setKey(id, '__thinking__')
     } else if (event.kind === 'chunk' && event.delta) {
-      // First real chunk: clear thinking preview, start fresh with response text
       const tools = $thinkingTools.get()[id]
       if (tools === '__thinking__') {
-        $thinkingPreviews.setKey(id, event.delta as string)  // replace thinking with response
-        $thinkingTools.setKey(id, '')  // clear thinking signal
+        $thinkingPreviews.setKey(id, event.delta)
+        $thinkingTools.setKey(id, '')
       } else {
         const prev = $thinkingPreviews.get()[id] ?? ''
-        $thinkingPreviews.setKey(id, prev + (event.delta as string))
+        $thinkingPreviews.setKey(id, prev + event.delta)
       }
     } else if (event.kind === 'tool_start' && event.tool) {
       $thinkingTools.setKey(id, `${event.tool}...`)
@@ -258,32 +261,30 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
       $thinkingTools.setKey(id, `${event.tool} ${event.success ? '✓' : '✗'}`)
     } else if (event.kind === 'context_ready') {
       $agentContexts.setKey(id, {
-        messages: event.messages as ReadonlyArray<{ role: string; content: string }>,
-        model: event.model as string,
-        temperature: event.temperature as number | undefined,
-        toolCount: event.toolCount as number,
+        messages: event.messages,
+        model: event.model,
+        temperature: event.temperature,
+        toolCount: event.toolCount,
       })
     } else if (event.kind === 'warning') {
       const existing = $agentWarnings.get()[id] ?? []
-      $agentWarnings.setKey(id, [...existing, event.message as string])
+      $agentWarnings.setKey(id, [...existing, event.message])
     }
   },
 
   // --- Rooms ---
 
-  room_created(msg: { profile: RoomProfile }): void {
-    $rooms.setKey(msg.profile.id, msg.profile)
-    // Auto-select if no room selected
+  room_created(msg) {
+    $rooms.setKey(msg.profile.id, toUIRoomProfile(msg.profile))
     if (!$selectedRoomId.get()) {
       $selectedRoomId.set(msg.profile.id)
     }
   },
 
-  room_deleted(msg: { roomName: string }): void {
+  room_deleted(msg) {
     const roomId = $roomIdByName.get()[msg.roomName]
     if (!roomId) return
 
-    // Remove from all stores
     const rooms = { ...$rooms.get() }
     delete rooms[roomId]
     $rooms.set(rooms)
@@ -296,7 +297,6 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
     delete messages[roomId]
     $roomMessages.set(messages)
 
-    // Deselect if this was the selected room
     if ($selectedRoomId.get() === roomId) {
       $selectedRoomId.set(null)
     }
@@ -304,11 +304,11 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Agents ---
 
-  agent_joined(msg: { agent: AgentInfo }): void {
+  agent_joined(msg) {
     $agents.setKey(msg.agent.id, toAgentEntry(msg.agent))
   },
 
-  agent_removed(msg: { agentName: string }): void {
+  agent_removed(msg) {
     const id = $agentIdByName.get()[msg.agentName]
     if (!id) return
     const agents = { ...$agents.get() }
@@ -318,7 +318,7 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Delivery mode ---
 
-  delivery_mode_changed(msg: { roomName: string; mode: string; paused: boolean }): void {
+  delivery_mode_changed(msg) {
     const roomId = $roomIdByName.get()[msg.roomName]
 
     $currentDeliveryMode.set(msg.mode)
@@ -334,8 +334,7 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Mute ---
 
-  mute_changed(msg: { roomName: string; agentName: string; muted: boolean }): void {
-    // Convert agentName to agentId for consistent ID-based storage
+  mute_changed(msg) {
     const agentId = $agentIdByName.get()[msg.agentName]
     if (!agentId) return
 
@@ -347,11 +346,11 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Turn / flow ---
 
-  turn_changed(msg: { roomName: string; agentName?: string; waitingForHuman?: boolean }): void {
+  turn_changed(msg) {
     $turnInfo.set({ roomName: msg.roomName, agentName: msg.agentName, waitingForHuman: msg.waitingForHuman })
   },
 
-  flow_event(msg: { roomName: string; event: string; detail?: Record<string, unknown> }): void {
+  flow_event(msg) {
     $flowStatus.set({ roomName: msg.roomName, event: msg.event, detail: msg.detail })
 
     if (msg.event === 'completed' || msg.event === 'cancelled') {
@@ -368,19 +367,19 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Artifacts ---
 
-  artifact_changed(msg: { action: 'added' | 'updated' | 'removed'; artifact: ArtifactInfo }): void {
+  artifact_changed(msg) {
     if (msg.action === 'removed') {
       const artifacts = { ...$artifacts.get() }
       delete artifacts[msg.artifact.id]
       $artifacts.set(artifacts)
     } else {
-      $artifacts.setKey(msg.artifact.id, msg.artifact)
+      $artifacts.setKey(msg.artifact.id, toUIArtifact(msg.artifact))
     }
   },
 
   // --- Membership ---
 
-  membership_changed(msg: { roomId: string; agentId: string; action: 'added' | 'removed' }): void {
+  membership_changed(msg) {
     const members = $roomMembers.get()[msg.roomId] ?? []
     if (msg.action === 'added') {
       if (!members.includes(msg.agentId)) {
@@ -393,22 +392,19 @@ export const wsDispatch: Record<string, (msg: any) => void> = {
 
   // --- Ollama ---
 
-  ollama_health(msg: Record<string, unknown>): void {
-    $ollamaHealth.set((msg as { health: Record<string, unknown> }).health)
+  ollama_health(msg) {
+    $ollamaHealth.set(msg.health)
   },
 
-  ollama_metrics(msg: Record<string, unknown>): void {
-    $ollamaMetrics.set((msg as { metrics: Record<string, unknown> }).metrics)
+  ollama_metrics(msg) {
+    $ollamaMetrics.set(msg.metrics)
   },
 
   // --- Errors ---
 
-  error(msg: { message: string }): void {
+  error(msg) {
     console.error('Server error:', msg.message)
   },
-
-  // --- Metrics subscriptions (no-op on client, handled by WS client) ---
-
-  subscribe_ollama_metrics(): void { /* handled by send() */ },
-  unsubscribe_ollama_metrics(): void { /* handled by send() */ },
 }
+
+export const wsDispatch = handlers as Record<string, (msg: WSOutbound) => void>

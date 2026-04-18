@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { createModal, createButtonRow } from './modal.ts'
-import type { AgentInfo } from './ui-renderer.ts'
+import type { AgentInfo } from './render-types.ts'
 
 interface FlowStepInput {
   agentId: string

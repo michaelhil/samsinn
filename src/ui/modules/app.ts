@@ -6,25 +6,24 @@
 // ============================================================================
 
 import { createWSClient, type WSClient } from './ws-client.ts'
+import { renderRooms, renderArtifacts } from './render-rooms.ts'
+import { renderAgents } from './render-agents.ts'
+import { renderMessage } from './render-message.ts'
 import {
-  renderRooms,
-  renderAgents,
-  renderMessage,
-  renderArtifacts,
-  renderThinkingIndicator,
-  removeThinkingIndicator,
   updateThinkingPreview,
   updateThinkingTool,
   updateThinkingLabel,
   updateThinkingPreviewStyle,
   showContextIcon,
   addThinkingWarning,
-  type UIMessage,
-  type RoomProfile,
-  type AgentInfo,
-  type ArtifactInfo,
-  type ArtifactAction,
-} from './ui-renderer.ts'
+} from './render-thinking.ts'
+import type {
+  UIMessage,
+  RoomProfile,
+  AgentInfo,
+  ArtifactInfo,
+  ArtifactAction,
+} from './render-types.ts'
 import { derivePhase, phaseLabel, THINKING_MARKER } from './thinking-phase.ts'
 import { openTextEditorModal, createModal, createButtonRow, createTextarea } from './modal.ts'
 import { createWorkspace } from './workspace.ts'
@@ -80,58 +79,25 @@ import {
 
 // === DOM refs ===
 
-const $ = (sel: string) => document.querySelector(sel)!
-const roomList = $('#room-list') as HTMLElement
-const roomHeader = $('#room-header') as HTMLElement
-const roomNameEl = $('#room-name') as HTMLElement
-const roomInfoBar = $('#room-info-bar') as HTMLElement
-const roomsToggle = $('#rooms-toggle') as HTMLElement
-const roomsHeader = $('#rooms-header') as HTMLElement
-const agentList = $('#agent-list') as HTMLElement
-const noRoomState = $('#no-room-state') as HTMLElement
-const agentArea = $('#agent-area') as HTMLElement
-const chatArea = $('#chat-area') as HTMLElement
-const pinnedMessagesDiv = $('#pinned-messages') as HTMLElement
-const workspaceBar = $('#workspace-bar') as HTMLElement
-const workspacePane = $('#workspace-pane') as HTMLElement
-const workspaceContent = $('#workspace-content') as HTMLElement
-const workspaceLabel = $('#workspace-label') as HTMLElement
-const workspaceAddRow = $('#workspace-add-row') as HTMLElement
-const artifactInput = $('#artifact-input') as HTMLInputElement
-const btnArtifactSubmit = $('#btn-artifact-submit') as HTMLElement
-const messagesDiv = $('#messages') as HTMLElement
-const chatForm = $('#chat-form') as HTMLFormElement
-const chatInput = $('#chat-input') as HTMLInputElement
-const modeSelector = $('#mode-selector') as HTMLSelectElement
-const pauseToggle = $('#btn-pause-toggle') as HTMLButtonElement
-const roomModeInfo = $('#room-mode-info') as HTMLElement
-const nameModal = $('#name-modal') as HTMLDialogElement
-const nameForm = $('#name-form') as HTMLFormElement
-const roomModal = $('#room-modal') as HTMLDialogElement
-const roomForm = $('#room-form') as HTMLFormElement
-const agentModal = $('#agent-modal') as HTMLDialogElement
-const agentForm = $('#agent-form') as HTMLFormElement
-const sidebar = $('#sidebar') as HTMLElement
-const btnCollapseSidebar = $('#btn-collapse-sidebar') as HTMLElement
-const settingsHeader = $('#settings-header') as HTMLElement
-const settingsToggle = $('#settings-toggle') as HTMLElement
-const settingsList = $('#settings-list') as HTMLElement
-const agentsHeader = $('#agents-header') as HTMLElement
-const agentsToggle = $('#agents-toggle') as HTMLElement
-const toolsHeader = $('#tools-header') as HTMLElement
-const toolsToggle = $('#tools-toggle') as HTMLElement
-const toolsList = $('#tools-list') as HTMLElement
-const skillsHeader = $('#skills-header') as HTMLElement
-const skillsToggle = $('#skills-toggle') as HTMLElement
-const skillsList = $('#skills-list') as HTMLElement
-const artifactTypeSelect = $('#artifact-type-select') as HTMLSelectElement
-const ollamaStatusDot = document.getElementById('ollama-status-dot') as HTMLElement
-const ollamaDashboard = document.getElementById('ollama-dashboard') as HTMLDialogElement
-const ollamaDashboardClose = document.getElementById('ollama-dashboard-close') as HTMLButtonElement
-const ollamaUrlSelect = $('#ollama-url-select') as HTMLSelectElement
-const ollamaUrlInput = $('#ollama-url-input') as HTMLInputElement
-const btnOllamaUrlAdd = $('#btn-ollama-url-add') as HTMLElement
-const btnOllamaUrlDelete = $('#btn-ollama-url-delete') as HTMLElement
+import { domRefs } from './app-dom.ts'
+import { createThinkingController } from './app-thinking.ts'
+
+const {
+  roomList, roomHeader, roomNameEl, roomInfoBar, roomsToggle, roomsHeader,
+  agentList, noRoomState, agentArea, chatArea, pinnedMessagesDiv,
+  workspaceBar, workspacePane, workspaceContent, workspaceLabel, workspaceAddRow,
+  artifactInput, btnArtifactSubmit, messagesDiv, chatForm, chatInput,
+  modeSelector, pauseToggle, roomModeInfo,
+  nameModal, nameForm, roomModal, roomForm, agentModal, agentForm,
+  sidebar, btnCollapseSidebar,
+  settingsHeader, settingsToggle, settingsList,
+  agentsHeader, agentsToggle,
+  toolsHeader, toolsToggle, toolsList,
+  skillsHeader, skillsToggle, skillsList,
+  artifactTypeSelect,
+  ollamaStatusDot, ollamaDashboard, ollamaDashboardClose,
+  ollamaUrlSelect, ollamaUrlInput, btnOllamaUrlAdd, btnOllamaUrlDelete,
+} = domRefs
 
 const workspace = createWorkspace({ bar: workspaceBar, pane: workspacePane, chatArea, label: workspaceLabel })
 
@@ -555,84 +521,19 @@ $roomMessages.listen((allMessages, _old, changedRoomId) => {
 })
 
 // --- Thinking indicator lifecycle ---
-// Store both timer ID and agent name so we can always find the DOM element for cleanup
-const thinkingState = new Map<string, { timer: number; name: string }>()
 
-const ensureThinkingIndicator = (agentId: string, agentName: string): void => {
-  if (messagesDiv.querySelector(`[data-thinking-agent="${agentName}"]`)) return
-  const { timer } = renderThinkingIndicator(messagesDiv, agentName, (name) => {
-    send({ type: 'cancel_generation', name })
-  })
-  thinkingState.set(agentId, { timer, name: agentName })
-
-  // Set label to match current known phase — covers room re-entry where state is already advanced.
-  const ctx = $agentContexts.get()[agentId]
-  const toolText = $thinkingTools.get()[agentId] ?? ''
-  const phase = derivePhase({
-    hasContext: ctx !== undefined,
-    model: ctx?.model,
-    toolText,
-    firstChunkSeen: firstChunkSeen.has(agentId),
-  })
-  if (phase.kind !== 'building') {
-    updateThinkingLabel(messagesDiv, agentName, phaseLabel(agentName, phase))
-  }
-  if (phase.kind === 'thinking') {
-    updateThinkingPreviewStyle(messagesDiv, agentName, true)
-  }
-  if (ctx && toolText !== THINKING_MARKER) {
-    showContextIcon(messagesDiv, agentName, () => showContextModal(ctx, $agentWarnings.get()[agentId]))
-  }
-
-  // Restore preview text if available
-  const preview = $thinkingPreviews.get()[agentId]
-  if (preview) updateThinkingPreview(messagesDiv, agentName, preview)
-}
-
-const clearThinkingIndicator = (agentId: string): void => {
-  const entry = thinkingState.get(agentId)
-  if (entry) {
-    clearInterval(entry.timer)
-    removeThinkingIndicator(messagesDiv, entry.name)
-    thinkingState.delete(agentId)
-  }
-  firstChunkSeen.delete(agentId)
-}
-
-// Sync thinking indicators: clear stale ones, ensure active ones are at the bottom.
-// Called after any change to agents, messages, or room selection.
-const syncThinkingIndicators = (): void => {
-  const selectedRoom = $selectedRoomId.get()
-  if (!selectedRoom) return
-  const agents = $agents.get()
-
-  // Determine which agents should have indicators in this room
-  const shouldShow = new Set<string>()
-  for (const [id, agent] of Object.entries(agents)) {
-    if (agent.state === 'generating' && agent.context === selectedRoom) {
-      shouldShow.add(id)
-    }
-  }
-
-  // Clear indicators that shouldn't be showing
-  for (const [id] of thinkingState) {
-    if (!shouldShow.has(id)) clearThinkingIndicator(id)
-  }
-
-  // Ensure indicators for active agents are at the bottom of messagesDiv
-  for (const id of shouldShow) {
-    const agent = agents[id]!
-    const existing = messagesDiv.querySelector(`[data-thinking-agent="${agent.name}"]`)
-    if (existing) {
-      // Move to bottom if not already last child
-      if (existing !== messagesDiv.lastElementChild) {
-        messagesDiv.appendChild(existing)
-      }
-    } else {
-      ensureThinkingIndicator(id, agent.name)
-    }
-  }
-}
+const { ensureThinkingIndicator, clearThinkingIndicator, syncThinkingIndicators } = createThinkingController({
+  messagesDiv,
+  send,
+  firstChunkSeen,
+  $agents,
+  $agentContexts,
+  $agentWarnings,
+  $thinkingTools,
+  $thinkingPreviews,
+  $selectedRoomId,
+  showContextModal,
+})
 
 $agents.listen((_agents, _old, _changedId) => {
   syncThinkingIndicators()
@@ -1011,9 +912,10 @@ document.getElementById('btn-ollama-dashboard')!.onclick = () => openOllamaDashb
 
 const connect = (name: string) => {
   client = createWSClient(name, $sessionToken.get(), (raw) => {
-    const msg = raw as Record<string, unknown>
-    const handler = wsDispatch[msg.type as string]
-    if (handler) handler(msg)
+    const msg = raw as { type?: string }
+    if (typeof msg.type !== 'string') return
+    const handler = wsDispatch[msg.type]
+    if (handler) handler(raw as Parameters<typeof handler>[0])
   }, (connected) => {
     $connected.set(connected)
   })

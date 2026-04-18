@@ -4,7 +4,7 @@
 // Extracted from ui-renderer.ts. Each artifact type has its own render function.
 // ============================================================================
 
-import type { ArtifactInfo, ArtifactAction, TaskItem, PollOption } from './ui-renderer.ts'
+import type { ArtifactInfo, ArtifactAction, TaskItem, PollOption } from './render-types.ts'
 
 // === Shared helpers ===
 
@@ -254,8 +254,7 @@ export const renderDocumentArtifact = (
 
 // === Mermaid ===
 
-// Import renderMermaidSource from ui-renderer (it has the lazy mermaid loading logic)
-import { renderMermaidSource } from './ui-renderer.ts'
+import { renderMermaidSource } from './render-mermaid.ts'
 
 export const renderMermaidArtifact = (
   artifact: ArtifactInfo,
