@@ -5,13 +5,16 @@
 // When run directly (bun run src/main.ts), starts up and prints diagnostics.
 // ============================================================================
 
+import type { Agent, AIAgent, AIAgentConfig, RouteMessage, Team } from './core/types/agent.ts'
+import type { DeliverFn, ResolveAgentName, ResolveTagFn } from './core/types/messaging.ts'
 import type {
-  Agent, AIAgent, AIAgentConfig, DeliverFn, House, HouseCallbacks,
-  OnArtifactChanged, OnDeliveryModeChanged, OnFlowEvent,
-  OnEvalEvent, OnMembershipChanged, OnMessagePosted, OnRoomCreated, OnRoomDeleted,
-  OnTurnChanged, ResolveAgentName, ResolveTagFn, RouteMessage, Team, ToolRegistry,
-} from './core/types.ts'
-import { DEFAULTS } from './core/types.ts'
+  House, HouseCallbacks, OnDeliveryModeChanged, OnFlowEvent,
+  OnMembershipChanged, OnMessagePosted, OnRoomCreated, OnRoomDeleted, OnTurnChanged,
+} from './core/types/room.ts'
+import type { OnArtifactChanged } from './core/types/artifact.ts'
+import type { OnEvalEvent } from './core/types/agent-eval.ts'
+import type { ToolRegistry } from './core/types/tool.ts'
+import { DEFAULTS } from './core/types/constants.ts'
 import { createHouse } from './core/house.ts'
 import { createTeam } from './agents/team.ts'
 import { createMessageRouter } from './core/delivery.ts'

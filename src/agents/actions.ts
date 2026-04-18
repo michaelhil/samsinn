@@ -6,7 +6,8 @@
 // membership, call agent.join/leave, and post a visible chat message.
 // ============================================================================
 
-import type { House, RouteMessage, Team } from '../core/types.ts'
+import type { House } from '../core/types/room.ts'
+import type { RouteMessage, Team } from '../core/types/agent.ts'
 import { makeJoinMetadata } from './shared.ts'
 
 export const addAgentToRoom = async (

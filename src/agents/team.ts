@@ -5,7 +5,7 @@
 // getAgent() accepts UUID or name (dual lookup).
 // ============================================================================
 
-import type { Agent, Team } from '../core/types.ts'
+import type { Agent, Team } from '../core/types/agent.ts'
 import { validateName } from '../core/names.ts'
 
 export const createTeam = (): Team => {

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { documentArtifactType } from './document.ts'
-import type { Artifact, DocumentBody } from '../types.ts'
+import type { Artifact, DocumentBody } from '../types/artifact.ts'
 
 // === Test helpers ===
 

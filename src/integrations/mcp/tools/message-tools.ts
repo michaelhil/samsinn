@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { MessageTarget } from '../../../core/types.ts'
+import type { MessageTarget } from '../../../core/types/messaging.ts'
 import type { System } from '../../../main.ts'
 import { resolveFlowArtifact, isFlowError } from '../../../core/flow-artifact.ts'
 import { textResult, errorResult, resolveRoom } from './helpers.ts'

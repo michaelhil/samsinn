@@ -2,7 +2,8 @@
 // Shared agent utilities — profile extraction and join metadata.
 // ============================================================================
 
-import type { Agent, AIAgent, AgentProfile, Message } from '../core/types.ts'
+import type { Agent, AIAgent } from '../core/types/agent.ts'
+import type { AgentProfile, Message } from '../core/types/messaging.ts'
 
 // Extract agent profile from a join message's metadata.
 // Called by both AI and human agents in receive() and join().

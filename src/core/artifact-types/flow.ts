@@ -12,7 +12,9 @@
 // in step definitions that omit agentId.
 // ============================================================================
 
-import type { Artifact, ArtifactTypeDefinition, FlowArtifactBody, FlowStep, Team } from '../types.ts'
+import type { Artifact, ArtifactTypeDefinition, FlowArtifactBody } from '../types/artifact.ts'
+import type { FlowStep } from '../types/flow.ts'
+import type { Team } from '../types/agent.ts'
 
 export const createFlowArtifactType = (team: Team): ArtifactTypeDefinition => ({
   type: 'flow',
@@ -50,7 +52,7 @@ export const createFlowArtifactType = (team: Team): ArtifactTypeDefinition => ({
     void artifact
   },
 
-  onUpdate: (artifact: Artifact, updates): import('../types.ts').ArtifactUpdateResult | void => {
+  onUpdate: (artifact: Artifact, updates): import('../types/artifact.ts').ArtifactUpdateResult | void => {
     if (!updates.body?.steps) return  // no steps change — default merge
     const body = artifact.body as unknown as FlowArtifactBody
     // Resolve any steps missing agentId

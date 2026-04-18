@@ -1,4 +1,4 @@
-import type { WSInbound } from '../../core/types.ts'
+import type { WSInbound } from '../../core/types/ws-protocol.ts'
 import { asAIAgent } from '../../agents/shared.ts'
 import { requireAgent, sendError, type CommandContext } from './types.ts'
 

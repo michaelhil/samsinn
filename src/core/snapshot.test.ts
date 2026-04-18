@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach } from 'bun:test'
 import { serializeSystem, saveSnapshot, loadSnapshot, restoreFromSnapshot } from './snapshot.ts'
 import { createHouse } from './house.ts'
 import { createTeam } from '../agents/team.ts'
-import type { DeliverFn } from './types.ts'
+import type { DeliverFn } from './types/messaging.ts'
 import { unlink, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 

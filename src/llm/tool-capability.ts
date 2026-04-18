@@ -6,7 +6,7 @@
 // definitions in the ChatRequest.tools field.
 // ============================================================================
 
-import type { Tool, ToolDefinition } from '../core/types.ts'
+import type { Tool, ToolDefinition } from '../core/types/tool.ts'
 
 // === Tool format conversion ===
 

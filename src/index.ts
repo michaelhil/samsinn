@@ -4,40 +4,17 @@
 
 // Core types
 export type {
-  Message,
-  MessageType,
-  MessageTarget,
-  RoomProfile,
-  AgentProfile,
-  PostParams,
-  DeliverFn,
-  CreateResult,
-  Room,
-  House,
-  RoomConfig,
-  Agent,
-  AIAgent,
-  Team,
-  RouteMessage,
-  AIAgentConfig,
-  AgentResponse,
-  AgentState,
-  StateValue,
-  StateSubscriber,
-  WSInbound,
-  WSOutbound,
-  Tool,
-  ToolCall,
-  ToolResult,
-  ToolContext,
-  ToolRegistry,
-  ToolExecutor,
-  ChatRequest,
-  ChatResponse,
-  LLMProvider,
-} from './core/types.ts'
+  Message, MessageType, MessageTarget, RoomProfile, AgentProfile, PostParams, DeliverFn,
+} from './core/types/messaging.ts'
+export type { CreateResult, Room, House, RoomConfig } from './core/types/room.ts'
+export type {
+  Agent, AIAgent, Team, RouteMessage, AIAgentConfig, AgentResponse, AgentState, StateValue, StateSubscriber,
+} from './core/types/agent.ts'
+export type { WSInbound, WSOutbound } from './core/types/ws-protocol.ts'
+export type { Tool, ToolCall, ToolResult, ToolContext, ToolRegistry, ToolExecutor } from './core/types/tool.ts'
+export type { ChatRequest, ChatResponse, LLMProvider } from './core/types/llm.ts'
 
-export { SYSTEM_SENDER_ID, DEFAULTS } from './core/types.ts'
+export { SYSTEM_SENDER_ID, DEFAULTS } from './core/types/constants.ts'
 
 // Core factories
 export { createRoom } from './core/room.ts'
@@ -79,4 +56,5 @@ export { createServer } from './api/server.ts'
 export { createMCPServer, wireEventNotifications, startMCPServerStdio } from './integrations/mcp/server.ts'
 
 // Delivery modes
-export type { DeliveryMode, Flow, FlowStep, FlowExecution } from './core/types.ts'
+export type { DeliveryMode } from './core/types/messaging.ts'
+export type { Flow, FlowStep, FlowExecution } from './core/types/flow.ts'

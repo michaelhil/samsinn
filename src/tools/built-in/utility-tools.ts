@@ -1,4 +1,5 @@
-import type { House, Tool, ToolContext } from '../../core/types.ts'
+import type { House } from '../../core/types/room.ts'
+import type { Tool, ToolContext } from '../../core/types/tool.ts'
 import { resolveRoom } from './resolve.ts'
 
 export const createGetTimeTool = (): Tool => ({

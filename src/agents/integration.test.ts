@@ -10,8 +10,9 @@ import { addAgentToRoom } from './actions.ts'
 import { createOllamaProvider } from '../llm/ollama.ts'
 import { createToolRegistry } from '../core/tool-registry.ts'
 import { createGetTimeTool } from '../tools/built-in/index.ts'
-import type { LLMProvider, Message } from '../core/types.ts'
-import { DEFAULTS, SYSTEM_SENDER_ID } from '../core/types.ts'
+import type { LLMProvider } from '../core/types/llm.ts'
+import type { Message } from '../core/types/messaging.ts'
+import { DEFAULTS, SYSTEM_SENDER_ID } from '../core/types/constants.ts'
 
 const FAST_MODEL = 'llama3.2:latest'
 

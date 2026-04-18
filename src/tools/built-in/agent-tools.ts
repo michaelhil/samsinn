@@ -1,4 +1,7 @@
-import type { AgentProfile, House, Team, Tool, ToolContext } from '../../core/types.ts'
+import type { AgentProfile } from '../../core/types/messaging.ts'
+import type { House } from '../../core/types/room.ts'
+import type { Team } from '../../core/types/agent.ts'
+import type { Tool, ToolContext } from '../../core/types/tool.ts'
 
 export const createPassTool = (): Tool => ({
   name: 'pass',

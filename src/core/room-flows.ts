@@ -6,7 +6,8 @@
 // notifies listeners of execution events (started/step/completed/cancelled).
 // ============================================================================
 
-import type { FlowExecution, OnFlowEvent } from './types.ts'
+import type { FlowExecution } from './types/flow.ts'
+import type { OnFlowEvent } from './types/room.ts'
 
 export interface FlowExecutionState {
   readonly getExecution: () => FlowExecution | undefined

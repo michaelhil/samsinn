@@ -9,7 +9,9 @@
 // giving each flow step's receiving agent context for *why* the flow was started.
 // ============================================================================
 
-import type { Artifact, Flow, FlowArtifactBody, FlowStep, Team } from './types.ts'
+import type { Artifact, FlowArtifactBody } from './types/artifact.ts'
+import type { Flow, FlowStep } from './types/flow.ts'
+import type { Team } from './types/agent.ts'
 
 export interface ResolveFlowArtifactError {
   readonly error: string

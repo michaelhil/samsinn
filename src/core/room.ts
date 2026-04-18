@@ -21,11 +21,15 @@
 // ============================================================================
 
 import type {
-  DeliverFn, DeliveryMode, Flow,
-  Message, OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted,
-  OnTurnChanged, PostParams, ResolveAgentName, ResolveTagFn, Room, RoomProfile, RoomRestoreParams, RoomState,
-} from './types.ts'
-import { DEFAULTS, SYSTEM_SENDER_ID } from './types.ts'
+  DeliverFn, DeliveryMode, Message, PostParams,
+  ResolveAgentName, ResolveTagFn, RoomProfile,
+} from './types/messaging.ts'
+import type { Flow } from './types/flow.ts'
+import type {
+  OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted, OnTurnChanged,
+  Room, RoomRestoreParams, RoomState,
+} from './types/room.ts'
+import { DEFAULTS, SYSTEM_SENDER_ID } from './types/constants.ts'
 import { parseAddressedAgents } from './addressing.ts'
 import { advanceFlowStep, buildFlowDeliveryContext, deliverBroadcast, deliverFlow } from './delivery-modes.ts'
 import { createFlowExecutionState } from './room-flows.ts'

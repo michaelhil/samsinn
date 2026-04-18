@@ -10,13 +10,10 @@
 
 import type { System } from '../main.ts'
 import type { HumanAgent } from '../agents/human-agent.ts'
-import type {
-  AgentProfile,
-  RoomState,
-  StateValue,
-  WSInbound,
-  WSOutbound,
-} from '../core/types.ts'
+import type { AgentProfile } from '../core/types/messaging.ts'
+import type { RoomState } from '../core/types/room.ts'
+import type { StateValue } from '../core/types/agent.ts'
+import type { WSInbound, WSOutbound } from '../core/types/ws-protocol.ts'
 import { asAIAgent } from '../agents/shared.ts'
 import { handleRoomCommand } from './ws-commands/room-commands.ts'
 import { handleAgentCommand } from './ws-commands/agent-commands.ts'

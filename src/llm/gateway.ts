@@ -6,8 +6,9 @@
 // Portable to any TypeScript project using Ollama.
 // ============================================================================
 
-import type { LLMProvider, ChatRequest, ChatResponse, StreamChunk } from '../core/types.ts'
+import type { LLMProvider, ChatRequest, ChatResponse, StreamChunk } from '../core/types/llm.ts'
 import type { OllamaPsModel, OllamaProviderExtended } from './ollama.ts'
+import { createCircuitBreaker, type CircuitState } from './circuit-breaker.ts'
 
 // === Configuration ===
 
@@ -78,17 +79,6 @@ export interface OllamaHealth {
   readonly loadedModels: ReadonlyArray<LoadedModel>
   readonly availableModels: ReadonlyArray<string>
   readonly lastCheckedAt: number
-}
-
-// === Circuit Breaker ===
-
-type CircuitState = 'closed' | 'open' | 'half_open'
-
-interface CircuitBreaker {
-  state: CircuitState
-  consecutiveFailures: number
-  lastFailureAt: number
-  openedAt: number
 }
 
 // === Gateway Interface ===
@@ -198,7 +188,7 @@ const createSemaphore = (max: number) => {
 // === Gateway Error ===
 
 export class GatewayError extends Error {
-  constructor(readonly code: 'circuit_open' | 'queue_full' | 'queue_timeout', message: string) {
+  constructor(readonly code: 'circuit_open' | 'queue_full' | 'queue_timeout' | 'not_supported', message: string) {
     super(message)
     this.name = 'GatewayError'
   }
@@ -224,53 +214,14 @@ export const createLLMGateway = (
   const metrics = createRingBuffer<RequestRecord>(200)
   let shedCount = 0
 
-  // Circuit breaker
-  const cb: CircuitBreaker = {
-    state: 'closed',
-    consecutiveFailures: 0,
-    lastFailureAt: 0,
-    openedAt: 0,
-  }
+  const cb = createCircuitBreaker(
+    { threshold: config.circuitBreakerThreshold, cooldownMs: config.circuitBreakerCooldownMs },
+    { onStateChange: () => checkHealthTransition() },
+  )
 
-  const tripCircuit = (): void => {
-    cb.state = 'open'
-    cb.openedAt = Date.now()
-    checkHealthTransition()
-  }
-
-  const resetCircuit = (): void => {
-    cb.state = 'closed'
-    cb.consecutiveFailures = 0
-    checkHealthTransition()
-  }
-
-  const recordSuccess = (): void => {
-    if (cb.state === 'half_open') resetCircuit()
-    else cb.consecutiveFailures = 0
-  }
-
-  const recordFailure = (): void => {
-    cb.consecutiveFailures++
-    cb.lastFailureAt = Date.now()
-    if (cb.state === 'half_open') {
-      tripCircuit()
-    } else if (cb.consecutiveFailures >= config.circuitBreakerThreshold) {
-      tripCircuit()
-    }
-  }
-
-  const shouldAllowRequest = (): boolean => {
-    if (cb.state === 'closed') return true
-    if (cb.state === 'open') {
-      if (Date.now() - cb.openedAt >= config.circuitBreakerCooldownMs) {
-        cb.state = 'half_open'
-        return true // allow one probe
-      }
-      return false
-    }
-    // half_open: only one request at a time (the probe)
-    return false
-  }
+  const recordSuccess = (): void => cb.recordSuccess()
+  const recordFailure = (): void => cb.recordFailure()
+  const shouldAllowRequest = (): boolean => cb.shouldAllow()
 
   // Health state
   let health: OllamaHealth = {
@@ -286,8 +237,9 @@ export const createLLMGateway = (
   const checkHealthTransition = (): void => {
     const prevStatus = health.status
     let newStatus: OllamaHealth['status'] = 'healthy'
-    if (cb.state === 'open') newStatus = 'down'
-    else if (cb.state === 'half_open') newStatus = 'degraded'
+    const cbState = cb.getState()
+    if (cbState === 'open') newStatus = 'down'
+    else if (cbState === 'half_open') newStatus = 'degraded'
     else if (health.latencyMs > 10_000) newStatus = 'degraded'
 
     if (newStatus !== prevStatus) {
@@ -331,7 +283,7 @@ export const createLLMGateway = (
       checkHealthTransition()
     } catch {
       // Poller failure — if circuit is already open, health is already 'down'
-      if (cb.state === 'closed') {
+      if (cb.getState() === 'closed') {
         health = { ...health, lastCheckedAt: Date.now() }
       }
     }
@@ -358,7 +310,7 @@ export const createLLMGateway = (
         status: 'circuit_open',
         timestamp: Date.now(),
       })
-      throw new GatewayError('circuit_open', `Circuit breaker open — Ollama appears down (${cb.consecutiveFailures} consecutive failures)`)
+      throw new GatewayError('circuit_open', `Circuit breaker open — Ollama appears down (${cb.getConsecutiveFailures()} consecutive failures)`)
     }
 
     let queueWaitMs: number
@@ -431,7 +383,7 @@ export const createLLMGateway = (
 
   // Wrapped stream — same semaphore + circuit breaker, but metrics recorded at end
   const stream = async function* (request: ChatRequest, signal?: AbortSignal): AsyncIterable<StreamChunk> {
-    if (!provider.stream) throw new Error('Provider does not support streaming')
+    if (!provider.stream) throw new GatewayError('not_supported', 'Provider does not support streaming')
 
     if (!shouldAllowRequest()) {
       shedCount++
@@ -511,7 +463,7 @@ export const createLLMGateway = (
       avgTokensPerSecond: Math.round(avgTps * 10) / 10,
       queueDepth: semaphore.queueDepth,
       concurrentRequests: semaphore.active,
-      circuitState: cb.state,
+      circuitState: cb.getState(),
       shedCount,
       windowMs,
     }
@@ -524,6 +476,12 @@ export const createLLMGateway = (
   const updateConfig = (partial: Partial<GatewayConfig>): void => {
     config = { ...config, ...partial }
     if (partial.maxConcurrent !== undefined) semaphore.updateMax(partial.maxConcurrent)
+    if (partial.circuitBreakerThreshold !== undefined || partial.circuitBreakerCooldownMs !== undefined) {
+      cb.updateConfig({
+        ...(partial.circuitBreakerThreshold !== undefined ? { threshold: partial.circuitBreakerThreshold } : {}),
+        ...(partial.circuitBreakerCooldownMs !== undefined ? { cooldownMs: partial.circuitBreakerCooldownMs } : {}),
+      })
+    }
     if (partial.healthPollIntervalMs !== undefined && pollTimer) {
       clearInterval(pollTimer)
       pollTimer = setInterval(pollHealth, config.healthPollIntervalMs)
@@ -563,7 +521,7 @@ export const createLLMGateway = (
     loadModel,
     unloadModel,
     onHealthChange,
-    resetCircuitBreaker: resetCircuit,
+    resetCircuitBreaker: () => cb.reset(),
     refreshHealth: () => { void pollHealth() },
     dispose,
   }

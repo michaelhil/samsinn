@@ -22,8 +22,8 @@ import type {
   ArtifactTypeRegistry,
   ArtifactUpdateConfig,
   OnArtifactChanged,
-  ToolContext,
-} from './types.ts'
+} from './types/artifact.ts'
+import type { ToolContext } from './types/tool.ts'
 
 export const createArtifactStore = (
   typeRegistry: ArtifactTypeRegistry,

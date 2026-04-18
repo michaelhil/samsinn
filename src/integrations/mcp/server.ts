@@ -16,7 +16,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { System } from '../../main.ts'
-import type { Artifact, OnArtifactChanged, OnDeliveryModeChanged, OnFlowEvent, OnTurnChanged } from '../../core/types.ts'
+import type { Artifact, OnArtifactChanged } from '../../core/types/artifact.ts'
+import type { OnDeliveryModeChanged, OnFlowEvent, OnTurnChanged } from '../../core/types/room.ts'
 import { registerAllMCPTools } from './tools/index.ts'
 import { registerMCPResources } from './resources.ts'
 

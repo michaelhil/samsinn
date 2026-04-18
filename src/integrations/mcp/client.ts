@@ -11,7 +11,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import type { ToolRegistry } from '../../core/types.ts'
+import type { ToolRegistry } from '../../core/types/tool.ts'
 
 export interface MCPServerConfig {
   readonly command: string

@@ -11,9 +11,10 @@
 //     All tool calling is native (no text protocol).
 // ============================================================================
 
-import type {
-  Agent, AIAgentConfig, Artifact, DeliveryMode, Message, Room, RoomProfile,
-} from './types.ts'
+import type { Agent, AIAgentConfig } from './types/agent.ts'
+import type { Artifact } from './types/artifact.ts'
+import type { DeliveryMode, Message, RoomProfile } from './types/messaging.ts'
+import type { Room } from './types/room.ts'
 import { asAIAgent } from '../agents/shared.ts'
 import { mkdir, rename } from 'node:fs/promises'
 import { dirname } from 'node:path'

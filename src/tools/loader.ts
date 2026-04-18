@@ -14,7 +14,7 @@
 // Hot-reload is not supported: restart to pick up file changes.
 // ============================================================================
 
-import type { Tool, ToolRegistry } from '../core/types.ts'
+import type { Tool, ToolRegistry } from '../core/types/tool.ts'
 import { readdir, stat } from 'node:fs/promises'
 import { join, resolve, extname, basename } from 'node:path'
 import { homedir } from 'node:os'

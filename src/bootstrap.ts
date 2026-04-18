@@ -8,7 +8,7 @@
 // ============================================================================
 
 import { createSystem } from './main.ts'
-import { DEFAULTS } from './core/types.ts'
+import { DEFAULTS } from './core/types/constants.ts'
 import { registerAllMCPServers } from './integrations/mcp/client.ts'
 import { existsSync } from 'node:fs'
 import { loadSnapshot, restoreFromSnapshot, createAutoSaver } from './core/snapshot.ts'

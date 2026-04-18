@@ -1,4 +1,4 @@
-import type { WSInbound, WSOutbound } from '../../core/types.ts'
+import type { WSInbound, WSOutbound } from '../../core/types/ws-protocol.ts'
 import type { CommandContext } from './types.ts'
 
 export const handleMessageCommand = (msg: WSInbound, ctx: CommandContext): boolean => {

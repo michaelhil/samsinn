@@ -1,6 +1,6 @@
 import type { System } from '../../main.ts'
 import type { ClientSession, WSManager } from '../ws-handler.ts'
-import type { WSInbound, WSOutbound } from '../../core/types.ts'
+import type { WSInbound, WSOutbound } from '../../core/types/ws-protocol.ts'
 
 export interface CommandContext {
   readonly ws: { send: (data: string) => void }

@@ -10,8 +10,10 @@
 // ID is auto-generated UUID, same as AI agents.
 // ============================================================================
 
-import type { Agent, AgentState, Message, Room } from '../core/types.ts'
-import { DEFAULTS } from '../core/types.ts'
+import type { Agent, AgentState } from '../core/types/agent.ts'
+import type { Message } from '../core/types/messaging.ts'
+import type { Room } from '../core/types/room.ts'
+import { DEFAULTS } from '../core/types/constants.ts'
 
 export interface HumanAgentConfig {
   readonly name: string

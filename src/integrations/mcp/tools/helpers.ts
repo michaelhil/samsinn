@@ -1,5 +1,6 @@
 import type { System } from '../../../main.ts'
-import type { Room, Agent } from '../../../core/types.ts'
+import type { Room } from '../../../core/types/room.ts'
+import type { Agent } from '../../../core/types/agent.ts'
 
 export const textResult = (data: unknown) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],

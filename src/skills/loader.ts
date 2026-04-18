@@ -17,7 +17,7 @@
 // via the existing loadToolDirectory() function.
 // ============================================================================
 
-import type { ToolRegistry } from '../core/types.ts'
+import type { ToolRegistry } from '../core/types/tool.ts'
 import { VALID_NAME, loadToolDirectory } from '../tools/loader.ts'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'

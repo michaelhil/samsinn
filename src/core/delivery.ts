@@ -5,7 +5,8 @@
 // correlationId is shared across all rooms in a single routing call.
 // ============================================================================
 
-import type { RouterDeps, Message, MessageTarget, RouteMessage } from './types.ts'
+import type { Message, MessageTarget } from './types/messaging.ts'
+import type { RouterDeps, RouteMessage } from './types/agent.ts'
 
 export const createMessageRouter = ({ house }: RouterDeps): RouteMessage => {
   return (target: MessageTarget, params) => {

@@ -9,7 +9,7 @@
 // ============================================================================
 
 import type { System } from '../main.ts'
-import type { WSOutbound } from '../core/types.ts'
+import type { WSOutbound } from '../core/types/ws-protocol.ts'
 import { houseRoutes } from './routes/house.ts'
 import { roomRoutes } from './routes/rooms.ts'
 import { artifactRoutes } from './routes/artifacts.ts'

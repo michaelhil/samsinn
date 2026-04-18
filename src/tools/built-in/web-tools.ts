@@ -16,7 +16,7 @@
 //   the evaluation loop's truncation boundary is never hit mid-content.
 // ============================================================================
 
-import type { Tool, ToolContext, ToolResult } from '../../core/types.ts'
+import type { Tool, ToolContext, ToolResult } from '../../core/types/tool.ts'
 import { htmlToMarkdown } from './html-to-md.ts'
 
 // === Configuration ===

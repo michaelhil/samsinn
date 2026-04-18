@@ -8,18 +8,9 @@
 // createRoomSafe auto-renames on collision and returns CreateResult.
 // ============================================================================
 
-import type {
-  Artifact,
-  ArtifactStore,
-  ArtifactTypeRegistry,
-  CreateResult,
-  House,
-  HouseCallbacks,
-  OnArtifactChanged,
-  Room,
-  RoomConfig,
-  RoomProfile,
-} from './types.ts'
+import type { Artifact, ArtifactStore, ArtifactTypeRegistry, OnArtifactChanged } from './types/artifact.ts'
+import type { CreateResult, House, HouseCallbacks, Room, RoomConfig } from './types/room.ts'
+import type { RoomProfile } from './types/messaging.ts'
 import { createRoom, type RoomCallbacks } from './room.ts'
 import { createArtifactStore } from './artifact-store.ts'
 import { createArtifactTypeRegistry } from './artifact-type-registry.ts'

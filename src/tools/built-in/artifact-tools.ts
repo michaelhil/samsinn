@@ -13,7 +13,8 @@
 // Scope accepts room names (resolved to IDs at the boundary).
 // ============================================================================
 
-import type { House, Tool, ToolContext } from '../../core/types.ts'
+import type { House } from '../../core/types/room.ts'
+import type { Tool, ToolContext } from '../../core/types/tool.ts'
 import { resolveRoom } from './resolve.ts'
 
 export const createListArtifactTypesTool = (house: House): Tool => ({

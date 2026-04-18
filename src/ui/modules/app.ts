@@ -25,6 +25,7 @@ import {
   type ArtifactInfo,
   type ArtifactAction,
 } from './ui-renderer.ts'
+import { derivePhase, phaseLabel, THINKING_MARKER } from './thinking-phase.ts'
 import { openTextEditorModal, createModal, createButtonRow, createTextarea } from './modal.ts'
 import { createWorkspace } from './workspace.ts'
 import { wsDispatch } from './ws-dispatch.ts'
@@ -564,22 +565,24 @@ const ensureThinkingIndicator = (agentId: string, agentName: string): void => {
   })
   thinkingState.set(agentId, { timer, name: agentName })
 
-  // Set label to match current known phase (not always "Building context")
+  // Set label to match current known phase — covers room re-entry where state is already advanced.
   const ctx = $agentContexts.get()[agentId]
   const toolText = $thinkingTools.get()[agentId] ?? ''
-  if (toolText === '__thinking__') {
-    updateThinkingLabel(messagesDiv, agentName, `${agentName}: Thinking...`)
+  const phase = derivePhase({
+    hasContext: ctx !== undefined,
+    model: ctx?.model,
+    toolText,
+    firstChunkSeen: firstChunkSeen.has(agentId),
+  })
+  if (phase.kind !== 'building') {
+    updateThinkingLabel(messagesDiv, agentName, phaseLabel(agentName, phase))
+  }
+  if (phase.kind === 'thinking') {
     updateThinkingPreviewStyle(messagesDiv, agentName, true)
-  } else if (ctx) {
-    // Context ready, possibly generating
-    if (firstChunkSeen.has(agentId) || toolText) {
-      updateThinkingLabel(messagesDiv, agentName, `${agentName}: Generating...`)
-    } else {
-      updateThinkingLabel(messagesDiv, agentName, `${agentName}: Waiting for ${ctx.model}...`)
-    }
+  }
+  if (ctx && toolText !== THINKING_MARKER) {
     showContextIcon(messagesDiv, agentName, () => showContextModal(ctx, $agentWarnings.get()[agentId]))
   }
-  // If no context yet, default "Building context..." from renderThinkingIndicator is correct
 
   // Restore preview text if available
   const preview = $thinkingPreviews.get()[agentId]

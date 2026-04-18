@@ -1,5 +1,5 @@
 import type { System } from '../../main.ts'
-import type { WSOutbound } from '../../core/types.ts'
+import type { WSOutbound } from '../../core/types/ws-protocol.ts'
 
 export interface RouteContext {
   readonly system: System

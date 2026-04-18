@@ -1,7 +1,8 @@
 // Shared room resolver for built-in tool implementations.
 // Falls back to the current room from ToolContext if no roomName param provided.
 
-import type { House, Room, ToolContext } from '../../core/types.ts'
+import type { House, Room } from '../../core/types/room.ts'
+import type { ToolContext } from '../../core/types/tool.ts'
 
 export const resolveRoom = (house: House, params: Record<string, unknown>, context: ToolContext): Room | undefined => {
   const name = params.roomName as string | undefined

@@ -9,7 +9,7 @@
 // Polls do not auto-resolve — they require explicit resolution.
 // ============================================================================
 
-import type { Artifact, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult, PollBody } from '../types.ts'
+import type { Artifact, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult, PollBody } from '../types/artifact.ts'
 
 export const pollArtifactType: ArtifactTypeDefinition = {
   type: 'poll',

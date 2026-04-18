@@ -5,7 +5,7 @@
 // the registry validates access at execution time.
 // ============================================================================
 
-import type { Tool, ToolRegistry } from './types.ts'
+import type { Tool, ToolRegistry } from './types/tool.ts'
 
 export const createToolRegistry = (): ToolRegistry => {
   const tools = new Map<string, Tool>()

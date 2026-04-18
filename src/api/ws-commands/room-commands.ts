@@ -1,5 +1,6 @@
-import { SETTABLE_DELIVERY_MODES } from '../../core/types.ts'
-import type { SettableDeliveryMode, WSInbound } from '../../core/types.ts'
+import { SETTABLE_DELIVERY_MODES } from '../../core/types/messaging.ts'
+import type { SettableDeliveryMode } from '../../core/types/messaging.ts'
+import type { WSInbound } from '../../core/types/ws-protocol.ts'
 import { requireRoom, requireAgent, sendError, type CommandContext } from './types.ts'
 
 export const handleRoomCommand = async (msg: WSInbound, ctx: CommandContext): Promise<boolean> => {

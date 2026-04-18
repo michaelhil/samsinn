@@ -8,7 +8,7 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { createWebTools } from '../../../tools/built-in/web-tools.ts'
-import type { ToolContext } from '../../../core/types.ts'
+import type { ToolContext } from '../../../core/types/tool.ts'
 import { textResult, errorResult } from './helpers.ts'
 
 const dummyContext: ToolContext = {

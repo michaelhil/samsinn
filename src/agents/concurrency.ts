@@ -14,7 +14,7 @@
 // a cancelled epoch are silently discarded.
 // ============================================================================
 
-import type { AgentState, StateSubscriber, StateValue } from '../core/types.ts'
+import type { AgentState, StateSubscriber, StateValue } from '../core/types/agent.ts'
 
 const AGENT_TIMEOUT_MS = 30_000
 

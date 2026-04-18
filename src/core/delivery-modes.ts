@@ -10,7 +10,8 @@
 //   flow       — deliver to current step agent (if eligible)
 // ============================================================================
 
-import type { DeliverFn, Flow, FlowDeliveryContext, FlowExecution, Message } from './types.ts'
+import type { DeliverFn, Message } from './types/messaging.ts'
+import type { Flow, FlowDeliveryContext, FlowExecution } from './types/flow.ts'
 
 // --- Shared flow context builder ---
 // Single source of truth for FlowDeliveryContext construction.

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { createTeam } from './team.ts'
-import type { Agent } from '../core/types.ts'
+import type { Agent } from '../core/types/agent.ts'
 
 let counter = 0
 const makeAgent = (overrides?: Partial<Agent>): Agent => ({

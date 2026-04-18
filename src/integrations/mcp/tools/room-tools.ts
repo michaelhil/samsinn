@@ -1,31 +1,169 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { System } from '../../../main.ts'
-import { textResult, errorResult, resolveRoom, resolveAgent } from './helpers.ts'
+import type { ToolContext } from '../../../core/types/tool.ts'
+import {
+  createListRoomsTool,
+  createCreateRoomTool,
+  createDeleteRoomTool,
+  createSetRoomPromptTool,
+  createPauseRoomTool,
+  createSetDeliveryModeTool,
+  createAddToRoomTool,
+  createRemoveFromRoomTool,
+} from '../../../tools/built-in/room-tools.ts'
+import { textResult, errorResult, resolveRoom } from './helpers.ts'
+
+const dummyContext: ToolContext = {
+  callerId: 'mcp-client',
+  callerName: 'mcp-client',
+}
 
 export const registerRoomTools = (mcpServer: McpServer, system: System): void => {
+  const listRooms = createListRoomsTool(system.house)
   mcpServer.tool(
-    'create_room',
-    'Create a new room for agent communication',
+    listRooms.name,
+    listRooms.description,
+    {},
+    async () => {
+      try {
+        const result = await listRooms.execute({}, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to list rooms')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to list rooms')
+      }
+    },
+  )
+
+  const createRoom = createCreateRoomTool(system.house, system.addAgentToRoom)
+  mcpServer.tool(
+    createRoom.name,
+    createRoom.description,
     {
-      name: z.string().describe('Room name'),
-      roomPrompt: z.string().optional().describe('Instructions for agents in this room'),
+      name: z.string().describe('Name for the new room'),
+      roomPrompt: z.string().optional().describe('Optional system prompt for the room'),
     },
     async ({ name, roomPrompt }) => {
       try {
-        const result = system.house.createRoomSafe({ name, roomPrompt, createdBy: 'mcp-client' })
-        return textResult(result.value.profile)
+        const result = await createRoom.execute(
+          { name, ...(roomPrompt !== undefined ? { roomPrompt } : {}) },
+          dummyContext,
+        )
+        if (!result.success) return errorResult(result.error ?? 'Failed to create room')
+        return textResult(result.data)
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to create room')
       }
     },
   )
 
+  const deleteRoom = createDeleteRoomTool(system.removeRoom, system.house)
   mcpServer.tool(
-    'list_rooms',
-    'List all rooms in the system',
-    {},
-    async () => textResult(system.house.listAllRooms()),
+    deleteRoom.name,
+    deleteRoom.description,
+    { roomName: z.string().describe('Name of the room to delete') },
+    async ({ roomName }) => {
+      try {
+        const result = await deleteRoom.execute({ roomName }, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to delete room')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to delete room')
+      }
+    },
+  )
+
+  const setRoomPrompt = createSetRoomPromptTool(system.house)
+  mcpServer.tool(
+    setRoomPrompt.name,
+    setRoomPrompt.description,
+    {
+      roomName: z.string().describe('Name of the room to update'),
+      prompt: z.string().describe('The new room prompt text'),
+    },
+    async ({ roomName, prompt }) => {
+      try {
+        const result = await setRoomPrompt.execute({ roomName, prompt }, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to set room prompt')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to set room prompt')
+      }
+    },
+  )
+
+  const pauseRoom = createPauseRoomTool(system.house)
+  mcpServer.tool(
+    pauseRoom.name,
+    pauseRoom.description,
+    {
+      roomName: z.string().describe('Name of the room'),
+      paused: z.boolean().describe('true to pause, false to unpause'),
+    },
+    async ({ roomName, paused }) => {
+      try {
+        const result = await pauseRoom.execute({ roomName, paused }, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to set paused')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to set paused')
+      }
+    },
+  )
+
+  const setDeliveryMode = createSetDeliveryModeTool(system.house)
+  mcpServer.tool(
+    setDeliveryMode.name,
+    setDeliveryMode.description,
+    { roomName: z.string().describe('Name of the room to update') },
+    async ({ roomName }) => {
+      try {
+        const result = await setDeliveryMode.execute({ roomName }, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to set delivery mode')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to set delivery mode')
+      }
+    },
+  )
+
+  const addToRoom = createAddToRoomTool(system.team, system.house, system.addAgentToRoom)
+  mcpServer.tool(
+    addToRoom.name,
+    addToRoom.description,
+    {
+      agentName: z.string().describe('Name of the agent to add (use own name to join)'),
+      roomName: z.string().describe('Name of the room to join'),
+    },
+    async ({ agentName, roomName }) => {
+      try {
+        const result = await addToRoom.execute({ agentName, roomName }, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to add to room')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to add to room')
+      }
+    },
+  )
+
+  const removeFromRoom = createRemoveFromRoomTool(system.team, system.house, system.removeAgentFromRoom)
+  mcpServer.tool(
+    removeFromRoom.name,
+    removeFromRoom.description,
+    {
+      agentName: z.string().describe('Name of the agent to remove (use own name to leave)'),
+      roomName: z.string().describe('Name of the room'),
+    },
+    async ({ agentName, roomName }) => {
+      try {
+        const result = await removeFromRoom.execute({ agentName, roomName }, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to remove from room')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to remove from room')
+      }
+    },
   )
 
   mcpServer.tool(
@@ -41,137 +179,6 @@ export const registerRoomTools = (mcpServer: McpServer, system: System): void =>
         return textResult({ profile: room.profile, messages: room.getRecent(messageLimit), deliveryMode: room.deliveryMode })
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Room not found')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'delete_room',
-    'Delete a room',
-    { name: z.string().describe('Room name') },
-    async ({ name }) => {
-      try {
-        const room = resolveRoom(system, name)
-        system.removeRoom(room.profile.id)
-        return textResult({ removed: true })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to delete room')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'set_room_prompt',
-    'Set the room prompt (instructions for agents in this room)',
-    {
-      roomName: z.string().describe('Room name'),
-      roomPrompt: z.string().describe('New room prompt'),
-    },
-    async ({ roomName, roomPrompt }) => {
-      try {
-        const room = resolveRoom(system, roomName)
-        room.setRoomPrompt(roomPrompt)
-        return textResult({ roomPrompt: room.profile.roomPrompt })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to set room prompt')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'add_to_room',
-    'Add an agent to a room',
-    {
-      agentName: z.string().describe('Name of the agent to add'),
-      roomName: z.string().describe('Name of the room'),
-    },
-    async ({ agentName, roomName }) => {
-      try {
-        const agent = system.team.getAgent(agentName)
-        if (!agent) return errorResult(`Agent "${agentName}" not found`)
-        const room = system.house.getRoom(roomName)
-        if (!room) return errorResult(`Room "${roomName}" not found`)
-        await system.addAgentToRoom(agent.id, room.profile.id)
-        return textResult({ agentName: agent.name, roomName: room.profile.name })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to add to room')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'remove_from_room',
-    'Remove an agent from a room',
-    {
-      agentName: z.string().describe('Name of the agent to remove'),
-      roomName: z.string().describe('Name of the room'),
-    },
-    async ({ agentName, roomName }) => {
-      try {
-        const agent = system.team.getAgent(agentName)
-        if (!agent) return errorResult(`Agent "${agentName}" not found`)
-        const room = system.house.getRoom(roomName)
-        if (!room) return errorResult(`Room "${roomName}" not found`)
-        system.removeAgentFromRoom(agent.id, room.profile.id)
-        return textResult({ agentName: agent.name, roomName: room.profile.name })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to remove from room')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'set_delivery_mode',
-    'Set the delivery mode for a room: broadcast (all agents). Use muting to control which agents respond.',
-    {
-      roomName: z.string().describe('Room name'),
-      mode: z.enum(['broadcast']).describe('Delivery mode'),
-    },
-    async ({ roomName, mode }) => {
-      try {
-        const room = resolveRoom(system, roomName)
-        room.setDeliveryMode(mode)
-        return textResult({ mode: room.deliveryMode })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to set delivery mode')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'set_paused',
-    'Pause or resume a room. Paused rooms store messages but do not deliver them.',
-    {
-      roomName: z.string().describe('Room name'),
-      paused: z.boolean().describe('True to pause, false to resume'),
-    },
-    async ({ roomName, paused }) => {
-      try {
-        const room = resolveRoom(system, roomName)
-        room.setPaused(paused)
-        return textResult({ paused: room.paused })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to set paused')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'set_muted',
-    'Mute or unmute an agent in a room. Muted agents are excluded from all delivery.',
-    {
-      roomName: z.string().describe('Room name'),
-      agentName: z.string().describe('Agent name'),
-      muted: z.boolean().describe('True to mute, false to unmute'),
-    },
-    async ({ roomName, agentName, muted }) => {
-      try {
-        const room = resolveRoom(system, roomName)
-        const agent = resolveAgent(system, agentName)
-        room.setMuted(agent.id, muted)
-        return textResult({ muted: room.isMuted(agent.id) })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to set mute')
       }
     },
   )

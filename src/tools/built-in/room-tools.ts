@@ -1,4 +1,6 @@
-import type { House, Team, Tool, ToolContext, RoomConfig } from '../../core/types.ts'
+import type { House, RoomConfig } from '../../core/types/room.ts'
+import type { Team } from '../../core/types/agent.ts'
+import type { Tool, ToolContext } from '../../core/types/tool.ts'
 
 type AddToRoomFn = (agentId: string, roomId: string, invitedBy?: string) => Promise<void>
 type RemoveFromRoomFn = (agentId: string, roomId: string, removedBy?: string) => void

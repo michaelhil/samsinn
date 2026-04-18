@@ -8,7 +8,8 @@ import { createHouse } from '../core/house.ts'
 import { createTeam } from '../agents/team.ts'
 import { createToolRegistry } from '../core/tool-registry.ts'
 import { createTaskListArtifactType } from '../core/artifact-types/task-list.ts'
-import type { DeliverFn, WSOutbound } from '../core/types.ts'
+import type { DeliverFn } from '../core/types/messaging.ts'
+import type { WSOutbound } from '../core/types/ws-protocol.ts'
 import type { System } from '../main.ts'
 
 // === Helpers ===

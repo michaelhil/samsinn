@@ -10,16 +10,11 @@
 // window is passed to the LLM on each context build.
 // ============================================================================
 
-import type {
-  Artifact,
-  ArtifactTypeDefinition,
-  AgentHistory,
-  AgentProfile,
-  ChatRequest,
-  FlowDeliveryContext,
-  Message,
-} from '../core/types.ts'
-import { SYSTEM_SENDER_ID } from '../core/types.ts'
+import type { Artifact, ArtifactTypeDefinition } from '../core/types/artifact.ts'
+import type { AgentHistory, AgentProfile, Message } from '../core/types/messaging.ts'
+import type { ChatRequest } from '../core/types/llm.ts'
+import type { FlowDeliveryContext } from '../core/types/flow.ts'
+import { SYSTEM_SENDER_ID } from '../core/types/constants.ts'
 // Text tool protocol removed — all tools use native tool calling
 
 // === Flush info — describes which incoming messages were consumed ===

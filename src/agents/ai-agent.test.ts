@@ -1,8 +1,11 @@
 import { describe, test, expect } from 'bun:test'
 import { createAIAgent } from './ai-agent.ts'
 import type { Decision } from './ai-agent.ts'
-import type { AIAgentConfig, LLMProvider, Message, Room, RoomProfile } from '../core/types.ts'
-import { SYSTEM_SENDER_ID } from '../core/types.ts'
+import type { AIAgentConfig } from '../core/types/agent.ts'
+import type { LLMProvider } from '../core/types/llm.ts'
+import type { Message, RoomProfile } from '../core/types/messaging.ts'
+import type { Room } from '../core/types/room.ts'
+import { SYSTEM_SENDER_ID } from '../core/types/constants.ts'
 import { createRoom } from '../core/room.ts'
 
 // --- Test helpers ---

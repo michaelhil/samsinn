@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { createOllamaProvider } from './ollama.ts'
-import { DEFAULTS } from '../core/types.ts'
+import { DEFAULTS } from '../core/types/constants.ts'
 
 const FAST_MODEL = 'llama3.2:latest'
 

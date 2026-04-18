@@ -4,7 +4,7 @@ import { createMessageRouter } from '../core/delivery.ts'
 import { createTeam } from './team.ts'
 import { createHumanAgent } from './human-agent.ts'
 import { addAgentToRoom, removeAgentFromRoom } from './actions.ts'
-import type { Message } from '../core/types.ts'
+import type { Message } from '../core/types/messaging.ts'
 
 const createTestSystem = () => {
   const team = createTeam()

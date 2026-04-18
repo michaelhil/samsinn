@@ -5,7 +5,7 @@
 // Updates via update_artifact re-render in real-time in the workspace pane.
 // ============================================================================
 
-import type { Artifact, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult } from '../types.ts'
+import type { Artifact, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult } from '../types/artifact.ts'
 
 export const mermaidArtifactType: ArtifactTypeDefinition = {
   type: 'mermaid',

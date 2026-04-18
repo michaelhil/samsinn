@@ -6,8 +6,9 @@
 // ============================================================================
 
 import type { System } from '../main.ts'
-import type { Message, WSOutbound } from '../core/types.ts'
-import { DEFAULTS } from '../core/types.ts'
+import type { Message } from '../core/types/messaging.ts'
+import type { WSOutbound } from '../core/types/ws-protocol.ts'
+import { DEFAULTS } from '../core/types/constants.ts'
 import { ensureUniqueName } from '../core/names.ts'
 import { handleAPI } from './http-routes.ts'
 import { createWSManager, handleWSMessage, type WSData } from './ws-handler.ts'

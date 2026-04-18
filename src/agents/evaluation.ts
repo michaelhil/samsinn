@@ -6,19 +6,10 @@
 // responding. All tool calling uses the model's native structured format.
 // ============================================================================
 
-import type {
-  AgentResponse,
-  AIAgentConfig,
-  ChatRequest,
-  EvalEvent,
-  LLMCallOptions,
-  LLMProvider,
-  NativeToolCall,
-  ToolCall,
-  ToolDefinition,
-  ToolExecutor,
-  ToolResult,
-} from '../core/types.ts'
+import type { AgentResponse, AIAgentConfig } from '../core/types/agent.ts'
+import type { ChatRequest, LLMCallOptions, LLMProvider } from '../core/types/llm.ts'
+import type { EvalEvent } from '../core/types/agent-eval.ts'
+import type { NativeToolCall, ToolCall, ToolDefinition, ToolExecutor, ToolResult } from '../core/types/tool.ts'
 import type { ContextResult, FlushInfo } from './context-builder.ts'
 
 // === Decision — what the agent wants to do after evaluation ===

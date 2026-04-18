@@ -18,20 +18,14 @@
 // Side effects are handled via the onDecision callback.
 // ============================================================================
 
-import type {
-  AIAgent,
-  AgentHistory,
-  AIAgentConfig,
-  Artifact,
-  ArtifactTypeDefinition,
-  EvalEvent,
-  LLMProvider,
-  Message,
-  Room,
-  ToolDefinition,
-  ToolExecutor,
-} from '../core/types.ts'
-import { DEFAULTS, SYSTEM_SENDER_ID } from '../core/types.ts'
+import type { AIAgent, AIAgentConfig } from '../core/types/agent.ts'
+import type { AgentHistory, Message } from '../core/types/messaging.ts'
+import type { Artifact, ArtifactTypeDefinition } from '../core/types/artifact.ts'
+import type { EvalEvent } from '../core/types/agent-eval.ts'
+import type { LLMProvider } from '../core/types/llm.ts'
+import type { Room } from '../core/types/room.ts'
+import type { ToolDefinition, ToolExecutor } from '../core/types/tool.ts'
+import { DEFAULTS, SYSTEM_SENDER_ID } from '../core/types/constants.ts'
 import { extractAgentProfile as extractProfile } from './shared.ts'
 import { buildContext, flushIncoming, type BuildContextDeps } from './context-builder.ts'
 import { callLLM, evaluate, type OnDecision } from './evaluation.ts'

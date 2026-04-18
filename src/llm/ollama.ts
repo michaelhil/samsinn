@@ -1,4 +1,4 @@
-import type { LLMProvider, ChatRequest, ChatResponse, StreamChunk } from '../core/types.ts'
+import type { LLMProvider, ChatRequest, ChatResponse, StreamChunk } from '../core/types/llm.ts'
 
 /** Typed error from Ollama — carries HTTP status for error classification. */
 export class OllamaError extends Error {

@@ -13,7 +13,7 @@
 // are handled by onUpdate. For direct manipulation, send the full updated tasks array.
 // ============================================================================
 
-import type { Artifact, ArtifactStore, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult, TaskItem, TaskListBody, TaskStatus } from '../types.ts'
+import type { Artifact, ArtifactStore, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult, TaskItem, TaskListBody, TaskStatus } from '../types/artifact.ts'
 
 const taskStatusMark = (status: TaskStatus): string => {
   if (status === 'completed') return 'x'

@@ -9,7 +9,8 @@
 // document blocks based on Markdown-like prefix syntax.
 // ============================================================================
 
-import type { ArtifactStore, BlockType, DocumentBody, Tool, ToolContext, ToolResult } from '../../core/types.ts'
+import type { ArtifactStore, BlockType, DocumentBody } from '../../core/types/artifact.ts'
+import type { Tool, ToolContext, ToolResult } from '../../core/types/tool.ts'
 
 // === parseStreamedBlocks ===
 // Splits accumulated text into discrete document blocks.

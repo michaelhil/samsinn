@@ -15,7 +15,7 @@
 // agents receive the artifact in context and can observe changes there.
 // ============================================================================
 
-import type { Artifact, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult, BlockType, DocumentBlock, DocumentBody } from '../types.ts'
+import type { Artifact, ArtifactTypeDefinition, ArtifactUpdateConfig, ArtifactUpdateResult, BlockType, DocumentBlock, DocumentBody } from '../types/artifact.ts'
 
 const DOCUMENT_CONTEXT_MAX_CHARS = 6_000
 

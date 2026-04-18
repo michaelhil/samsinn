@@ -1,11 +1,54 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { System } from '../../../main.ts'
-import type { AIAgent } from '../../../core/types.ts'
+import type { AIAgent } from '../../../core/types/agent.ts'
+import type { ToolContext } from '../../../core/types/tool.ts'
 import { asAIAgent } from '../../../agents/shared.ts'
+import { createListAgentsTool, createMuteAgentTool } from '../../../tools/built-in/agent-tools.ts'
 import { textResult, errorResult, resolveAgent } from './helpers.ts'
 
+const dummyContext: ToolContext = {
+  callerId: 'mcp-client',
+  callerName: 'mcp-client',
+}
+
 export const registerAgentTools = (mcpServer: McpServer, system: System): void => {
+  const listAgents = createListAgentsTool(system.team)
+  mcpServer.tool(
+    listAgents.name,
+    listAgents.description,
+    {},
+    async () => {
+      try {
+        const result = await listAgents.execute({}, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to list agents')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to list agents')
+      }
+    },
+  )
+
+  const muteAgent = createMuteAgentTool(system.team, system.house)
+  mcpServer.tool(
+    muteAgent.name,
+    muteAgent.description,
+    {
+      roomName: z.string().describe('Name of the room'),
+      agentName: z.string().describe('Name of the agent to mute or unmute'),
+      muted: z.boolean().describe('true to mute, false to unmute'),
+    },
+    async ({ roomName, agentName, muted }) => {
+      try {
+        const result = await muteAgent.execute({ roomName, agentName, muted }, dummyContext)
+        if (!result.success) return errorResult(result.error ?? 'Failed to set mute')
+        return textResult(result.data)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to set mute')
+      }
+    },
+  )
+
   mcpServer.tool(
     'create_agent',
     'Create a new AI agent (not added to any room by default)',
@@ -22,18 +65,6 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to create agent')
       }
-    },
-  )
-
-  mcpServer.tool(
-    'list_agents',
-    'List all agents in the system',
-    {},
-    async () => {
-      const agents = system.team.listAgents().map(a => ({
-        id: a.id, name: a.name, kind: a.kind, state: a.state.get(),
-      }))
-      return textResult(agents)
     },
   )
 

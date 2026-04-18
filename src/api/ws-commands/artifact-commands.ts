@@ -1,4 +1,4 @@
-import type { WSInbound } from '../../core/types.ts'
+import type { WSInbound } from '../../core/types/ws-protocol.ts'
 import { resolveFlowArtifact, isFlowError } from '../../core/flow-artifact.ts'
 import { requireRoom, sendError, type CommandContext } from './types.ts'
 

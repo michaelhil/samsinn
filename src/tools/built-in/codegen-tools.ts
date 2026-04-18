@@ -11,7 +11,7 @@
 // These tools are mechanical — filesystem, registry, validation.
 // ============================================================================
 
-import type { Tool, ToolRegistry } from '../../core/types.ts'
+import type { Tool, ToolRegistry } from '../../core/types/tool.ts'
 import type { SkillStore } from '../../skills/loader.ts'
 import { VALID_NAME, isTool } from '../loader.ts'
 import { mkdir, unlink, writeFile } from 'node:fs/promises'

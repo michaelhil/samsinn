@@ -1,6 +1,7 @@
 import { json, errorResponse, parseBody } from '../http-routes.ts'
-import { SYSTEM_SENDER_ID, SETTABLE_DELIVERY_MODES } from '../../core/types.ts'
-import type { SettableDeliveryMode } from '../../core/types.ts'
+import { SYSTEM_SENDER_ID } from '../../core/types/constants.ts'
+import { SETTABLE_DELIVERY_MODES } from '../../core/types/messaging.ts'
+import type { SettableDeliveryMode } from '../../core/types/messaging.ts'
 import type { RouteEntry } from './types.ts'
 
 export const roomRoutes: RouteEntry[] = [
@@ -194,7 +195,7 @@ export const roomRoutes: RouteEntry[] = [
       if (!artifact || artifact.type !== 'flow') {
         return errorResponse(`Flow artifact "${body.flowArtifactId}" not found`, 404)
       }
-      const flowBody = artifact.body as unknown as import('../../core/types.ts').FlowArtifactBody
+      const flowBody = artifact.body as unknown as import('../../core/types/artifact.ts').FlowArtifactBody
       const steps = (flowBody.steps ?? []).map(s => ({
         agentId: s.agentId || (system.team.getAgent(s.agentName)?.id ?? ''),
         agentName: s.agentName,

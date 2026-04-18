@@ -7,24 +7,11 @@
 // toolExecutor bridges agent tool calls to the global tool registry.
 // ============================================================================
 
-import type {
-  Agent,
-  AIAgent,
-  AIAgentConfig,
-  House,
-  LLMProvider,
-  MessageTarget,
-  RouteMessage,
-  Room,
-  Team,
-  Tool,
-  ToolCall,
-  ToolContext,
-  ToolDefinition,
-  ToolExecutor,
-  ToolRegistry,
-  ToolResult,
-} from '../core/types.ts'
+import type { Agent, AIAgent, AIAgentConfig, RouteMessage, Team } from '../core/types/agent.ts'
+import type { House, Room } from '../core/types/room.ts'
+import type { LLMProvider } from '../core/types/llm.ts'
+import type { MessageTarget } from '../core/types/messaging.ts'
+import type { Tool, ToolCall, ToolContext, ToolDefinition, ToolExecutor, ToolRegistry, ToolResult } from '../core/types/tool.ts'
 import { createAIAgent } from './ai-agent.ts'
 import type { Decision } from './ai-agent.ts'
 import { callLLM, streamLLM } from './evaluation.ts'
@@ -137,7 +124,7 @@ const resolveAgentTools = async (
 export interface SpawnOptions {
   readonly overrideId?: string
   readonly getSkills?: (roomName: string) => string
-  readonly onEvalEvent?: (agentName: string, event: import('../core/types.ts').EvalEvent) => void
+  readonly onEvalEvent?: (agentName: string, event: import('../core/types/agent-eval.ts').EvalEvent) => void
 }
 
 export const spawnAIAgent = async (
