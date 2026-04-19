@@ -339,8 +339,30 @@ export const providersRoutes: RouteEntry[] = [
     pattern: /^\/api\/providers\/([^/]+)\/test$/,
     handler: async (req, match, { system }) => {
       const name = decodeURIComponent(match[1] ?? '')
+
+      // Ollama has no API key — Test just pings the configured URL via the
+      // gateway's model list. Fast path; no adapter instantiation needed.
+      if (name === 'ollama') {
+        const gw = system.gateways.ollama
+        if (!gw) return json({ ok: false, error: 'Ollama gateway not configured', elapsedMs: 0 }, 200)
+        const startedAt = performance.now()
+        try {
+          const models = await gw.models()
+          return json({
+            ok: true,
+            elapsedMs: Math.round(performance.now() - startedAt),
+            sampleModel: models[0] ?? null,
+            modelCount: models.length,
+          })
+        } catch (err) {
+          const elapsedMs = Math.round(performance.now() - startedAt)
+          const reason = err instanceof Error ? err.message : String(err)
+          return json({ ok: false, error: reason, elapsedMs })
+        }
+      }
+
       if (!isCloud(name)) {
-        return errorResponse(`Unknown cloud provider: ${name}`, 404)
+        return errorResponse(`Unknown provider: ${name}`, 404)
       }
 
       const body: Record<string, unknown> = await parseBody(req).catch(() => ({} as Record<string, unknown>))

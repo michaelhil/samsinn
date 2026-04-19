@@ -126,6 +126,10 @@ const renderRow = (ctx: RowContext): HTMLElement => {
   // Key field (cloud only). type=text so the stub is selectable and
   // editable; value = current stub (empty when no key). Tab-out / blur
   // triggers save. Fixed width so columns align.
+  //
+  // For Ollama: no key; the same slot is used for the Settings button that
+  // toggles the expanded settings panel below the row. Width matches so
+  // columns across rows stay aligned.
   const keyField = isCloud ? `
     <input id="${keyFieldId}" type="text"
            value="${entry.keyMask ?? ''}"
@@ -134,7 +138,7 @@ const renderRow = (ctx: RowContext): HTMLElement => {
            class="w-24 shrink-0 px-2 py-0.5 border rounded font-mono text-[11px]"
            ${locked ? 'disabled title="Key comes from environment variable"' : ''}>
   ` : `
-    <span class="w-24 shrink-0 text-[11px] text-gray-500 italic">local</span>
+    <button class="ollama-settings-btn w-24 shrink-0 text-[11px] px-2 py-0.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded">⚙ Settings</button>
   `
 
   const maxField = `
@@ -146,10 +150,9 @@ const renderRow = (ctx: RowContext): HTMLElement => {
     </label>
   `
 
-  const actionButtons = isCloud ? `
+  // Test button — cloud providers test their key; Ollama pings its URL.
+  const actionButtons = `
     <button class="prov-test text-[11px] px-2 py-0.5 bg-green-600 hover:bg-green-700 text-white rounded shrink-0">Test</button>
-  ` : `
-    <button class="ollama-settings-btn text-[11px] px-2 py-0.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded shrink-0">⚙ Settings</button>
   `
 
   const arrows = `
@@ -263,21 +266,23 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
     })
     container.appendChild(row)
 
-    // For the Ollama row, append the settings block inside an expander.
+    // For Ollama: a full-width sibling container below the row holds the
+    // settings panel. The Settings button in the row toggles its visibility.
+    // No <details>/<summary> wrapper — one Settings affordance, not two.
     if (entry.kind === 'ollama') {
-      const details = document.createElement('details')
-      details.className = 'w-full mt-1'
-      const summary = document.createElement('summary')
-      summary.className = 'text-[11px] text-gray-500 cursor-pointer select-none'
-      summary.textContent = '⚙ settings'
-      details.appendChild(summary)
+      const settingsHolder = document.createElement('div')
+      settingsHolder.className = 'hidden w-full pl-8 pr-2 py-2'
+      settingsHolder.dataset.ollamaSettingsHolder = '1'
+      // Give the row + its holder a shared parent by wrapping in a fragment —
+      // but the list container is the parent here, so we just append the
+      // holder directly after the row.
+      container.appendChild(settingsHolder)
 
       const settings = document.getElementById('ollama-settings')
       if (settings) {
         settings.classList.remove('hidden')
-        details.appendChild(settings)
+        settingsHolder.appendChild(settings)
       }
-      row.appendChild(details)
 
       // Ollama: blur on max triggers save.
       const mcField = row.querySelector<HTMLInputElement>(`#prov-mc-${entry.name}`)
@@ -289,7 +294,7 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
         showToast(document.body, ok ? `ollama: concurrency updated` : `ollama: save failed`, { type: ok ? 'success' : 'error', position: 'fixed' })
       })
       row.querySelector<HTMLButtonElement>('.ollama-settings-btn')?.addEventListener('click', () => {
-        details.open = !details.open
+        settingsHolder.classList.toggle('hidden')
       })
     }
 
@@ -319,6 +324,19 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
       // `providers_changed` broadcast (fired by the PUT handler) will trigger
       // the panel to re-render with the new status.
     })
+
+    // Ollama Test button: ping the configured URL via gateway.models().
+    if (entry.kind === 'ollama') {
+      row.querySelector<HTMLButtonElement>('.prov-test')?.addEventListener('click', async () => {
+        showToast(document.body, `ollama: testing…`, { position: 'fixed' })
+        const result = await testKey('ollama')
+        if (result.ok) {
+          showToast(document.body, `ollama: ${result.modelCount ?? 0} models · ${result.elapsedMs}ms`, { type: 'success', position: 'fixed' })
+        } else {
+          showToast(document.body, `ollama: ${result.error ?? 'test failed'}`, { type: 'error', position: 'fixed' })
+        }
+      })
+    }
 
     // Cloud-provider blur-triggered save + test; Test button still available
     // for "validate without committing" on an unsaved typed value.
