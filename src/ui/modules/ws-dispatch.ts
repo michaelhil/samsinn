@@ -189,7 +189,7 @@ const handlers: Handlers = {
       $unreadCounts.setKey(roomId, (counts[roomId] ?? 0) + 1)
     }
 
-    if (m.type === 'chat') {
+    if (m.type === 'chat' || m.type === 'pass') {
       const agents = $agents.get()
       const sender = agents[m.senderId]
       if (sender && sender.state === 'generating') {

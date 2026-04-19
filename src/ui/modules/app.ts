@@ -207,7 +207,11 @@ const showContextModal = (context: AgentContext, warnings?: string[]): void => {
 
 const handleViewContext = (msgId: string): void => {
   const ctx = $messageContexts.get()[msgId]
-  if (ctx) showContextModal(ctx, $messageWarnings.get()[msgId])
+  if (ctx) {
+    showContextModal(ctx, $messageWarnings.get()[msgId])
+  } else {
+    showToast(document.body, 'Prompt context not captured for this message (e.g. older message or after page reload).', { position: 'fixed' })
+  }
 }
 
 const submitArtifact = (): void => {

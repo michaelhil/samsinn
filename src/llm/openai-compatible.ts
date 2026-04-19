@@ -120,15 +120,26 @@ const mapHttpError = (
       status, retryAfterMs,
     })
   }
-  // Context-length exceeded: per-model limitation, NOT a permanent config error.
-  // Other providers / models may serve the same request fine — classify as
+  // Per-model limitations that aren't permanent config errors — classify as
   // provider_down so the router falls through for bare model names. Prefix-
   // pinned models still throw because the router doesn't fall back on pins.
+  //   - context_length_exceeded: request too long for this model's window
+  //   - model_not_found: provider's /models listed it but the account can't
+  //     actually use it (common on Cerebras free-tier for premium models)
   const bodyLowerFull = body.toLowerCase()
-  if (bodyLowerFull.includes('context_length_exceeded') || bodyLowerFull.includes('maximum context length')) {
+  const isContextIssue = bodyLowerFull.includes('context_length_exceeded') || bodyLowerFull.includes('maximum context length')
+  const isModelIssue = status === 404 || bodyLowerFull.includes('model_not_found') || bodyLowerFull.includes('does not exist')
+  if (isContextIssue) {
     return createCloudProviderError({
       code: 'provider_down', provider: providerName,
       message: `${providerName} context-length exceeded: ${snippet}`,
+      status,
+    })
+  }
+  if (isModelIssue) {
+    return createCloudProviderError({
+      code: 'provider_down', provider: providerName,
+      message: `${providerName} model not available: ${snippet}`,
       status,
     })
   }
