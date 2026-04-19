@@ -22,7 +22,96 @@ import {
 import { createOpenAICompatibleProvider } from '../../llm/openai-compatible.ts'
 import { isCloudProviderError } from '../../llm/errors.ts'
 
-const TEST_TIMEOUT_MS = 10_000
+const TEST_TIMEOUT_MS = 15_000
+
+// --- Concurrency probe helpers ---
+
+interface ProbeAttempt {
+  readonly ok: boolean
+  readonly ms: number
+  readonly code?: string
+}
+
+interface ProbeResult {
+  readonly model: string
+  readonly target: number
+  readonly succeeded: number
+  readonly failed: number
+  readonly avgMs: number
+  readonly p95Ms: number
+  readonly byFailure: Record<string, number>
+}
+
+const p95 = (xs: ReadonlyArray<number>): number => {
+  if (xs.length === 0) return 0
+  const sorted = [...xs].sort((a, b) => a - b)
+  const idx = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)
+  return Math.round(sorted[idx] ?? 0)
+}
+
+// Pick the best test model: first pinned, then first curated, then first
+// reported. Returns null if nothing suitable is available.
+const pickTestModel = (
+  provider: string,
+  pinned: ReadonlyArray<string>,
+  curated: ReadonlyArray<string>,
+  reported: ReadonlyArray<string>,
+): string | null => {
+  void provider
+  if (pinned.length > 0 && pinned[0]) return pinned[0]
+  if (curated.length > 0 && curated[0]) return curated[0]
+  if (reported.length > 0 && reported[0]) return reported[0]
+  return null
+}
+
+const runProbe = async (
+  chatFn: (model: string) => Promise<void>,
+  model: string,
+  target: number,
+  overallTimeoutMs: number,
+): Promise<ProbeResult> => {
+  const attempts: ProbeAttempt[] = []
+  const overall = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`timeout after ${overallTimeoutMs}ms`)), overallTimeoutMs))
+
+  const one = async (): Promise<ProbeAttempt> => {
+    const t0 = performance.now()
+    try {
+      await chatFn(model)
+      return { ok: true, ms: Math.round(performance.now() - t0) }
+    } catch (err) {
+      const ms = Math.round(performance.now() - t0)
+      const code = (err as { code?: string })?.code ?? 'error'
+      return { ok: false, ms, code }
+    }
+  }
+
+  try {
+    const results = await Promise.race([
+      Promise.all(Array.from({ length: target }, () => one())),
+      overall,
+    ]) as ProbeAttempt[]
+    attempts.push(...results)
+  } catch {
+    // Overall timeout — record anything that did complete? Can't; stub as fails.
+    for (let i = 0; i < target; i++) attempts.push({ ok: false, ms: overallTimeoutMs, code: 'timeout' })
+  }
+
+  const successes = attempts.filter(a => a.ok).map(a => a.ms)
+  const failures = attempts.filter(a => !a.ok)
+  const byFailure: Record<string, number> = {}
+  for (const f of failures) byFailure[f.code ?? 'error'] = (byFailure[f.code ?? 'error'] ?? 0) + 1
+
+  return {
+    model,
+    target,
+    succeeded: successes.length,
+    failed: failures.length,
+    avgMs: successes.length > 0 ? Math.round(successes.reduce((s, x) => s + x, 0) / successes.length) : 0,
+    p95Ms: p95(successes),
+    byFailure,
+  }
+}
 
 const knownCloudNames: ReadonlySet<string> = new Set(Object.keys(PROVIDER_PROFILES))
 
@@ -333,6 +422,67 @@ export const providersRoutes: RouteEntry[] = [
     },
   },
 
+  // --- Test a single model (from the models popover) ---
+  {
+    method: 'POST',
+    pattern: /^\/api\/providers\/([^/]+)\/test-model$/,
+    handler: async (req, match, { system }) => {
+      const name = decodeURIComponent(match[1] ?? '')
+      const body = await parseBody(req).catch(() => ({} as Record<string, unknown>))
+      const model = typeof body.model === 'string' ? body.model.trim() : ''
+      if (!model) return errorResponse('model is required')
+
+      // Ollama path.
+      if (name === 'ollama') {
+        const { createOllamaProvider } = await import('../../llm/ollama.ts')
+        const raw = createOllamaProvider(system.providerConfig.ollamaUrl)
+        const t0 = performance.now()
+        try {
+          const resp = await raw.chat({ model, messages: [{ role: 'user', content: 'ping' }], maxTokens: 1, temperature: 0 })
+          return json({
+            ok: true, elapsedMs: Math.round(performance.now() - t0),
+            usage: resp.tokensUsed ?? null,
+          })
+        } catch (err) {
+          const elapsedMs = Math.round(performance.now() - t0)
+          return json({ ok: false, error: err instanceof Error ? err.message : String(err), elapsedMs })
+        }
+      }
+
+      if (!isCloud(name)) return errorResponse(`Unknown provider: ${name}`, 404)
+
+      const { data: storeLocal } = await loadProviderStore(system.providersStorePath)
+      const mergedLocal = mergeWithEnv(storeLocal)
+      const apiKey = mergedLocal.cloud[name]?.apiKey ?? ''
+      if (!apiKey) return json({ ok: false, error: 'No API key stored', elapsedMs: 0 })
+
+      const authHeaders = name === 'anthropic'
+        ? () => ({ 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' })
+        : undefined
+      const provider = createOpenAICompatibleProvider({
+        name,
+        baseUrl: PROVIDER_PROFILES[name].baseUrl,
+        getApiKey: () => apiKey,
+        ...(authHeaders ? { authHeaders } : {}),
+      })
+
+      const t0 = performance.now()
+      try {
+        const resp = await provider.chat({ model, messages: [{ role: 'user', content: 'ping' }], maxTokens: 1, temperature: 0 })
+        return json({
+          ok: true, elapsedMs: Math.round(performance.now() - t0),
+          usage: resp.tokensUsed ?? null,
+        })
+      } catch (err) {
+        const elapsedMs = Math.round(performance.now() - t0)
+        let reason = err instanceof Error ? err.message : String(err)
+        if (apiKey) reason = reason.split(apiKey).join('•••REDACTED•••')
+        const code = isCloudProviderError(err) ? err.code : 'error'
+        return json({ ok: false, error: reason, code, elapsedMs })
+      }
+    },
+  },
+
   // --- Test a key (pending or stored) ---
   {
     method: 'POST',
@@ -340,25 +490,46 @@ export const providersRoutes: RouteEntry[] = [
     handler: async (req, match, { system }) => {
       const name = decodeURIComponent(match[1] ?? '')
 
-      // Ollama has no API key — Test just pings the configured URL via the
-      // gateway's model list. Fast path; no adapter instantiation needed.
+      // Ollama: ping /models, then run a concurrency probe against the
+      // configured maxConcurrent using a single-token chat call. Free because
+      // it's local.
       if (name === 'ollama') {
         const gw = system.gateways.ollama
         if (!gw) return json({ ok: false, error: 'Ollama gateway not configured', elapsedMs: 0 }, 200)
         const startedAt = performance.now()
+        let models: ReadonlyArray<string>
         try {
-          const models = await gw.models()
-          return json({
-            ok: true,
-            elapsedMs: Math.round(performance.now() - startedAt),
-            sampleModel: models[0] ?? null,
-            modelCount: models.length,
-          })
+          models = await gw.models()
         } catch (err) {
           const elapsedMs = Math.round(performance.now() - startedAt)
           const reason = err instanceof Error ? err.message : String(err)
           return json({ ok: false, error: reason, elapsedMs })
         }
+        const elapsedMs = Math.round(performance.now() - startedAt)
+
+        const { CURATED_MODELS } = await import('../../llm/model-catalog.ts')
+        const { createOllamaProvider } = await import('../../llm/ollama.ts')
+        const pinnedList = [] as ReadonlyArray<string>
+        const curatedIds = (CURATED_MODELS.ollama ?? []).map(m => m.id)
+        const model = pickTestModel('ollama', pinnedList, curatedIds, models)
+        if (!model) {
+          return json({ ok: true, elapsedMs, sampleModel: null, modelCount: models.length })
+        }
+
+        const target = Math.max(1, system.providerConfig.ollamaMaxConcurrent || 2)
+        const raw = createOllamaProvider(system.providerConfig.ollamaUrl)
+        const probe = await runProbe(
+          async (m) => { await raw.chat({ model: m, messages: [{ role: 'user', content: 'ping' }], maxTokens: 1, temperature: 0 }) },
+          model, target, TEST_TIMEOUT_MS,
+        )
+
+        return json({
+          ok: probe.succeeded > 0,
+          elapsedMs,
+          sampleModel: models[0] ?? null,
+          modelCount: models.length,
+          concurrency: probe,
+        })
       }
 
       if (!isCloud(name)) {
@@ -392,27 +563,49 @@ export const providersRoutes: RouteEntry[] = [
       })
 
       const startedAt = performance.now()
+      let list: ReadonlyArray<string>
       try {
-        const list = await Promise.race([
+        list = await Promise.race([
           provider.models(),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error(`timeout after ${TEST_TIMEOUT_MS}ms`)), TEST_TIMEOUT_MS)),
         ])
-        return json({
-          ok: true,
-          elapsedMs: Math.round(performance.now() - startedAt),
-          sampleModel: list[0] ?? null,
-          modelCount: list.length,
-        })
       } catch (err) {
         const elapsedMs = Math.round(performance.now() - startedAt)
         let reason = err instanceof Error ? err.message : String(err)
-        // Don't leak the key if an error unexpectedly includes it. Simple redact.
         if (apiKey) reason = reason.split(apiKey).join('•••REDACTED•••')
         let code: string = 'error'
         if (isCloudProviderError(err)) code = err.code
         return json({ ok: false, error: reason, code, elapsedMs })
       }
+      const elapsedMs = Math.round(performance.now() - startedAt)
+
+      // Concurrency probe — fire `maxConcurrent` parallel single-token chat
+      // calls and report capacity. Bypasses the gateway's local semaphore to
+      // actually probe upstream behaviour, not our own throttle.
+      const { CURATED_MODELS } = await import('../../llm/model-catalog.ts')
+      const { data: storeAgain } = await loadProviderStore(system.providersStorePath)
+      const mergedAgain = mergeWithEnv(storeAgain)
+      const pinned = mergedAgain.cloud[name]?.pinnedModels ?? []
+      const curatedIds = (CURATED_MODELS[name] ?? []).map(m => m.id)
+      const model = pickTestModel(name, pinned, curatedIds, list)
+
+      let concurrency: ProbeResult | undefined
+      if (model) {
+        const target = Math.max(1, mergedAgain.cloud[name]?.maxConcurrent ?? PROVIDER_PROFILES[name].defaultMaxConcurrent)
+        concurrency = await runProbe(
+          async (m) => { await provider.chat({ model: m, messages: [{ role: 'user', content: 'ping' }], maxTokens: 1, temperature: 0 }) },
+          model, target, TEST_TIMEOUT_MS,
+        )
+      }
+
+      return json({
+        ok: !concurrency || concurrency.succeeded > 0,
+        elapsedMs,
+        sampleModel: list[0] ?? null,
+        modelCount: list.length,
+        ...(concurrency ? { concurrency } : {}),
+      })
     },
   },
 ]

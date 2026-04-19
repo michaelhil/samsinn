@@ -195,14 +195,51 @@ const saveOrder = async (order: string[]): Promise<boolean> => {
   return res.ok
 }
 
-const testKey = async (name: string, apiKey?: string): Promise<{ ok: boolean; error?: string; elapsedMs: number; modelCount?: number }> => {
+interface TestResult {
+  ok: boolean
+  error?: string
+  elapsedMs: number
+  modelCount?: number
+  concurrency?: {
+    model: string
+    target: number
+    succeeded: number
+    failed: number
+    avgMs: number
+    p95Ms: number
+    byFailure: Record<string, number>
+  }
+}
+
+const testKey = async (name: string, apiKey?: string): Promise<TestResult> => {
   const res = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(apiKey ? { apiKey } : {}),
   })
-  try { return await res.json() as { ok: boolean; error?: string; elapsedMs: number; modelCount?: number } }
+  try { return await res.json() as TestResult }
   catch { return { ok: false, error: 'invalid response', elapsedMs: 0 } }
+}
+
+// Build a human-friendly toast line from a test result. Includes model count
+// + concurrency probe details when present.
+const formatTestToast = (name: string, r: TestResult): string => {
+  if (!r.ok && !r.concurrency) {
+    return `${name}: ${r.error ?? 'test failed'}`
+  }
+  const parts: string[] = []
+  if (typeof r.modelCount === 'number') parts.push(`${r.modelCount} models`)
+  if (r.concurrency) {
+    const c = r.concurrency
+    const capacity = `${c.succeeded}/${c.target} ok`
+    const lat = c.succeeded > 0 ? `avg ${c.avgMs}ms` : null
+    const fails = Object.entries(c.byFailure).map(([k, n]) => `${n}×${k}`).join(', ')
+    parts.push(capacity)
+    if (lat) parts.push(lat)
+    if (fails) parts.push(fails)
+    parts.push(`(${c.model})`)
+  }
+  return `${name}: ${parts.join(' · ')}`
 }
 
 // --- Render ---
@@ -325,16 +362,12 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
       // the panel to re-render with the new status.
     })
 
-    // Ollama Test button: ping the configured URL via gateway.models().
+    // Ollama Test button: ping + concurrency probe.
     if (entry.kind === 'ollama') {
       row.querySelector<HTMLButtonElement>('.prov-test')?.addEventListener('click', async () => {
         showToast(document.body, `ollama: testing…`, { position: 'fixed' })
         const result = await testKey('ollama')
-        if (result.ok) {
-          showToast(document.body, `ollama: ${result.modelCount ?? 0} models · ${result.elapsedMs}ms`, { type: 'success', position: 'fixed' })
-        } else {
-          showToast(document.body, `ollama: ${result.error ?? 'test failed'}`, { type: 'error', position: 'fixed' })
-        }
+        showToast(document.body, formatTestToast('ollama', result), { type: result.ok ? 'success' : 'error', position: 'fixed' })
       })
     }
 
@@ -388,19 +421,15 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
           { type: ok ? 'success' : 'error', position: 'fixed' })
       })
 
-      // Test button: validates the typed value (or the stored key when no
-      // typed change). Posts a toast with the outcome.
+      // Test button: models-ping + concurrency probe. If the user has typed
+      // an unsaved key, we test that one; otherwise the stored key.
       row.querySelector<HTMLButtonElement>('.prov-test')?.addEventListener('click', async () => {
         const typed = keyField?.value.trim()
         const original = keyField?.dataset.original ?? ''
         const pending = typed && typed !== original ? typed : undefined
         showToast(document.body, `${entry.name}: testing…`, { position: 'fixed' })
         const result = await testKey(entry.name, pending)
-        if (result.ok) {
-          showToast(document.body, `${entry.name}: ${result.modelCount ?? 0} models · ${result.elapsedMs}ms`, { type: 'success', position: 'fixed' })
-        } else {
-          showToast(document.body, `${entry.name}: ${result.error ?? 'test failed'}`, { type: 'error', position: 'fixed' })
-        }
+        showToast(document.body, formatTestToast(entry.name, result), { type: result.ok ? 'success' : 'error', position: 'fixed' })
       })
     }
   })
