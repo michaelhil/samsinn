@@ -98,17 +98,6 @@ export const getParticipantsForRoom = (
   return [...senderIds].map(id => history.agentProfiles.get(id) ?? id)
 }
 
-// === Format relative time ===
-
-const relativeTime = (ts: number | undefined): string => {
-  if (!ts) return 'idle'
-  const secs = Math.floor((Date.now() - ts) / 1000)
-  if (secs < 60) return `${secs}s ago`
-  const mins = Math.floor(secs / 60)
-  if (mins < 60) return `${mins}m ago`
-  return `${Math.floor(mins / 60)}h ago`
-}
-
 // === Build deps ===
 
 export interface BuildContextDeps {
@@ -195,15 +184,18 @@ const buildActivitySection = (
   deps: BuildContextDeps,
   triggerRoomId: string,
 ): string => {
+  // NOTE: timestamps intentionally omitted. Relative times ("5 minutes ago")
+  // change every minute and break prompt-prefix caching (both Gemini implicit
+  // and Anthropic explicit). If the agent needs recency, surface it through
+  // the incoming/history messages — those already carry timestamps and sit
+  // *after* the cacheable prefix.
   const activityLines: string[] = []
-
   for (const [roomId, ctx] of deps.history.rooms) {
     if (roomId === triggerRoomId) continue
-    const timeStr = relativeTime(ctx.lastActiveAt)
-    activityLines.push(`- Room "${ctx.profile.name}" [id: ${roomId}]: ${timeStr}`)
+    activityLines.push(`- "${ctx.profile.name}" [id: ${roomId}]`)
   }
-
-  return `Your activity in other contexts:\n${activityLines.join('\n')}`
+  if (activityLines.length === 0) return ''
+  return `Your other rooms:\n${activityLines.join('\n')}`
 }
 
 // === System-message section model ===
@@ -362,37 +354,55 @@ export const buildSystemSections = (
 // Prompt-level sections get `=== LABEL ===\n` headers; CONTEXT sub-sections
 // are collected under a single `=== CONTEXT ===` block matching the original
 // wire format (so no downstream model sees a behavior change).
+// Context sub-sections ordered stable-first (for cache-prefix stability).
+// Anything that can change mid-conversation goes last so the stable prefix
+// up to the first variable block caches cleanly on Gemini (implicit) and
+// Anthropic (explicit cache_control).
+const CTX_STABLE_KEYS: ReadonlyArray<SystemSectionKey> = [
+  'ctx_intro', 'ctx_activity', 'ctx_newHint',
+]
+const CTX_VARIABLE_KEYS: ReadonlyArray<SystemSectionKey> = [
+  'ctx_knownAgents', 'ctx_participants', 'ctx_artifacts', 'ctx_flow',
+]
+
 const buildSystemMessage = (
   deps: BuildContextDeps,
   triggerRoomId: string,
 ): string => {
   const sections = buildSystemSections(deps, triggerRoomId).filter(s => s.enabled)
-  const promptSections: string[] = []
-  const contextLines: string[] = []
+  const byKey = new Map<SystemSectionKey, string>()
+  for (const s of sections) byKey.set(s.key, s.text)
 
-  for (const s of sections) {
-    const isContext = s.key.startsWith('ctx_')
-    if (isContext) {
-      contextLines.push(s.text)
-    } else {
-      // Top-level label formatting matches prior wire format exactly
-      const header = s.key === 'room'
-        ? s.label                // already includes `ROOM: name`
-        : s.label
-      promptSections.push(`=== ${header} ===\n${s.text}`)
-    }
+  // Top-level prompt sections — stable, cacheable. Order: house → room →
+  // agent → skills → responseFormat (moved here from after CONTEXT so the
+  // cacheable prefix is maximised; RESPONSE_FORMAT content is stable across
+  // calls).
+  const promptOrder: ReadonlyArray<SystemSectionKey> = [
+    'house', 'room', 'agent', 'skills', 'responseFormat',
+  ]
+  const promptSections: string[] = []
+  for (const key of promptOrder) {
+    const text = byKey.get(key)
+    if (text === undefined) continue
+    const s = sections.find(x => x.key === key)!
+    promptSections.push(`=== ${s.label} ===\n${text}`)
   }
 
-  // Preserve prior ordering: house → room → agent → skills → CONTEXT → responseFormat
-  const housePromptIdx = promptSections.findIndex(p => p.startsWith('=== HOUSE RULES ==='))
-  const rfIdx = promptSections.findIndex(p => p.startsWith('=== RESPONSE FORMAT ==='))
-  const rf = rfIdx >= 0 ? promptSections.splice(rfIdx, 1)[0]! : null
-  void housePromptIdx
+  // Context block — stable sub-sections first, variable last.
+  const contextLines: string[] = []
+  for (const key of CTX_STABLE_KEYS) {
+    const text = byKey.get(key)
+    if (text) contextLines.push(text)
+  }
+  for (const key of CTX_VARIABLE_KEYS) {
+    const text = byKey.get(key)
+    if (text) contextLines.push(text)
+  }
   const contextBlock = contextLines.length > 0
     ? `=== CONTEXT ===\n${contextLines.join('\n\n')}`
     : ''
-  const assembled = [...promptSections, contextBlock, ...(rf ? [rf] : [])].filter(Boolean)
-  return assembled.join('\n\n')
+
+  return [...promptSections, contextBlock].filter(Boolean).join('\n\n')
 }
 
 // === Token estimation ===
