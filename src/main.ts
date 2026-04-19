@@ -23,6 +23,9 @@ import type { LLMGateway } from './llm/gateway.ts'
 import type { ProviderRouter } from './llm/router.ts'
 import { buildProvidersFromConfig, type ProviderSetupResult } from './llm/providers-setup.ts'
 import { parseProviderConfig, type ProviderConfig } from './llm/providers-config.ts'
+import { createProviderKeys, type ProviderKeys } from './llm/provider-keys.ts'
+import { mergeWithEnv } from './llm/providers-store.ts'
+import type { ProviderGateway } from './llm/provider-gateway.ts'
 import { createToolRegistry } from './core/tool-registry.ts'
 import { spawnAIAgent, spawnHumanAgent, buildToolSupport, type SpawnOptions } from './agents/spawn.ts'
 import { callLLM } from './agents/evaluation.ts'
@@ -69,6 +72,12 @@ export interface System {
   // Used by the Ollama dashboard UI for ps/loadModel; not for routing.
   readonly ollama: LLMGateway | undefined
   readonly providerConfig: ProviderConfig
+  // Mutable registry of current API keys, read by gateways at request time.
+  // Used by the providers admin endpoints to apply key changes without restart.
+  readonly providerKeys: ProviderKeys
+  // Per-provider gateways — exposed so admin endpoints can refresh model
+  // caches when keys change.
+  readonly gateways: Record<string, ProviderGateway>
   readonly toolRegistry: ToolRegistry
   readonly skillStore: SkillStore
   readonly skillsDir: string
@@ -106,8 +115,17 @@ export interface CreateSystemOptions {
 
 export const createSystem = (options: CreateSystemOptions = {}): System => {
   const providerConfig = options.providerConfig ?? parseProviderConfig()
-  const providerSetup = options.providerSetup ?? buildProvidersFromConfig(providerConfig)
-  const { router: llm, ollama, ollamaRaw } = providerSetup
+  // Build keys registry from the merged boot config so runtime key edits can
+  // flow into the gateways without restart. Tests pass a pre-built
+  // providerSetup and skip this by never mutating the keys object.
+  const providerKeys = createProviderKeys(mergeWithEnv({ version: 1, providers: {} }, { env: {} as Record<string, string | undefined> }))
+  // Seed from providerConfig.cloud so boot-time env/stored keys land in the
+  // mutable registry. This loop handles both env and stored sources.
+  for (const [name, cc] of Object.entries(providerConfig.cloud)) {
+    if (cc?.apiKey) providerKeys.set(name, cc.apiKey)
+  }
+  const providerSetup = options.providerSetup ?? buildProvidersFromConfig(providerConfig, { providerKeys })
+  const { router: llm, ollama, ollamaRaw, gateways } = providerSetup
   const team = createTeam()
 
   const deliver: DeliverFn = (agentId, message) => {
@@ -332,7 +350,7 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
 
   return {
     house, team, routeMessage,
-    llm, ollama, providerConfig,
+    llm, ollama, providerConfig, providerKeys, gateways,
     toolRegistry, skillStore, skillsDir,
     knowledgeDir: join(homedir(), '.samsinn', 'knowledge'),
     providersStorePath: join(homedir(), '.samsinn', 'providers.json'),

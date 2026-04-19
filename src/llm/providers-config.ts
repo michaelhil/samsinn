@@ -112,10 +112,13 @@ export const parseProviderConfig = (opts: ParseOptions = {}): ProviderConfig => 
     const raw = requested
       ? requested.split(',').map(s => s.trim()).filter(Boolean)
       : [...DEFAULT_PROVIDER_ORDER]
-    // Filter to only configured providers; track drops so the caller can log.
-    const configured = new Set<string>(['ollama', ...Object.keys(cloud)])
+    // Keep every known provider in the order, even without a key at boot —
+    // the router skips providers whose current key is empty via
+    // `isProviderEnabled`, so users can add a key later via the UI without
+    // restarting. Only truly unknown names are dropped.
+    const known = new Set<string>(['ollama', ...Object.keys(PROVIDER_PROFILES)])
     order = raw.filter(name => {
-      if (configured.has(name)) return true
+      if (known.has(name)) return true
       droppedFromOrder.push(name)
       return false
     })
@@ -151,12 +154,13 @@ export const summariseProviderConfig = (config: ProviderConfig): string => {
       const cc = config.cloud[name as CloudProviderName]
       if (cc) {
         lines.push(`  ${name.padEnd(11)} source=${cc.source} maxConcurrent=${cc.maxConcurrent}`)
+      } else {
+        lines.push(`  ${name.padEnd(11)} (no key — add via UI to activate)`)
       }
     }
   }
   if (config.droppedFromOrder.length > 0) {
-    const source = config.orderFromUser ? 'PROVIDER_ORDER' : 'default provider order'
-    lines.push(`Skipped (missing API key, from ${source}): ${config.droppedFromOrder.join(', ')}`)
+    lines.push(`Unknown provider names in PROVIDER_ORDER: ${config.droppedFromOrder.join(', ')}`)
   }
   if (config.forceFailProvider) {
     lines.push(`FORCE_PROVIDER_FAIL=${config.forceFailProvider} (test hook active)`)

@@ -25,7 +25,11 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 60_000
 export interface OpenAICompatConfig {
   readonly name: string                  // logical provider name, e.g. "groq"
   readonly baseUrl: string               // e.g. "https://api.groq.com/openai/v1"
-  readonly apiKey: string
+  // Resolved lazily so runtime key changes take effect without restart.
+  readonly getApiKey: () => string
+  // Optional extra headers (e.g. Anthropic's `anthropic-version`) — resolved
+  // per request for symmetry with `getApiKey`.
+  readonly extraHeaders?: () => Record<string, string>
   readonly chatTimeoutMs?: number
   readonly modelsTimeoutMs?: number
   readonly streamIdleTimeoutMs?: number
@@ -210,7 +214,8 @@ export const createOpenAICompatibleProvider = (config: OpenAICompatConfig): LLMP
 
   const headers = (): Record<string, string> => ({
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${config.apiKey}`,
+    Authorization: `Bearer ${config.getApiKey()}`,
+    ...(config.extraHeaders?.() ?? {}),
   })
 
   const fetchWithTimeout = async (url: string, init: RequestInit, timeoutMs: number): Promise<Response> => {

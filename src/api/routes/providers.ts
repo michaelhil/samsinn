@@ -5,8 +5,9 @@
 // PUT  /api/providers/:name           set apiKey / enabled / maxConcurrent
 // POST /api/providers/:name/test      validate an apiKey against /models
 //
-// Mutations require restart to take effect (see /api/system/shutdown).
-// Responses include { requiresRestart: true } so the UI shows a banner.
+// Mutations take effect immediately — gateways read keys lazily via
+// ProviderKeys, and the PUT handler kicks a model-list refresh and emits
+// a `providers_changed` WS broadcast so open dropdowns refresh.
 // ============================================================================
 
 import { json, errorResponse, parseBody } from '../http-routes.ts'
@@ -93,7 +94,7 @@ export const providersRoutes: RouteEntry[] = [
   {
     method: 'PUT',
     pattern: /^\/api\/providers\/([^/]+)$/,
-    handler: async (req, match, { system }) => {
+    handler: async (req, match, { system, broadcast }) => {
       const name = decodeURIComponent(match[1] ?? '')
       if (!name) return errorResponse('Provider name required')
       if (name !== 'ollama' && !isCloud(name)) {
@@ -142,9 +143,33 @@ export const providersRoutes: RouteEntry[] = [
       }
       await saveProviderStore(system.providersStorePath, next)
 
+      // Apply immediately to the running system:
+      //   - Cloud providers: mutate the in-memory keys registry; gateways pick
+      //     up the new key on the next request.
+      //   - Ollama has no key concept — settings changes (enabled, maxConcurrent)
+      //     still require restart for now, but this is rare and we keep
+      //     `requiresRestart` honest for that case.
+      let requiresRestart = false
+      if (name !== 'ollama') {
+        const nextKey = clearKey ? '' : (updated.apiKey ?? '')
+        system.providerKeys.set(name, nextKey)
+        // Fire-and-forget a model-list refresh so the dropdown populates.
+        // We don't await — PUT returns promptly and the WS broadcast below
+        // prompts the UI to refetch /api/models a moment later.
+        const gw = system.gateways[name]
+        if (gw && nextKey) {
+          void gw.refreshModels().catch(() => { /* swallow — UI will surface */ })
+        }
+      } else {
+        requiresRestart = true
+      }
+
+      // Notify UIs so open model dropdowns re-render.
+      try { broadcast({ type: 'providers_changed', providers: [name] }) } catch { /* ignore */ }
+
       return json({
         saved: true,
-        requiresRestart: true,
+        requiresRestart,
         provider: {
           name,
           keyMask: maskKey(updated.apiKey ?? ''),
@@ -181,7 +206,7 @@ export const providersRoutes: RouteEntry[] = [
       const provider = createOpenAICompatibleProvider({
         name,
         baseUrl: PROVIDER_PROFILES[name].baseUrl,
-        apiKey,
+        getApiKey: () => apiKey,
         modelsTimeoutMs: TEST_TIMEOUT_MS,
       })
 

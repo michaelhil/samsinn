@@ -17,6 +17,7 @@ import { createProviderRouter } from './router.ts'
 import { isCloudProviderError } from './errors.ts'
 import { PROVIDER_PROFILES, type ProviderConfig, type CloudProviderName } from './providers-config.ts'
 import { getContextWindow } from './model-context.ts'
+import type { ProviderKeys } from './provider-keys.ts'
 
 export interface ProviderSetupResult {
   readonly router: ProviderRouter
@@ -26,7 +27,17 @@ export interface ProviderSetupResult {
   readonly dispose: () => void
 }
 
-export const buildProvidersFromConfig = (config: ProviderConfig): ProviderSetupResult => {
+export interface BuildProvidersOptions {
+  // Keys store — when provided, gateways read keys via getter so runtime key
+  // changes take effect without a restart. When absent, we fall back to a
+  // static snapshot captured from `config.cloud` (test paths).
+  readonly providerKeys?: ProviderKeys
+}
+
+export const buildProvidersFromConfig = (
+  config: ProviderConfig,
+  options: BuildProvidersOptions = {},
+): ProviderSetupResult => {
   const gateways: Record<string, ProviderGateway> = {}
   let ollama: OllamaGateway | undefined
   let ollamaRaw: OllamaProviderExtended | undefined
@@ -40,34 +51,38 @@ export const buildProvidersFromConfig = (config: ProviderConfig): ProviderSetupR
     gateways.ollama = ollama as unknown as ProviderGateway
   }
 
-  // Cloud providers — all share the same isPermanentError rule: treat every
-  // CloudProviderError as "CB-permanent" so the internal circuit breaker
-  // doesn't double-count against the router's cooldown map. Non-cloud errors
-  // bubbling up still trip the CB as a last-resort defence.
+  // Cloud providers — build a gateway for every known profile so that keys
+  // added at runtime can activate a provider without server restart. The
+  // router skips providers whose current key is empty via `isProviderEnabled`.
   for (const name of Object.keys(PROVIDER_PROFILES) as CloudProviderName[]) {
     const cc = config.cloud[name]
-    if (!cc) continue
-    if (!config.order.includes(name)) continue
+    const staticKey = cc?.apiKey ?? ''
+    const getApiKey = options.providerKeys
+      ? () => options.providerKeys!.get(name)
+      : () => staticKey
+    const maxConcurrent = cc?.maxConcurrent
     const provider = createOpenAICompatibleProvider({
       name,
       baseUrl: PROVIDER_PROFILES[name].baseUrl,
-      apiKey: cc.apiKey,
+      getApiKey,
     })
     gateways[name] = createProviderGateway(
       provider,
-      { maxConcurrent: cc.maxConcurrent },
+      { maxConcurrent },
       { isPermanentError: (err) => isCloudProviderError(err) },
     )
   }
 
-  const openrouterKey = config.cloud.openrouter?.apiKey
   const router = createProviderRouter(gateways, {
     order: config.order,
     forceFailProvider: config.forceFailProvider,
+    isProviderEnabled: options.providerKeys
+      ? (name) => name === 'ollama' || options.providerKeys!.isEnabled(name)
+      : undefined,
     contextLookup: async (provider, model) => {
       const info = await getContextWindow(provider, model, {
         ollamaBaseUrl: config.ollamaUrl,
-        openrouterApiKey: openrouterKey,
+        openrouterApiKey: options.providerKeys?.get('openrouter') || config.cloud.openrouter?.apiKey,
       })
       return { contextMax: info.contextMax, source: info.source }
     },

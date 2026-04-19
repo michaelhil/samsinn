@@ -62,7 +62,7 @@ describe('createOpenAICompatibleProvider', () => {
     }))
     try {
       const provider = createOpenAICompatibleProvider({
-        name: 'test', baseUrl: fx.url, apiKey: 'sk-test',
+        name: 'test', baseUrl: fx.url, getApiKey: () => 'sk-test',
       })
       const response = await provider.chat({
         model: 'm1',
@@ -85,7 +85,7 @@ describe('createOpenAICompatibleProvider', () => {
     }))
     try {
       const provider = createOpenAICompatibleProvider({
-        name: 'test', baseUrl: fx.url, apiKey: 'k',
+        name: 'test', baseUrl: fx.url, getApiKey: () => 'k',
       })
       let caught: unknown
       try { await provider.chat({ model: 'm', messages: [{ role: 'user', content: 'x' }] }) }
@@ -105,7 +105,7 @@ describe('createOpenAICompatibleProvider', () => {
       headers: { 'Retry-After': future },
     }))
     try {
-      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, apiKey: 'k' })
+      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, getApiKey: () => 'k' })
       let caught: unknown
       try { await provider.chat({ model: 'm', messages: [{ role: 'user', content: 'x' }] }) }
       catch (err) { caught = err }
@@ -122,7 +122,7 @@ describe('createOpenAICompatibleProvider', () => {
   test('401 → auth error (no retryAfterMs)', async () => {
     const fx = startFixture(() => ({ status: 401, body: 'invalid key' }))
     try {
-      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, apiKey: 'bad' })
+      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, getApiKey: () => 'bad' })
       let caught: unknown
       try { await provider.chat({ model: 'm', messages: [{ role: 'user', content: 'x' }] }) }
       catch (err) { caught = err }
@@ -146,7 +146,7 @@ describe('createOpenAICompatibleProvider', () => {
       ],
     }))
     try {
-      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, apiKey: 'k' })
+      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, getApiKey: () => 'k' })
       const chunks: Array<{ delta: string; done: boolean; toolCalls?: ReadonlyArray<{ function: { name: string; arguments: Record<string, unknown> } }> }> = []
       for await (const chunk of provider.stream!({ model: 'm', messages: [{ role: 'user', content: 'x' }] })) {
         chunks.push(chunk as { delta: string; done: boolean; toolCalls?: ReadonlyArray<{ function: { name: string; arguments: Record<string, unknown> } }> })
@@ -170,7 +170,7 @@ describe('createOpenAICompatibleProvider', () => {
       ],
     }))
     try {
-      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, apiKey: 'k' })
+      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, getApiKey: () => 'k' })
       const chunks: Array<{ delta: string; done: boolean; thinking?: string }> = []
       for await (const chunk of provider.stream!({ model: 'm', messages: [{ role: 'user', content: 'x' }] })) {
         chunks.push(chunk as { delta: string; done: boolean; thinking?: string })
@@ -189,7 +189,7 @@ describe('createOpenAICompatibleProvider', () => {
       body: JSON.stringify({ data: [{ id: 'alpha' }, { id: 'beta' }] }),
     }))
     try {
-      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, apiKey: 'k' })
+      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, getApiKey: () => 'k' })
       const list = await provider.models()
       expect(list).toEqual(['alpha', 'beta'])
     } finally { fx.stop() }
@@ -208,7 +208,7 @@ describe('createOpenAICompatibleProvider', () => {
       }),
     }))
     try {
-      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, apiKey: 'k' })
+      const provider = createOpenAICompatibleProvider({ name: 'test', baseUrl: fx.url, getApiKey: () => 'k' })
       const response = await provider.chat({ model: 'm', messages: [{ role: 'user', content: 'x' }] })
       expect(response.toolCalls?.[0]?.function.arguments).toEqual({ x: 42 })
     } finally { fx.stop() }

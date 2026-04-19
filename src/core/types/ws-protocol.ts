@@ -75,3 +75,6 @@ export type WSOutbound =
   | { readonly type: 'provider_bound'; readonly agentId: string | null; readonly agentName: string | null; readonly model: string; readonly oldProvider: string | null; readonly newProvider: string }
   | { readonly type: 'provider_all_failed'; readonly agentId: string | null; readonly agentName: string | null; readonly model: string; readonly attempts: ReadonlyArray<{ readonly provider: string; readonly reason: string }> }
   | { readonly type: 'provider_stream_failed'; readonly agentId: string | null; readonly agentName: string | null; readonly model: string; readonly provider: string; readonly reason: string }
+  // Fired after the providers admin endpoint applies a live key change. UI
+  // listeners refresh their model-list dropdowns without a reload.
+  | { readonly type: 'providers_changed'; readonly providers: ReadonlyArray<string> }

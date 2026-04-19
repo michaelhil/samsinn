@@ -129,11 +129,6 @@ const testKey = async (name: string, apiKey?: string): Promise<{ ok: boolean; er
   catch { return { ok: false, error: 'invalid response', elapsedMs: 0 } }
 }
 
-const markRestartPending = (): void => {
-  const banner = document.getElementById('providers-restart-banner')
-  if (banner) banner.classList.remove('hidden')
-}
-
 export const renderProvidersPanel = (list: ProvidersResponse): void => {
   const container = document.getElementById('cloud-providers-list')
   if (!container) return
@@ -179,8 +174,8 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
       }
       const ok = await save(name, body)
       if (ok) {
-        if (feedback) feedback.textContent = 'Saved — restart to apply.'
-        markRestartPending()
+        if (feedback) feedback.textContent = '✓ Saved — applied.'
+        showToast(document.body, `${name} updated`, { position: 'fixed' })
         if (keyField) keyField.value = ''
       } else {
         if (feedback) feedback.textContent = 'Save failed.'
@@ -190,8 +185,8 @@ export const renderProvidersPanel = (list: ProvidersResponse): void => {
     row.querySelector<HTMLButtonElement>('.prov-clear')?.addEventListener('click', async () => {
       const ok = await save(name, { apiKey: null })
       if (ok) {
-        if (feedback) feedback.textContent = 'Key cleared — restart to apply.'
-        markRestartPending()
+        if (feedback) feedback.textContent = '✓ Key cleared.'
+        showToast(document.body, `${name} key cleared`, { position: 'fixed' })
         if (keyField) keyField.value = ''
       }
     })
@@ -233,21 +228,6 @@ export const startProvidersPanel = async (): Promise<void> => {
   await refresh()
   if (pollTimer !== undefined) window.clearInterval(pollTimer)
   pollTimer = window.setInterval(() => { void refresh() }, 10_000)
-
-  // Restart button wiring (idempotent — attaches only once)
-  const btn = document.getElementById('providers-restart-btn')
-  if (btn && !btn.dataset.wired) {
-    btn.dataset.wired = '1'
-    btn.addEventListener('click', async () => {
-      if (!confirm('Restart samsinn? The UI will reconnect once the server is back.')) return
-      try {
-        await fetch('/api/system/shutdown', { method: 'POST' })
-        showToast(document.body, 'Server shutting down — reconnecting…', { position: 'fixed' })
-      } catch {
-        showToast(document.body, 'Failed to signal shutdown', { position: 'fixed', type: 'error' })
-      }
-    })
-  }
 }
 
 export const stopProvidersPanel = (): void => {

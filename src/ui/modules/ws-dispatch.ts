@@ -477,6 +477,14 @@ const handlers: Handlers = {
     showToast(document.body, `${who}stream interrupted on ${msg.provider} (response may be partial)`, { type: 'error', position: 'fixed' })
   },
 
+  providers_changed(_msg) {
+    // A key was added/removed/updated live. Prompt the providers panel to
+    // re-poll and any open model dropdown to refetch /api/models. We use a
+    // CustomEvent so subscribers (agent-modal, inspector, editor) can opt in
+    // without tight coupling to this dispatcher.
+    window.dispatchEvent(new CustomEvent('providers-changed'))
+  },
+
   // --- Errors ---
 
   error(msg) {

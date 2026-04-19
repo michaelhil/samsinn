@@ -88,6 +88,9 @@ export interface ProviderRouterConfig {
   // Resolve the model's max context window. Results are consumed per call and
   // attached to ChatResponse / the final StreamChunk.
   readonly contextLookup?: ContextLookupFn
+  // Runtime gate — return false to skip a provider entirely (e.g. no API key
+  // supplied yet). Called on every request; safe to change over time.
+  readonly isProviderEnabled?: (name: string) => boolean
 }
 
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000          // 1 min
@@ -195,19 +198,26 @@ export const createProviderRouter = (
   }
   const eventCounts = { bound: 0, allFailed: 0, streamFailed: 0 }
 
+  const isEnabled = (name: string): boolean => {
+    if (!config.isProviderEnabled) return true
+    return config.isProviderEnabled(name)
+  }
+
   // Resolve the provider list to try for a given model.
   const resolveCandidates = (model: string): { candidates: string[]; modelId: string; pinned: boolean } => {
     const { provider: pinned, modelId } = parseProviderPrefix(model)
     if (pinned) {
-      if (!providers[pinned]) return { candidates: [], modelId, pinned: true }
+      if (!providers[pinned] || !isEnabled(pinned)) return { candidates: [], modelId, pinned: true }
       return { candidates: [pinned], modelId, pinned: true }
     }
 
-    // Filter order by providers whose cached availableModels includes modelId.
-    // If a provider hasn't populated its model list yet (empty array), we
-    // optimistically include it rather than skip — avoids blocking on first
-    // call before refreshModels has fired.
+    // Filter order by providers whose cached availableModels includes modelId
+    // AND who are currently enabled (have an API key). If a provider hasn't
+    // populated its model list yet (empty array), we optimistically include
+    // it rather than skip — avoids blocking on first call before refreshModels
+    // has fired.
     const eligible = order.filter(name => {
+      if (!isEnabled(name)) return false
       const list = providers[name]?.getHealth().availableModels ?? []
       if (list.length === 0) return true
       return list.includes(modelId)
