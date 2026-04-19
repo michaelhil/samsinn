@@ -1,6 +1,46 @@
 import { json, errorResponse, parseBody } from '../http-routes.ts'
 import { asAIAgent } from '../../agents/shared.ts'
+import { buildToolSupport } from '../../agents/spawn.ts'
+import { toolsToDefinitions } from '../../llm/tool-capability.ts'
+import { estimateTokens } from '../../agents/context-builder.ts'
+import type { ContextSection, IncludeContext, IncludePrompts, PromptSection } from '../../core/types/agent.ts'
+import type { ToolRegistry } from '../../core/types/tool.ts'
 import type { RouteEntry } from './types.ts'
+
+const PROMPT_SECTIONS: ReadonlyArray<PromptSection> = ['agent', 'room', 'house', 'responseFormat', 'skills']
+const CONTEXT_SECTIONS: ReadonlyArray<ContextSection> = ['participants', 'flow', 'artifacts', 'activity', 'knownAgents']
+
+// Compute approximate token cost of each registered tool's definition.
+// Uses the standard 4-chars-per-token heuristic across JSON-serialised defs.
+const computeToolTokens = (toolNames: ReadonlyArray<string>, registry: ToolRegistry): Record<string, number> => {
+  const result: Record<string, number> = {}
+  const tools = toolNames.map(n => registry.get(n)).filter((t): t is NonNullable<ReturnType<typeof registry.get>> => t !== undefined)
+  const defs = toolsToDefinitions(tools)
+  for (const def of defs) {
+    result[def.function.name] = estimateTokens(JSON.stringify(def))
+  }
+  return result
+}
+
+const sanitizeIncludePrompts = (raw: unknown): IncludePrompts | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const out: IncludePrompts = {}
+  for (const key of PROMPT_SECTIONS) {
+    if (typeof r[key] === 'boolean') out[key] = r[key] as boolean
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+const sanitizeIncludeContext = (raw: unknown): IncludeContext | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const out: IncludeContext = {}
+  for (const key of CONTEXT_SECTIONS) {
+    if (typeof r[key] === 'boolean') out[key] = r[key] as boolean
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
 
 export const agentRoutes: RouteEntry[] = [
   {
@@ -40,6 +80,18 @@ export const agentRoutes: RouteEntry[] = [
         detail.historyLimit = aiAgent.getHistoryLimit()
         detail.thinking = aiAgent.getThinking()
         detail.tools = aiAgent.getTools()
+        detail.includePrompts = aiAgent.getIncludePrompts()
+        detail.includeContext = aiAgent.getIncludeContext()
+        detail.includeFlowStepPrompt = aiAgent.getIncludeFlowStepPrompt()
+        detail.includeTools = aiAgent.getIncludeTools()
+        detail.maxHistoryChars = aiAgent.getMaxHistoryChars()
+        detail.maxContextTokens = aiAgent.getMaxContextTokens()
+        detail.maxToolResultChars = aiAgent.getMaxToolResultChars()
+        detail.maxToolIterations = aiAgent.getMaxToolIterations()
+        // Registered tools + token cost estimates — enables per-tool UI panel
+        const registered = system.toolRegistry.list().map(t => t.name)
+        detail.registeredTools = registered
+        detail.toolTokens = computeToolTokens(registered, system.toolRegistry)
       }
       if (agent.getDescription) {
         detail.description = agent.getDescription()
@@ -97,11 +149,63 @@ export const agentRoutes: RouteEntry[] = [
         if (body.temperature !== undefined) aiAgent.updateTemperature?.(body.temperature as number | undefined)
         if (body.historyLimit !== undefined) aiAgent.updateHistoryLimit?.(body.historyLimit as number)
         if (body.thinking !== undefined) aiAgent.updateThinking?.(body.thinking as boolean)
+        const inc = sanitizeIncludePrompts(body.includePrompts)
+        if (inc) aiAgent.updateIncludePrompts(inc)
+        const incCtx = sanitizeIncludeContext(body.includeContext)
+        if (incCtx) aiAgent.updateIncludeContext(incCtx)
+        if (typeof body.includeFlowStepPrompt === 'boolean') aiAgent.updateIncludeFlowStepPrompt(body.includeFlowStepPrompt)
+        if (typeof body.includeTools === 'boolean') aiAgent.updateIncludeTools(body.includeTools)
+        if (body.maxHistoryChars === null) aiAgent.updateMaxHistoryChars(undefined)
+        else if (typeof body.maxHistoryChars === 'number') aiAgent.updateMaxHistoryChars(body.maxHistoryChars)
+        if (body.maxContextTokens === null) aiAgent.updateMaxContextTokens(undefined)
+        else if (typeof body.maxContextTokens === 'number') aiAgent.updateMaxContextTokens(body.maxContextTokens)
+        if (body.maxToolResultChars === null) aiAgent.updateMaxToolResultChars(undefined)
+        else if (typeof body.maxToolResultChars === 'number') aiAgent.updateMaxToolResultChars(body.maxToolResultChars)
+        if (typeof body.maxToolIterations === 'number') aiAgent.updateMaxToolIterations(body.maxToolIterations)
+        // Tool-list edits rebuild the agent's tool support so updated tools
+        // reach the next LLM request. Rejects names not in the registry.
+        if (Array.isArray(body.tools)) {
+          const requested = (body.tools as unknown[]).filter((n): n is string => typeof n === 'string')
+          const known = new Set(system.toolRegistry.list().map(t => t.name))
+          const resolved = requested.filter(n => known.has(n))
+          aiAgent.updateTools?.(resolved)
+          const support = await buildToolSupport(
+            resolved, system.toolRegistry,
+            { id: aiAgent.id, name: aiAgent.name, currentModel: () => aiAgent.getModel() },
+            system.llm,
+          )
+          aiAgent.refreshTools?.(support)
+        }
       }
       if (typeof body.description === 'string' && agent.updateDescription) {
         agent.updateDescription(body.description)
       }
       return json({ updated: true, name: agent.name })
+    },
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/agents\/([^/]+)\/context-preview$/,
+    handler: (req, match, { system }) => {
+      const name = decodeURIComponent(match[1]!)
+      const agent = system.team.getAgent(name)
+      if (!agent) return errorResponse(`Agent "${name}" not found`, 404)
+      const ai = asAIAgent(agent)
+      if (!ai) return errorResponse('Only AI agents have a context preview')
+      const url = new URL(req.url)
+      const roomIdParam = url.searchParams.get('roomId') ?? undefined
+      const agentRooms = system.house.getRoomsForAgent(agent.id).map(r => r.profile.id)
+      const roomId = roomIdParam && agentRooms.includes(roomIdParam)
+        ? roomIdParam
+        : agentRooms[0]
+      if (!roomId) return errorResponse('Agent is not in any rooms', 400)
+      const preview = ai.getContextPreview(roomId)
+      const registered = system.toolRegistry.list().map(t => t.name)
+      return json({
+        ...preview,
+        toolTokens: computeToolTokens(registered, system.toolRegistry),
+        registeredTools: registered,
+      })
     },
   },
   {

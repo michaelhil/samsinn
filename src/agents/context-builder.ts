@@ -14,6 +14,7 @@ import type { Artifact, ArtifactTypeDefinition } from '../core/types/artifact.ts
 import type { AgentHistory, AgentProfile, Message } from '../core/types/messaging.ts'
 import type { ChatRequest } from '../core/types/llm.ts'
 import type { FlowDeliveryContext } from '../core/types/flow.ts'
+import type { IncludeContext, IncludePrompts } from '../core/types/agent.ts'
 import { SYSTEM_SENDER_ID } from '../core/types/constants.ts'
 // Text tool protocol removed — all tools use native tool calling
 
@@ -40,6 +41,7 @@ export const formatMessage = (
   agentId: string,
   resolveName: (senderId: string) => string,
   compressedIds?: ReadonlySet<string>,
+  includeFlowStepPrompt: boolean = true,
 ): { role: 'user' | 'assistant'; content: string } | null => {
   if (msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.type === 'pass' || msg.type === 'mute') return null
   const stepPrompt = (msg.metadata as Record<string, unknown> | undefined)?.stepPrompt as string | undefined
@@ -49,7 +51,7 @@ export const formatMessage = (
     return { role: 'assistant' as const, content: `${msg.content}${suffix}` }
   }
   const name = resolveName(msg.senderId)
-  const stepLine = stepPrompt ? `\n[Step instruction: ${stepPrompt}]` : ''
+  const stepLine = stepPrompt && includeFlowStepPrompt ? `\n[Step instruction: ${stepPrompt}]` : ''
   return { role: 'user' as const, content: `${prefix}[${name}]: ${msg.content}${stepLine}` }
 }
 
@@ -121,7 +123,28 @@ export interface BuildContextDeps {
   readonly getArtifactsForScope?: (roomId: string) => ReadonlyArray<Artifact>
   readonly getArtifactTypeDef?: (type: string) => ArtifactTypeDefinition | undefined
   readonly getCompressedIds?: (roomId: string) => ReadonlySet<string>
+  readonly includePrompts?: IncludePrompts       // undefined = all on; missing keys = on
+  readonly includeContext?: IncludeContext       // CONTEXT sub-section toggles
+  readonly includeFlowStepPrompt?: boolean       // suffix on flow messages; default true
+  readonly maxHistoryChars?: number              // optional char cap for old messages
+  readonly maxContextTokens?: number             // budget for system+history; undefined → caller default
 }
+
+const resolveIncludes = (inc: IncludePrompts | undefined): Required<IncludePrompts> => ({
+  agent: inc?.agent ?? true,
+  room: inc?.room ?? true,
+  house: inc?.house ?? true,
+  responseFormat: inc?.responseFormat ?? true,
+  skills: inc?.skills ?? true,
+})
+
+const resolveIncludeContext = (inc: IncludeContext | undefined): Required<IncludeContext> => ({
+  participants: inc?.participants ?? true,
+  flow: inc?.flow ?? true,
+  artifacts: inc?.artifacts ?? true,
+  activity: inc?.activity ?? true,
+  knownAgents: inc?.knownAgents ?? true,
+})
 
 // === Private section builders ===
 
@@ -183,77 +206,193 @@ const buildActivitySection = (
   return `Your activity in other contexts:\n${activityLines.join('\n')}`
 }
 
-const buildSystemMessage = (
+// === System-message section model ===
+// Each section is the atomic unit of the LLM system message: a labelled block
+// of text that is either included or suppressed. `buildSystemSections` is the
+// single source of truth — the context-preview API and the serialized prompt
+// both derive from it.
+export interface SystemSection {
+  readonly key: SystemSectionKey
+  readonly label: string
+  readonly text: string
+  readonly enabled: boolean
+  readonly optional: boolean   // gated by a user toggle (false = always emitted)
+}
+
+export type SystemSectionKey =
+  | 'house' | 'room' | 'agent' | 'responseFormat' | 'skills'
+  | 'ctx_intro'       // "You are in room X" — always emitted
+  | 'ctx_flow'
+  | 'ctx_participants'
+  | 'ctx_artifacts'
+  | 'ctx_activity'
+  | 'ctx_knownAgents'
+  | 'ctx_newHint'     // "[NEW] hint" — always emitted
+
+export const buildSystemSections = (
   deps: BuildContextDeps,
   triggerRoomId: string,
-): string => {
-  const sections: string[] = []
-
-  if (deps.housePrompt) {
-    sections.push(`=== HOUSE RULES ===\n${deps.housePrompt}`)
-  }
-
+): ReadonlyArray<SystemSection> => {
+  const includes = resolveIncludes(deps.includePrompts)
+  const ctxIncludes = resolveIncludeContext(deps.includeContext)
   const roomCtx = deps.history.rooms.get(triggerRoomId)
-  if (roomCtx?.profile.roomPrompt) {
-    sections.push(`=== ROOM: ${roomCtx.profile.name} ===\n${roomCtx.profile.roomPrompt}`)
-  }
+  const out: SystemSection[] = []
 
-  sections.push(`=== YOUR IDENTITY ===\n${deps.systemPrompt}`)
+  out.push({
+    key: 'house',
+    label: 'HOUSE RULES',
+    text: deps.housePrompt ?? '',
+    enabled: includes.house && !!deps.housePrompt,
+    optional: true,
+  })
 
-  if (deps.getSkills) {
-    const roomName = roomCtx?.profile.name ?? ''
-    const skillsSection = deps.getSkills(roomName)
-    if (skillsSection) {
-      sections.push(`=== SKILLS ===\n${skillsSection}`)
-    }
-  }
+  out.push({
+    key: 'room',
+    label: `ROOM: ${roomCtx?.profile.name ?? ''}`,
+    text: roomCtx?.profile.roomPrompt ?? '',
+    enabled: includes.room && !!roomCtx?.profile.roomPrompt,
+    optional: true,
+  })
 
-  const contextLines: string[] = []
+  out.push({
+    key: 'agent',
+    label: 'YOUR IDENTITY',
+    text: deps.systemPrompt,
+    enabled: includes.agent,
+    optional: true,
+  })
 
-  if (roomCtx) {
-    contextLines.push(`You are in room "${roomCtx.profile.name}" [id: ${triggerRoomId}].`)
-  }
+  const skillsText = deps.getSkills ? deps.getSkills(roomCtx?.profile.name ?? '') : ''
+  out.push({
+    key: 'skills',
+    label: 'SKILLS',
+    text: skillsText,
+    enabled: includes.skills && !!skillsText,
+    optional: true,
+  })
+
+  // CONTEXT sub-sections. `ctx_intro` and `ctx_newHint` are always-on
+  // scaffolding. The other four are toggleable.
+  out.push({
+    key: 'ctx_intro',
+    label: 'CONTEXT_INTRO',
+    text: roomCtx ? `You are in room "${roomCtx.profile.name}" [id: ${triggerRoomId}].` : '',
+    enabled: !!roomCtx,
+    optional: false,
+  })
 
   const freshForRoom = deps.history.incoming.filter(m => m.roomId === triggerRoomId)
   const latestWithFlow = [...freshForRoom].reverse().find(
     m => (m.metadata as Record<string, unknown> | undefined)?.flowContext,
   )
-  if (latestWithFlow) {
-    const fc = (latestWithFlow.metadata as Record<string, unknown>).flowContext as FlowDeliveryContext
-    contextLines.push(buildFlowSection(fc, fc.stepIndex))
-  }
+  const flowText = latestWithFlow
+    ? buildFlowSection(
+        (latestWithFlow.metadata as Record<string, unknown>).flowContext as FlowDeliveryContext,
+        ((latestWithFlow.metadata as Record<string, unknown>).flowContext as FlowDeliveryContext).stepIndex,
+      )
+    : ''
+  out.push({
+    key: 'ctx_flow',
+    label: 'Flow',
+    text: flowText,
+    enabled: ctxIncludes.flow && !!flowText,
+    optional: true,
+  })
 
   const participants = getParticipantsForRoom(triggerRoomId, deps.history, deps.agentId)
-  if (participants.length > 0) {
-    contextLines.push(buildParticipantsSection(participants))
-  }
+  out.push({
+    key: 'ctx_participants',
+    label: 'Participants',
+    text: participants.length > 0 ? buildParticipantsSection(participants) : '',
+    enabled: ctxIncludes.participants && participants.length > 0,
+    optional: true,
+  })
 
-  // Artifacts scoped to this room (system-wide artifacts excluded from per-room context)
-  if (deps.getArtifactsForScope) {
-    const artifacts = deps.getArtifactsForScope(triggerRoomId)
-    const artifactsSection = buildArtifactsSection(artifacts, deps.getArtifactTypeDef)
-    if (artifactsSection) contextLines.push(artifactsSection)
-  }
+  const artifacts = deps.getArtifactsForScope ? deps.getArtifactsForScope(triggerRoomId) : []
+  const artifactsText = artifacts.length > 0 ? buildArtifactsSection(artifacts, deps.getArtifactTypeDef) : ''
+  out.push({
+    key: 'ctx_artifacts',
+    label: 'Artifacts',
+    text: artifactsText,
+    enabled: ctxIncludes.artifacts && !!artifactsText,
+    optional: true,
+  })
 
-  if (deps.history.rooms.size > 1) {
-    contextLines.push(buildActivitySection(deps, triggerRoomId))
-  }
+  const activityEligible = deps.history.rooms.size > 1
+  out.push({
+    key: 'ctx_activity',
+    label: 'Activity',
+    text: activityEligible ? buildActivitySection(deps, triggerRoomId) : '',
+    enabled: ctxIncludes.activity && activityEligible,
+    optional: true,
+  })
 
   const knownAgents = [...deps.history.agentProfiles.values()].filter(a => a.id !== deps.agentId)
-  if (knownAgents.length > 0) {
-    const agentNames = knownAgents.map(a => `"${a.name}" (${a.kind})`)
-    contextLines.push(`Known agents: ${agentNames.join(', ')}`)
+  const knownText = knownAgents.length > 0
+    ? `Known agents: ${knownAgents.map(a => `"${a.name}" (${a.kind})`).join(', ')}`
+    : ''
+  out.push({
+    key: 'ctx_knownAgents',
+    label: 'Known agents',
+    text: knownText,
+    enabled: ctxIncludes.knownAgents && !!knownText,
+    optional: true,
+  })
+
+  out.push({
+    key: 'ctx_newHint',
+    label: 'NEW_HINT',
+    text: 'Messages marked [NEW] have arrived since you last responded.',
+    enabled: true,
+    optional: false,
+  })
+
+  out.push({
+    key: 'responseFormat',
+    label: 'RESPONSE FORMAT',
+    text: deps.responseFormat ?? '',
+    enabled: includes.responseFormat && !!deps.responseFormat,
+    optional: true,
+  })
+
+  return out
+}
+
+// Assemble the final system-message string from enabled sections.
+// Prompt-level sections get `=== LABEL ===\n` headers; CONTEXT sub-sections
+// are collected under a single `=== CONTEXT ===` block matching the original
+// wire format (so no downstream model sees a behavior change).
+const buildSystemMessage = (
+  deps: BuildContextDeps,
+  triggerRoomId: string,
+): string => {
+  const sections = buildSystemSections(deps, triggerRoomId).filter(s => s.enabled)
+  const promptSections: string[] = []
+  const contextLines: string[] = []
+
+  for (const s of sections) {
+    const isContext = s.key.startsWith('ctx_')
+    if (isContext) {
+      contextLines.push(s.text)
+    } else {
+      // Top-level label formatting matches prior wire format exactly
+      const header = s.key === 'room'
+        ? s.label                // already includes `ROOM: name`
+        : s.label
+      promptSections.push(`=== ${header} ===\n${s.text}`)
+    }
   }
 
-  contextLines.push('Messages marked [NEW] have arrived since you last responded.')
-
-  sections.push(`=== CONTEXT ===\n${contextLines.join('\n\n')}`)
-
-  if (deps.responseFormat) {
-    sections.push(`=== RESPONSE FORMAT ===\n${deps.responseFormat}`)
-  }
-
-  return sections.join('\n\n')
+  // Preserve prior ordering: house → room → agent → skills → CONTEXT → responseFormat
+  const housePromptIdx = promptSections.findIndex(p => p.startsWith('=== HOUSE RULES ==='))
+  const rfIdx = promptSections.findIndex(p => p.startsWith('=== RESPONSE FORMAT ==='))
+  const rf = rfIdx >= 0 ? promptSections.splice(rfIdx, 1)[0]! : null
+  void housePromptIdx
+  const contextBlock = contextLines.length > 0
+    ? `=== CONTEXT ===\n${contextLines.join('\n\n')}`
+    : ''
+  const assembled = [...promptSections, contextBlock, ...(rf ? [rf] : [])].filter(Boolean)
+  return assembled.join('\n\n')
 }
 
 // === Token estimation ===
@@ -271,8 +410,11 @@ const DEFAULT_MAX_CONTEXT_TOKENS = 8000
 export const buildContext = (
   deps: BuildContextDeps,
   triggerRoomId: string,
-  maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS,
+  maxContextTokensArg?: number,
 ): ContextResult => {
+  // Priority: explicit function arg > deps.maxContextTokens > default constant.
+  // The arg form is kept for callers that already pass it explicitly.
+  const maxContextTokens = maxContextTokensArg ?? deps.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS
   const flushIds = new Set<string>()
 
   const systemContent = buildSystemMessage(deps, triggerRoomId)
@@ -290,14 +432,33 @@ export const buildContext = (
   // Format all candidate messages
   const formattedOld: ChatRequest['messages'][number][] = []
   for (const msg of old) {
-    const formatted = formatMessage(msg, '', deps.agentId, deps.resolveName, roomCompressedIds)
+    const formatted = formatMessage(msg, '', deps.agentId, deps.resolveName, roomCompressedIds, deps.includeFlowStepPrompt ?? true)
     if (formatted) formattedOld.push(formatted)
   }
 
   const formattedFresh: Array<{ formatted: ChatRequest['messages'][number]; id: string }> = []
   for (const msg of fresh) {
-    const formatted = formatMessage(msg, '[NEW] ', deps.agentId, deps.resolveName, roomCompressedIds)
+    const formatted = formatMessage(msg, '[NEW] ', deps.agentId, deps.resolveName, roomCompressedIds, deps.includeFlowStepPrompt ?? true)
     if (formatted) formattedFresh.push({ formatted, id: msg.id })
+  }
+
+  const warnings: string[] = []
+
+  // Trim layers (in order):
+  //   1. historyLimit (count) — slice above
+  //   2. maxHistoryChars (per-agent char cap) — here
+  //   3. maxContextTokens (global token budget) — below
+  if (deps.maxHistoryChars !== undefined && deps.maxHistoryChars > 0) {
+    let totalChars = formattedOld.reduce((s, m) => s + m.content.length, 0)
+    const originalLen = formattedOld.length
+    while (formattedOld.length > 0 && totalChars > deps.maxHistoryChars) {
+      const removed = formattedOld.shift()!
+      totalChars -= removed.content.length
+    }
+    if (formattedOld.length < originalLen) {
+      const dropped = originalLen - formattedOld.length
+      warnings.push(`Context trimmed by char cap: dropped ${dropped} old messages to fit ${deps.maxHistoryChars}-char budget`)
+    }
   }
 
   // Context budget: system + fresh messages are mandatory; trim old messages to fit
@@ -305,7 +466,6 @@ export const buildContext = (
   const freshTokens = formattedFresh.reduce((sum, f) => sum + estimateTokens(f.formatted.content), 0)
   const budgetForOld = maxContextTokens - systemTokens - freshTokens
 
-  const warnings: string[] = []
   let trimmedOld = formattedOld
   if (budgetForOld > 0) {
     // Trim from oldest (front) until within budget

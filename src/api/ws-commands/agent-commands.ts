@@ -1,5 +1,6 @@
 import type { WSInbound } from '../../core/types/ws-protocol.ts'
 import { asAIAgent } from '../../agents/shared.ts'
+import { buildToolSupport } from '../../agents/spawn.ts'
 import { requireAgent, sendError, type CommandContext } from './types.ts'
 
 export const handleAgentCommand = async (msg: WSInbound, ctx: CommandContext): Promise<boolean> => {
@@ -28,6 +29,28 @@ export const handleAgentCommand = async (msg: WSInbound, ctx: CommandContext): P
       if (aiAgent) {
         if (msg.systemPrompt) aiAgent.updateSystemPrompt(msg.systemPrompt)
         if (msg.model) aiAgent.updateModel(msg.model)
+        if (msg.includePrompts) aiAgent.updateIncludePrompts(msg.includePrompts)
+        if (msg.includeContext) aiAgent.updateIncludeContext(msg.includeContext)
+        if (typeof msg.includeFlowStepPrompt === 'boolean') aiAgent.updateIncludeFlowStepPrompt(msg.includeFlowStepPrompt)
+        if (typeof msg.includeTools === 'boolean') aiAgent.updateIncludeTools(msg.includeTools)
+        if (msg.maxHistoryChars === null) aiAgent.updateMaxHistoryChars(undefined)
+        else if (typeof msg.maxHistoryChars === 'number') aiAgent.updateMaxHistoryChars(msg.maxHistoryChars)
+        if (msg.maxContextTokens === null) aiAgent.updateMaxContextTokens(undefined)
+        else if (typeof msg.maxContextTokens === 'number') aiAgent.updateMaxContextTokens(msg.maxContextTokens)
+        if (msg.maxToolResultChars === null) aiAgent.updateMaxToolResultChars(undefined)
+        else if (typeof msg.maxToolResultChars === 'number') aiAgent.updateMaxToolResultChars(msg.maxToolResultChars)
+        if (typeof msg.maxToolIterations === 'number') aiAgent.updateMaxToolIterations(msg.maxToolIterations)
+        if (Array.isArray(msg.tools)) {
+          const known = new Set(system.toolRegistry.list().map(t => t.name))
+          const resolved = msg.tools.filter(n => known.has(n))
+          aiAgent.updateTools?.(resolved)
+          const support = await buildToolSupport(
+            resolved, system.toolRegistry,
+            { id: aiAgent.id, name: aiAgent.name, currentModel: () => aiAgent.getModel() },
+            system.llm,
+          )
+          aiAgent.refreshTools?.(support)
+        }
       }
       return true
     }

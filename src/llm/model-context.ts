@@ -29,6 +29,11 @@ const CLOUD_TABLE: Record<string, Record<string, number>> = {
     'llama-3.1-70b-versatile': 131072,
     'gemma2-9b-it': 8192,
     'kimi-k2-thinking': 128000,
+    'openai/gpt-oss-120b': 131072,
+    'openai/gpt-oss-20b': 131072,
+    'qwen/qwen3-32b': 131072,
+    'moonshotai/kimi-k2-instruct': 131072,
+    'deepseek-r1-distill-llama-70b': 131072,
   },
   mistral: {
     'mistral-large-latest': 131072,
@@ -110,6 +115,19 @@ export const getContextWindow = async (
 
   cache.set(key, info)
   return info
+}
+
+// Synchronous best-effort lookup — hits the in-process cache and the curated
+// CLOUD_TABLE only. Returns `unknown` when neither source has an entry, so
+// callers can fall back to a safe default. Used by the ai-agent factory to
+// auto-derive the per-request context budget without awaiting HTTP.
+export const getContextWindowSync = (providerName: string, modelId: string): ContextInfo => {
+  const key = `${providerName}::${modelId}`
+  const cached = cache.get(key)
+  if (cached) return cached
+  const hard = CLOUD_TABLE[providerName]?.[modelId]
+  if (hard) return { contextMax: hard, source: 'known_table' }
+  return { contextMax: 0, source: 'unknown' }
 }
 
 // For tests only.

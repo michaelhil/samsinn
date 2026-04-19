@@ -27,12 +27,32 @@ describe('Snapshot', () => {
     try { await unlink(`${TEST_SNAPSHOT_PATH}.tmp`) } catch { /* ignore */ }
   })
 
+  describe('v3 → v4 migration', () => {
+    test('loads a v3 snapshot as v4 with no Context & Prompts fields set', async () => {
+      await mkdir(TEST_SNAPSHOT_DIR, { recursive: true })
+      const v3Snapshot = {
+        version: '3',
+        timestamp: Date.now(),
+        rooms: [],
+        agents: [],
+        artifacts: [],
+      }
+      await Bun.write(TEST_SNAPSHOT_PATH, JSON.stringify(v3Snapshot))
+
+      const loaded = await loadSnapshot(TEST_SNAPSHOT_PATH)
+      expect(loaded).not.toBeNull()
+      expect(loaded!.version).toBe('5')
+      // Missing includePrompts/includeTools/maxHistoryChars on agents is
+      // expected — the factory resolves to defaults at spawn time.
+    })
+  })
+
   describe('serializeSystem', () => {
     test('serializes empty system', () => {
       const system = createTestSystem()
       const snapshot = serializeSystem(system)
 
-      expect(snapshot.version).toBe('3')
+      expect(snapshot.version).toBe('5')
       expect(snapshot.timestamp).toBeGreaterThan(0)
       expect(snapshot.rooms.length).toBe(1) // default Introductions room
       expect(snapshot.agents.length).toBe(0)
@@ -100,7 +120,7 @@ describe('Snapshot', () => {
 
       const loaded = await loadSnapshot(TEST_SNAPSHOT_PATH)
       expect(loaded).not.toBeNull()
-      expect(loaded!.version).toBe('3')
+      expect(loaded!.version).toBe('5')
       expect(loaded!.rooms.length).toBe(snapshot.rooms.length)
 
       const chatMsgs = loaded!.rooms[0]!.messages.filter(m => m.type === 'chat')

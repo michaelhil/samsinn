@@ -36,6 +36,23 @@ export interface Agent {
 
 // === AIAgent — extended Agent with observability ===
 
+// Per-agent toggles controlling which prompt sections are injected into the
+// LLM system message. UI labels map to config keys as:
+//   UI "Agent prompt"    → `agent`          (the per-agent systemPrompt)
+//   UI "Room prompt"     → `room`           (the trigger room's roomPrompt)
+//   UI "System prompt"   → `house`          (global housePrompt — NOT the LLM `role:'system'`)
+//   UI "Response format" → `responseFormat` (global responseFormat)
+// All default true; undefined at load → preserve current behavior.
+export type PromptSection = 'agent' | 'room' | 'house' | 'responseFormat' | 'skills'
+export type IncludePrompts = Partial<Record<PromptSection, boolean>>
+
+// Sub-sections inside the generated CONTEXT block. Default all true; undefined
+// preserves current behavior. Unlike `PromptSection`, these are fixed-purpose
+// informational (not author-written text), so the magnifier shows the text
+// that would be injected at request time.
+export type ContextSection = 'participants' | 'flow' | 'artifacts' | 'activity' | 'knownAgents'
+export type IncludeContext = Partial<Record<ContextSection, boolean>>
+
 export interface AIAgent extends Agent {
   readonly whenIdle: (timeoutMs?: number) => Promise<void>
   readonly updateSystemPrompt: (prompt: string) => void
@@ -50,7 +67,29 @@ export interface AIAgent extends Agent {
   readonly getThinking: () => boolean
   readonly updateThinking?: (enabled: boolean) => void
   readonly getTools: () => ReadonlyArray<string> | undefined
+  readonly updateTools?: (tools: ReadonlyArray<string>) => void
   readonly refreshTools?: (support: { toolExecutor?: ToolExecutor; toolDefinitions?: ReadonlyArray<ToolDefinition> }) => void
+  // Context & Prompts toggles
+  readonly getIncludePrompts: () => Required<IncludePrompts>
+  readonly updateIncludePrompts: (partial: IncludePrompts) => void
+  readonly getIncludeContext: () => Required<IncludeContext>
+  readonly updateIncludeContext: (partial: IncludeContext) => void
+  readonly getIncludeFlowStepPrompt: () => boolean
+  readonly updateIncludeFlowStepPrompt: (enabled: boolean) => void
+  readonly getIncludeTools: () => boolean
+  readonly updateIncludeTools: (enabled: boolean) => void
+  readonly getMaxHistoryChars: () => number | undefined
+  readonly updateMaxHistoryChars: (n: number | undefined) => void
+  readonly getMaxContextTokens: () => number | undefined
+  readonly updateMaxContextTokens: (n: number | undefined) => void
+  readonly getMaxToolResultChars: () => number | undefined
+  readonly updateMaxToolResultChars: (n: number | undefined) => void
+  readonly getMaxToolIterations: () => number | undefined
+  readonly updateMaxToolIterations: (n: number | undefined) => void
+  // Context preview — runs buildSystemSections for a specific room and
+  // returns section-by-section text + token estimate plus budget resolution.
+  // Used by the UI panel so every magnifier has ground truth.
+  readonly getContextPreview: (roomId: string) => ContextPreview
   // Memory introspection + management
   readonly getHistory?: (roomId: string) => ReadonlyArray<Message>
   readonly getIncoming?: () => ReadonlyArray<Message>
@@ -60,6 +99,23 @@ export interface AIAgent extends Agent {
   // Returns a snapshot of the agent's current configuration (mutable fields resolved).
   // Use this when you need multiple config fields at once (e.g. for serialization).
   readonly getConfig: () => AIAgentConfig
+}
+
+export interface ContextPreviewSection {
+  readonly key: string
+  readonly label: string
+  readonly text: string
+  readonly tokens: number
+  readonly enabled: boolean
+  readonly optional: boolean
+}
+
+export interface ContextPreview {
+  readonly roomId: string
+  readonly roomName: string
+  readonly sections: ReadonlyArray<ContextPreviewSection>
+  readonly budget: { readonly value: number; readonly source: 'override' | 'auto' | 'fallback'; readonly modelMax: number }
+  readonly historyEstimate: { readonly messages: number; readonly chars: number }
 }
 
 export interface AgentMemoryStats {
@@ -107,6 +163,13 @@ export interface AIAgentConfig {
   readonly tags?: ReadonlyArray<string>         // capability/role tags for [[tag:X]] addressing
   readonly thinking?: boolean                    // enable model CoT (qwen3 thinking mode)
   readonly compressionThreshold?: number        // history length triggering LLM compression (default: 3 × historyLimit)
+  // Context & Prompts toggles — all default true; undefined preserves current behavior
+  readonly includePrompts?: IncludePrompts      // per-section prompt inclusion (agent/room/house/responseFormat/skills)
+  readonly includeContext?: IncludeContext      // CONTEXT sub-sections (participants/flow/artifacts/activity/knownAgents)
+  readonly includeFlowStepPrompt?: boolean      // include [Step instruction: ...] suffix on flow messages (default: true)
+  readonly includeTools?: boolean               // master: send tool definitions to LLM (default: true)
+  readonly maxHistoryChars?: number             // optional char cap for old messages in context (undefined = no cap)
+  readonly maxContextTokens?: number            // explicit budget for system+history; undefined = auto from model
 }
 
 // === Agent Response (parsed from LLM plain text output) ===

@@ -9,6 +9,12 @@
 //
 // v3: House prompts are no longer persisted — defaults live in code.
 //     All tool calling is native (no text protocol).
+// v4: Per-agent Context & Prompts toggles (includePrompts, includeTools,
+//     maxHistoryChars). v3 snapshots are auto-migrated with defaults that
+//     preserve v3 behavior (all prompts on, tools on, no char cap).
+// v5: Extended Context panel — includePrompts.skills, includeContext,
+//     includeFlowStepPrompt, maxContextTokens. All additive; missing fields
+//     resolve to defaults at load that preserve v4 behavior.
 // ============================================================================
 
 import type { Agent, AIAgentConfig } from './types/agent.ts'
@@ -21,7 +27,7 @@ import { dirname } from 'node:path'
 
 // --- Version ---
 
-export const SNAPSHOT_VERSION = 3
+export const SNAPSHOT_VERSION = 5
 
 // --- Snapshot schema ---
 
@@ -42,7 +48,7 @@ export interface AgentSnapshot {
 }
 
 export interface SystemSnapshot {
-  readonly version: '3'
+  readonly version: '5'
   readonly timestamp: number
   readonly rooms: ReadonlyArray<RoomSnapshot>
   readonly agents: ReadonlyArray<AgentSnapshot>
@@ -113,7 +119,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
   const artifacts = system.house.artifacts.list({ includeResolved: true })
 
   return {
-    version: '3',
+    version: '5',
     timestamp: Date.now(),
     rooms,
     agents,
@@ -129,6 +135,31 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
 
 const isValidSnapshot = (raw: Record<string, unknown>): boolean =>
   raw.version === String(SNAPSHOT_VERSION)
+
+// --- Migration ---
+// v3 → v4: no stored fields, new toggles default to "current behavior"
+// (includePrompts all-true, includeTools true, maxHistoryChars undefined).
+// The factory resolves missing fields to these defaults, so migration only
+// needs to bump the version string; no shape changes required.
+const migrateV3ToV4 = (raw: Record<string, unknown>): Record<string, unknown> => {
+  if (raw.version !== '3') return raw
+  return { ...raw, version: '4' }
+}
+
+// v4 → v5: additive-only. New fields (includePrompts.skills, includeContext,
+// includeFlowStepPrompt, maxContextTokens) resolve to defaults at the
+// factory, so migration is a version bump.
+const migrateV4ToV5 = (raw: Record<string, unknown>): Record<string, unknown> => {
+  if (raw.version !== '4') return raw
+  return { ...raw, version: '5' }
+}
+
+const migrate = (raw: Record<string, unknown>): Record<string, unknown> => {
+  let out = raw
+  out = migrateV3ToV4(out)
+  out = migrateV4ToV5(out)
+  return out
+}
 
 // --- Save / Load ---
 
@@ -146,7 +177,8 @@ export const loadSnapshot = async (path: string): Promise<SystemSnapshot | null>
 
   try {
     const text = await file.text()
-    const raw = JSON.parse(text) as Record<string, unknown>
+    const rawParsed = JSON.parse(text) as Record<string, unknown>
+    const raw = migrate(rawParsed)
 
     if (!isValidSnapshot(raw)) {
       console.warn(`Snapshot at "${path}" is incompatible (expected v${SNAPSHOT_VERSION}). Ignoring — delete the snapshot file to reset.`)

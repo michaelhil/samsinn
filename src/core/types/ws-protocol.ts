@@ -2,7 +2,7 @@
 // (server → client) message discriminated unions.
 
 import type { Message, MessageTarget, RoomProfile, AgentProfile, DeliveryMode } from './messaging.ts'
-import type { AIAgentConfig, StateValue } from './agent.ts'
+import type { AIAgentConfig, IncludeContext, IncludePrompts, StateValue } from './agent.ts'
 import type { RoomState } from './room.ts'
 import type { Artifact } from './artifact.ts'
 import type { EvalEvent } from './agent-eval.ts'
@@ -16,7 +16,21 @@ export type WSInbound =
   | { readonly type: 'remove_from_room'; readonly roomName: string; readonly agentName: string }
   | { readonly type: 'create_agent'; readonly config: AIAgentConfig }
   | { readonly type: 'remove_agent'; readonly name: string }
-  | { readonly type: 'update_agent'; readonly name: string; readonly systemPrompt?: string; readonly model?: string }
+  | {
+      readonly type: 'update_agent'
+      readonly name: string
+      readonly systemPrompt?: string
+      readonly model?: string
+      readonly includePrompts?: IncludePrompts
+      readonly includeContext?: IncludeContext
+      readonly includeFlowStepPrompt?: boolean
+      readonly includeTools?: boolean
+      readonly maxHistoryChars?: number | null
+      readonly maxContextTokens?: number | null
+      readonly maxToolResultChars?: number | null
+      readonly maxToolIterations?: number
+      readonly tools?: ReadonlyArray<string>
+    }
   // Delivery mode
   | { readonly type: 'set_delivery_mode'; readonly roomName: string; readonly mode: 'broadcast' }
   // Pause

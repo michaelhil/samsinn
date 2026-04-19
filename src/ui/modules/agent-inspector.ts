@@ -8,6 +8,7 @@
 
 import { safeFetchJson, showToast, agentNameToId } from './ui-utils.ts'
 import { $pendingModelChanges } from './stores.ts'
+import { renderPromptToggles } from './prompt-toggles.ts'
 
 interface MemoryStats {
   rooms: Array<{ roomId: string; roomName: string; messageCount: number; lastActiveAt?: number }>
@@ -296,7 +297,7 @@ export const renderAgentInspector = (container: HTMLElement, agentName: string):
 
     // --- Agent prompt (AI) or Description (human) ---
     if (isAI) {
-      const { container: promptContainer } = createEditableField(
+      const { container: promptContainer, textarea: promptTextarea } = createEditableField(
         'Agent Prompt',
         (agentRes.systemPrompt as string) ?? '',
         async (val) => {
@@ -307,6 +308,14 @@ export const renderAgentInspector = (container: HTMLElement, agentName: string):
         },
       )
       container.appendChild(promptContainer)
+
+      // Context & Prompts — per-agent toggles for what gets injected into the LLM
+      renderPromptToggles(container, {
+        agentName,
+        agentEnc: enc,
+        agentData: agentRes as Parameters<typeof renderPromptToggles>[1]['agentData'],
+        promptTextarea,
+      })
     }
 
     // Description (both AI and human, but primary for human)

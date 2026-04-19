@@ -129,6 +129,68 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
   )
 
   mcpServer.tool(
+    'update_agent_context',
+    'Update per-agent Context panel toggles and limits (includePrompts, includeContext, includeFlowStepPrompt, includeTools, maxHistoryChars, maxContextTokens, maxToolResultChars, maxToolIterations).',
+    {
+      name: z.string().describe('Agent name'),
+      includePrompts: z.object({
+        agent: z.boolean().optional(),
+        room: z.boolean().optional(),
+        house: z.boolean().optional(),
+        responseFormat: z.boolean().optional(),
+        skills: z.boolean().optional(),
+      }).optional().describe('Prompt-section toggles. Partial — only provided keys change.'),
+      includeContext: z.object({
+        participants: z.boolean().optional(),
+        flow: z.boolean().optional(),
+        artifacts: z.boolean().optional(),
+        activity: z.boolean().optional(),
+        knownAgents: z.boolean().optional(),
+      }).optional().describe('CONTEXT sub-section toggles. Partial.'),
+      includeFlowStepPrompt: z.boolean().optional().describe('Include [Step instruction: ...] suffix on flow messages (default: true).'),
+      includeTools: z.boolean().optional().describe('Master tools on/off (false = send zero tool definitions).'),
+      maxHistoryChars: z.number().nullable().optional().describe('Char cap on old messages. null clears; number sets.'),
+      maxContextTokens: z.number().nullable().optional().describe('Explicit budget for system+history. null clears (auto from model).'),
+      maxToolResultChars: z.number().nullable().optional().describe('Cap on each tool-result payload injected back into the loop.'),
+      maxToolIterations: z.number().optional().describe('Max tool-call rounds per turn.'),
+    },
+    async ({ name, includePrompts, includeContext, includeFlowStepPrompt, includeTools, maxHistoryChars, maxContextTokens, maxToolResultChars, maxToolIterations }) => {
+      try {
+        const agent = resolveAgent(system, name)
+        const ai = agent as AIAgent
+        if (agent.kind !== 'ai' || !('updateIncludePrompts' in ai)) {
+          return errorResult('Only AI agents can be updated')
+        }
+        if (includePrompts) ai.updateIncludePrompts(includePrompts)
+        if (includeContext) ai.updateIncludeContext(includeContext)
+        if (typeof includeFlowStepPrompt === 'boolean') ai.updateIncludeFlowStepPrompt(includeFlowStepPrompt)
+        if (typeof includeTools === 'boolean') ai.updateIncludeTools(includeTools)
+        if (maxHistoryChars === null) ai.updateMaxHistoryChars(undefined)
+        else if (typeof maxHistoryChars === 'number') ai.updateMaxHistoryChars(maxHistoryChars)
+        if (maxContextTokens === null) ai.updateMaxContextTokens(undefined)
+        else if (typeof maxContextTokens === 'number') ai.updateMaxContextTokens(maxContextTokens)
+        if (maxToolResultChars === null) ai.updateMaxToolResultChars(undefined)
+        else if (typeof maxToolResultChars === 'number') ai.updateMaxToolResultChars(maxToolResultChars)
+        if (typeof maxToolIterations === 'number') ai.updateMaxToolIterations(maxToolIterations)
+        return textResult({
+          updated: true,
+          name: agent.name,
+          includePrompts: ai.getIncludePrompts(),
+          includeContext: ai.getIncludeContext(),
+          includeFlowStepPrompt: ai.getIncludeFlowStepPrompt(),
+          includeTools: ai.getIncludeTools(),
+          maxHistoryChars: ai.getMaxHistoryChars() ?? null,
+          maxContextTokens: ai.getMaxContextTokens() ?? null,
+          maxToolResultChars: ai.getMaxToolResultChars() ?? null,
+          maxToolIterations: ai.getMaxToolIterations() ?? null,
+        })
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'Failed to update agent context')
+      }
+    },
+  )
+
+  mcpServer.tool(
     'get_house_prompts',
     'Get the global house prompt and response format that guide all agents',
     {},

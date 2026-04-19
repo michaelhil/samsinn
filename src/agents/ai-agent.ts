@@ -18,7 +18,7 @@
 // Side effects are handled via the onDecision callback.
 // ============================================================================
 
-import type { AIAgent, AIAgentConfig } from '../core/types/agent.ts'
+import type { AIAgent, AIAgentConfig, IncludeContext, IncludePrompts, PromptSection, ContextSection } from '../core/types/agent.ts'
 import type { AgentHistory, Message } from '../core/types/messaging.ts'
 import type { Artifact, ArtifactTypeDefinition } from '../core/types/artifact.ts'
 import type { EvalEvent } from '../core/types/agent-eval.ts'
@@ -27,9 +27,29 @@ import type { Room } from '../core/types/room.ts'
 import type { ToolDefinition, ToolExecutor } from '../core/types/tool.ts'
 import { DEFAULTS, SYSTEM_SENDER_ID } from '../core/types/constants.ts'
 import { extractAgentProfile as extractProfile } from './shared.ts'
-import { buildContext, flushIncoming, type BuildContextDeps } from './context-builder.ts'
+import { buildContext, buildSystemSections, estimateTokens, flushIncoming, type BuildContextDeps } from './context-builder.ts'
 import { callLLM, evaluate, type OnDecision } from './evaluation.ts'
 import { createConcurrencyManager } from './concurrency.ts'
+import { getContextWindowSync } from '../llm/model-context.ts'
+
+// Auto-budget reserves ~30% of a model's context window for tool definitions,
+// generation output, and safety margin. Fits typical tool+output overhead
+// without requiring users to hand-tune per model.
+const AUTO_BUDGET_FRACTION = 0.7
+const AUTO_BUDGET_FLOOR = 2000
+const AUTO_BUDGET_FALLBACK = 8000
+
+// Split "provider:model" on the FIRST colon only — OpenRouter slugs can
+// contain additional colons (e.g. "openrouter:anthropic/claude-3.5:beta").
+const splitProviderModel = (fullModel: string): { provider: string; model: string } => {
+  const idx = fullModel.indexOf(':')
+  if (idx < 0) return { provider: 'ollama', model: fullModel }
+  const provider = fullModel.slice(0, idx)
+  const model = fullModel.slice(idx + 1)
+  // Known cloud prefixes; everything else is treated as Ollama (e.g. "qwen:14b")
+  const cloudPrefixes = new Set(['groq', 'cerebras', 'openrouter', 'mistral', 'sambanova'])
+  return cloudPrefixes.has(provider) ? { provider, model } : { provider: 'ollama', model: fullModel }
+}
 
 // Re-export Decision/OnDecision for consumers
 export type { Decision, OnDecision } from './evaluation.ts'
@@ -73,9 +93,58 @@ export const createAIAgent = (
   let currentTemperature: number | undefined = config.temperature
   let currentThinking: boolean = config.thinking ?? false
   let historyLimit = config.historyLimit ?? DEFAULTS.historyLimit
-  const maxToolIterations = config.maxToolIterations ?? 5
   let toolExecutor = options?.toolExecutor
   let toolDefinitions = options?.toolDefinitions
+  let currentTools: ReadonlyArray<string> | undefined = config.tools
+  // Context & Prompts toggles — resolve defaults to preserve current behavior
+  const includePromptsState: Required<IncludePrompts> = {
+    agent: config.includePrompts?.agent ?? true,
+    room: config.includePrompts?.room ?? true,
+    house: config.includePrompts?.house ?? true,
+    responseFormat: config.includePrompts?.responseFormat ?? true,
+    skills: config.includePrompts?.skills ?? true,
+  }
+  const includeContextState: Required<IncludeContext> = {
+    participants: config.includeContext?.participants ?? true,
+    flow: config.includeContext?.flow ?? true,
+    artifacts: config.includeContext?.artifacts ?? true,
+    activity: config.includeContext?.activity ?? true,
+    knownAgents: config.includeContext?.knownAgents ?? true,
+  }
+  let includeFlowStepPrompt: boolean = config.includeFlowStepPrompt ?? true
+  let includeTools: boolean = config.includeTools ?? true
+  let maxHistoryChars: number | undefined = config.maxHistoryChars
+  let maxContextTokens: number | undefined = config.maxContextTokens
+  let maxToolResultCharsCfg: number | undefined = config.maxToolResultChars
+  let maxToolIterationsCfg: number = config.maxToolIterations ?? 5
+
+  // Resolve the system+history token budget at request time:
+  //   explicit override > auto from model window > fallback 8000.
+  const resolveMaxContextTokens = (): number => {
+    if (maxContextTokens !== undefined && maxContextTokens > 0) return maxContextTokens
+    const { provider, model } = splitProviderModel(currentModel)
+    const info = getContextWindowSync(provider, model)
+    if (info.contextMax > 0) {
+      return Math.max(AUTO_BUDGET_FLOOR, Math.floor(info.contextMax * AUTO_BUDGET_FRACTION))
+    }
+    return AUTO_BUDGET_FALLBACK
+  }
+
+  const resolveBudgetSource = (): { value: number; source: 'override' | 'auto' | 'fallback'; modelMax: number } => {
+    if (maxContextTokens !== undefined && maxContextTokens > 0) {
+      return { value: maxContextTokens, source: 'override', modelMax: 0 }
+    }
+    const { provider, model } = splitProviderModel(currentModel)
+    const info = getContextWindowSync(provider, model)
+    if (info.contextMax > 0) {
+      return {
+        value: Math.max(AUTO_BUDGET_FLOOR, Math.floor(info.contextMax * AUTO_BUDGET_FRACTION)),
+        source: 'auto',
+        modelMax: info.contextMax,
+      }
+    }
+    return { value: AUTO_BUDGET_FALLBACK, source: 'fallback', modelMax: 0 }
+  }
   const getHousePrompt = options?.getHousePrompt
   const getResponseFormat = options?.getResponseFormat
   const getArtifactsForScope = options?.getArtifactsForScope
@@ -113,6 +182,11 @@ export const createAIAgent = (
     getArtifactsForScope,
     getArtifactTypeDef,
     getSkills,
+    includePrompts: includePromptsState,
+    includeContext: includeContextState,
+    includeFlowStepPrompt,
+    maxHistoryChars,
+    maxContextTokens: resolveMaxContextTokens(),
     // Merge room-level pruned IDs with agent-level compression IDs
     getCompressedIds: (roomId: string) => {
       const roomIds = getCompressedIds?.(roomId)
@@ -141,13 +215,24 @@ export const createAIAgent = (
     const contextResult = buildContext(contextDeps(), triggerRoomId)
     const epoch = cm.epochAtStart()
 
-    const evalConfig = { ...config, model: currentModel, systemPrompt: currentSystemPrompt, temperature: currentTemperature, thinking: currentThinking, historyLimit }
+    const evalConfig = {
+      ...config,
+      model: currentModel,
+      systemPrompt: currentSystemPrompt,
+      temperature: currentTemperature,
+      thinking: currentThinking,
+      historyLimit,
+      maxToolResultChars: maxToolResultCharsCfg ?? config.maxToolResultChars,
+      maxToolIterations: maxToolIterationsCfg,
+    }
     const inReplyTo = contextResult.flushInfo.ids.size > 0 ? [...contextResult.flushInfo.ids] : undefined
     const abortController = new AbortController()
     activeAbortController = abortController
     const evalEventCb = onEvalEvent
       ? (event: EvalEvent) => onEvalEvent(config.name, event)
       : undefined
+
+    const effectiveToolDefs = includeTools ? toolDefinitions : undefined
 
     // Emit context_ready + any context builder warnings before LLM call
     if (onEvalEvent) {
@@ -156,7 +241,7 @@ export const createAIAgent = (
         messages: contextResult.messages,
         model: evalConfig.model,
         temperature: evalConfig.temperature,
-        toolCount: toolDefinitions?.length ?? 0,
+        toolCount: effectiveToolDefs?.length ?? 0,
       })
       for (const w of contextResult.warnings) {
         onEvalEvent(config.name, { kind: 'warning', message: w })
@@ -168,9 +253,9 @@ export const createAIAgent = (
       let wasRespond = false
       try {
         const { decision, flushInfo } = await evaluate(
-          contextResult, evalConfig, llmProvider, toolExecutor, maxToolIterations,
+          contextResult, evalConfig, llmProvider, includeTools ? toolExecutor : undefined, maxToolIterationsCfg,
           triggerRoomId, {
-            toolDefinitions,
+            toolDefinitions: effectiveToolDefs,
             inReplyTo,
             onEvent: evalEventCb,
             signal: abortController.signal,
@@ -309,9 +394,12 @@ Respond with only the summary — no preamble or explanation.`
   const JOIN_SUMMARY_PROMPT = `Summarize the following room discussion concisely. When referring to participants, always use the format [participantName]. Include: 1) Main topics discussed 2) Key positions held by each participant 3) Any decisions or open questions. Be brief — this summary helps a new participant catch up.`
 
   const join = async (room: Room): Promise<void> => {
-    // Initialise context — profile available here, before messages arrive
+    // Initialise context — profile available here, before messages arrive.
+    // Use a getter so the stored profile tracks the Room live (room name and
+    // roomPrompt can change after the agent joins; stale snapshots broke the
+    // Context panel's room-prompt preview).
     agentHistory.rooms.set(room.profile.id, {
-      profile: room.profile,
+      get profile() { return room.profile },
       history: [],
       lastActiveAt: undefined,
     })
@@ -368,8 +456,82 @@ Respond with only the summary — no preamble or explanation.`
     updateHistoryLimit: (n: number) => { historyLimit = n },
     getThinking: () => currentThinking,
     updateThinking: (enabled: boolean) => { currentThinking = enabled },
-    getTools: () => config.tools,
-    getConfig: () => ({ ...config, model: currentModel, systemPrompt: currentSystemPrompt, temperature: currentTemperature, historyLimit }),
+    getTools: () => currentTools,
+    updateTools: (tools: ReadonlyArray<string>) => { currentTools = tools },
+    getIncludePrompts: () => ({ ...includePromptsState }),
+    updateIncludePrompts: (partial: IncludePrompts) => {
+      for (const key of Object.keys(partial) as PromptSection[]) {
+        const v = partial[key]
+        if (typeof v === 'boolean') includePromptsState[key] = v
+      }
+    },
+    getIncludeContext: () => ({ ...includeContextState }),
+    updateIncludeContext: (partial: IncludeContext) => {
+      for (const key of Object.keys(partial) as ContextSection[]) {
+        const v = partial[key]
+        if (typeof v === 'boolean') includeContextState[key] = v
+      }
+    },
+    getIncludeFlowStepPrompt: () => includeFlowStepPrompt,
+    updateIncludeFlowStepPrompt: (enabled: boolean) => { includeFlowStepPrompt = enabled },
+    getIncludeTools: () => includeTools,
+    updateIncludeTools: (enabled: boolean) => { includeTools = enabled },
+    getMaxHistoryChars: () => maxHistoryChars,
+    updateMaxHistoryChars: (n: number | undefined) => {
+      maxHistoryChars = (typeof n === 'number' && n > 0) ? n : undefined
+    },
+    getMaxContextTokens: () => maxContextTokens,
+    updateMaxContextTokens: (n: number | undefined) => {
+      maxContextTokens = (typeof n === 'number' && n > 0) ? n : undefined
+    },
+    getMaxToolResultChars: () => maxToolResultCharsCfg,
+    updateMaxToolResultChars: (n: number | undefined) => {
+      maxToolResultCharsCfg = (typeof n === 'number' && n > 0) ? n : undefined
+    },
+    getMaxToolIterations: () => maxToolIterationsCfg,
+    updateMaxToolIterations: (n: number | undefined) => {
+      maxToolIterationsCfg = (typeof n === 'number' && n > 0) ? n : 5
+    },
+    getContextPreview: (roomId: string) => {
+      const deps = contextDeps()
+      const sections = buildSystemSections(deps, roomId)
+      const roomCtx = agentHistory.rooms.get(roomId)
+      const previewSections = sections.map(s => ({
+        key: s.key,
+        label: s.label,
+        text: s.text,
+        tokens: estimateTokens(s.text),
+        enabled: s.enabled,
+        optional: s.optional,
+      }))
+      // History estimate: rough char count over the post-trim window.
+      const history = roomCtx?.history ?? []
+      const windowed = history.length > historyLimit ? history.slice(-historyLimit) : history
+      const historyChars = windowed.reduce((sum, m) => sum + m.content.length, 0)
+      return {
+        roomId,
+        roomName: roomCtx?.profile.name ?? '',
+        sections: previewSections,
+        budget: resolveBudgetSource(),
+        historyEstimate: { messages: windowed.length, chars: historyChars },
+      }
+    },
+    getConfig: () => ({
+      ...config,
+      model: currentModel,
+      systemPrompt: currentSystemPrompt,
+      temperature: currentTemperature,
+      historyLimit,
+      tools: currentTools,
+      includePrompts: { ...includePromptsState },
+      includeContext: { ...includeContextState },
+      includeFlowStepPrompt,
+      includeTools,
+      maxHistoryChars,
+      maxContextTokens,
+      maxToolResultChars: maxToolResultCharsCfg,
+      maxToolIterations: maxToolIterationsCfg,
+    }),
     cancelGeneration: () => { activeAbortController?.abort(); activeAbortController = null; cm.cancelAll() },
     refreshTools: (support) => {
       if (support.toolExecutor !== undefined) toolExecutor = support.toolExecutor
