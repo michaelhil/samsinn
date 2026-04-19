@@ -118,8 +118,9 @@ export interface BuildContextDeps {
   readonly includePrompts?: IncludePrompts       // undefined = all on; missing keys = on
   readonly includeContext?: IncludeContext       // CONTEXT sub-section toggles
   readonly includeFlowStepPrompt?: boolean       // suffix on flow messages; default true
-  readonly maxHistoryChars?: number              // optional char cap for old messages
-  readonly maxContextTokens?: number             // budget for system+history; undefined → caller default
+  readonly promptsEnabled?: boolean              // group master for includePrompts; false forces all off
+  readonly contextEnabled?: boolean              // group master for includeContext; false forces all off
+  readonly contextTokenBudget?: number           // token budget for system+history (derived from model window)
 }
 
 const resolveIncludes = (inc: IncludePrompts | undefined): Required<IncludePrompts> => ({
@@ -228,8 +229,14 @@ export const buildSystemSections = (
   deps: BuildContextDeps,
   triggerRoomId: string,
 ): ReadonlyArray<SystemSection> => {
-  const includes = resolveIncludes(deps.includePrompts)
-  const ctxIncludes = resolveIncludeContext(deps.includeContext)
+  const promptsEnabled = deps.promptsEnabled ?? true
+  const contextEnabled = deps.contextEnabled ?? true
+  const includes = promptsEnabled
+    ? resolveIncludes(deps.includePrompts)
+    : { agent: false, room: false, house: false, responseFormat: false, skills: false }
+  const ctxIncludes = contextEnabled
+    ? resolveIncludeContext(deps.includeContext)
+    : { participants: false, flow: false, artifacts: false, activity: false, knownAgents: false }
   const roomCtx = deps.history.rooms.get(triggerRoomId)
   const out: SystemSection[] = []
 
@@ -445,11 +452,8 @@ const DEFAULT_MAX_CONTEXT_TOKENS = 8000
 export const buildContext = (
   deps: BuildContextDeps,
   triggerRoomId: string,
-  maxContextTokensArg?: number,
 ): ContextResult => {
-  // Priority: explicit function arg > deps.maxContextTokens > default constant.
-  // The arg form is kept for callers that already pass it explicitly.
-  const maxContextTokens = maxContextTokensArg ?? deps.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS
+  const maxContextTokens = deps.contextTokenBudget ?? DEFAULT_MAX_CONTEXT_TOKENS
   const flushIds = new Set<string>()
 
   const systemBlocks = buildSystemBlocks(deps, triggerRoomId)
@@ -482,21 +486,7 @@ export const buildContext = (
 
   // Trim layers (in order):
   //   1. historyLimit (count) — slice above
-  //   2. maxHistoryChars (per-agent char cap) — here
-  //   3. maxContextTokens (global token budget) — below
-  if (deps.maxHistoryChars !== undefined && deps.maxHistoryChars > 0) {
-    let totalChars = formattedOld.reduce((s, m) => s + m.content.length, 0)
-    const originalLen = formattedOld.length
-    while (formattedOld.length > 0 && totalChars > deps.maxHistoryChars) {
-      const removed = formattedOld.shift()!
-      totalChars -= removed.content.length
-    }
-    if (formattedOld.length < originalLen) {
-      const dropped = originalLen - formattedOld.length
-      warnings.push(`Context trimmed by char cap: dropped ${dropped} old messages to fit ${deps.maxHistoryChars}-char budget`)
-    }
-  }
-
+  //   2. contextTokenBudget (derived from model window) — below
   // Context budget: system + fresh messages are mandatory; trim old messages to fit
   const systemTokens = estimateTokens(systemContent)
   const freshTokens = formattedFresh.reduce((sum, f) => sum + estimateTokens(f.formatted.content), 0)

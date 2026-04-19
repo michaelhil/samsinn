@@ -87,6 +87,27 @@ describe('context-builder includePrompts', () => {
     expect(sys).toContain('=== ROOM: General ===')
     expect(sys).toContain('=== RESPONSE FORMAT ===')
   })
+
+  test('promptsEnabled: false excludes every prompt regardless of per-key flags', () => {
+    const result = buildContext(mkDeps({
+      promptsEnabled: false,
+      includePrompts: { agent: true, room: true, house: true, responseFormat: true, skills: true },
+    }), 'room-1')
+    const sys = result.messages[0]!.content
+    expect(sys).not.toContain('=== HOUSE RULES ===')
+    expect(sys).not.toContain('=== ROOM: General ===')
+    expect(sys).not.toContain('=== YOUR IDENTITY ===')
+    expect(sys).not.toContain('=== RESPONSE FORMAT ===')
+  })
+
+  test('contextEnabled: false suppresses participants/flow/artifacts/activity/knownAgents', () => {
+    const sections = buildSystemSections(mkDeps({ contextEnabled: false }), 'room-1')
+    const toggleableKeys = ['ctx_participants', 'ctx_flow', 'ctx_artifacts', 'ctx_activity', 'ctx_knownAgents']
+    for (const key of toggleableKeys) {
+      const sec = sections.find(s => s.key === key)
+      expect(sec?.enabled).toBe(false)
+    }
+  })
 })
 
 describe('buildSystemSections', () => {
@@ -188,40 +209,3 @@ describe('context-builder flow stepPrompt toggle', () => {
   })
 })
 
-describe('context-builder maxHistoryChars', () => {
-  const mkMsg = (id: string, content: string): Message => ({
-    id, roomId: 'room-1', senderId: 'other', senderName: 'Other',
-    content, timestamp: Date.now(), type: 'chat',
-  })
-
-  test('no cap by default — all old messages pass through', () => {
-    const msgs = Array.from({ length: 5 }, (_, i) => mkMsg(`m${i}`, 'x'.repeat(500)))
-    const deps = mkDeps({ history: mkHistory('room-1', 'General', undefined, msgs) })
-    const result = buildContext(deps, 'room-1')
-    expect(result.messages.length).toBeGreaterThanOrEqual(6) // system + 5 old
-  })
-
-  test('char cap drops oldest messages until under budget', () => {
-    // Each message is ~520 chars formatted ("[Other]: " + 500 'x' chars)
-    const msgs = Array.from({ length: 5 }, (_, i) => mkMsg(`m${i}`, 'x'.repeat(500)))
-    const deps = mkDeps({
-      history: mkHistory('room-1', 'General', undefined, msgs),
-      maxHistoryChars: 1100, // should keep ~2 messages
-    })
-    const result = buildContext(deps, 'room-1')
-    const oldMsgs = result.messages.slice(1) // skip system
-    expect(oldMsgs.length).toBeLessThan(5)
-    expect(oldMsgs.length).toBeGreaterThan(0)
-    expect(result.warnings.some(w => w.includes('char cap'))).toBe(true)
-  })
-
-  test('char cap of 0 treated as no cap (guarded)', () => {
-    const msgs = [mkMsg('m1', 'hello')]
-    const deps = mkDeps({
-      history: mkHistory('room-1', 'General', undefined, msgs),
-      maxHistoryChars: 0,
-    })
-    const result = buildContext(deps, 'room-1')
-    expect(result.messages.length).toBe(2)
-  })
-})

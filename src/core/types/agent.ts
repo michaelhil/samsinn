@@ -78,10 +78,10 @@ export interface AIAgent extends Agent {
   readonly updateIncludeFlowStepPrompt: (enabled: boolean) => void
   readonly getIncludeTools: () => boolean
   readonly updateIncludeTools: (enabled: boolean) => void
-  readonly getMaxHistoryChars: () => number | undefined
-  readonly updateMaxHistoryChars: (n: number | undefined) => void
-  readonly getMaxContextTokens: () => number | undefined
-  readonly updateMaxContextTokens: (n: number | undefined) => void
+  readonly getPromptsEnabled: () => boolean
+  readonly updatePromptsEnabled: (enabled: boolean) => void
+  readonly getContextEnabled: () => boolean
+  readonly updateContextEnabled: (enabled: boolean) => void
   readonly getMaxToolResultChars: () => number | undefined
   readonly updateMaxToolResultChars: (n: number | undefined) => void
   readonly getMaxToolIterations: () => number | undefined
@@ -114,7 +114,7 @@ export interface ContextPreview {
   readonly roomId: string
   readonly roomName: string
   readonly sections: ReadonlyArray<ContextPreviewSection>
-  readonly budget: { readonly value: number; readonly source: 'override' | 'auto' | 'fallback'; readonly modelMax: number }
+  readonly modelMax: number   // model's context window; 0 if unknown
   readonly historyEstimate: { readonly messages: number; readonly chars: number }
 }
 
@@ -168,8 +168,8 @@ export interface AIAgentConfig {
   readonly includeContext?: IncludeContext      // CONTEXT sub-sections (participants/flow/artifacts/activity/knownAgents)
   readonly includeFlowStepPrompt?: boolean      // include [Step instruction: ...] suffix on flow messages (default: true)
   readonly includeTools?: boolean               // master: send tool definitions to LLM (default: true)
-  readonly maxHistoryChars?: number             // optional char cap for old messages in context (undefined = no cap)
-  readonly maxContextTokens?: number            // explicit budget for system+history; undefined = auto from model
+  readonly promptsEnabled?: boolean             // master for all per-section prompt toggles (default: true)
+  readonly contextEnabled?: boolean             // master for all context sub-section toggles (default: true)
 }
 
 // === Agent Response (parsed from LLM plain text output) ===

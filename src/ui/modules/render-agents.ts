@@ -11,6 +11,7 @@ const renderAgentRow = (
   isSelf: boolean,
   isSelected: boolean,
   onInspect: (agentName: string) => void,
+  onDelete: (agentName: string) => void,
 ): HTMLElement => {
   const div = document.createElement('div')
   const tint = isSelected ? 'bg-blue-100' : isInSelectedRoom ? 'bg-blue-50' : ''
@@ -21,16 +22,23 @@ const renderAgentRow = (
   dot.className = `inline-block w-2 h-2 rounded-full shrink-0 ${dotColor}`
   div.appendChild(dot)
 
-  const emoji = document.createElement('span')
-  emoji.className = 'text-xs shrink-0'
-  emoji.textContent = agent.kind === 'ai' ? '🤖' : '🧠'
-  div.appendChild(emoji)
-
   const name = document.createElement('span')
   name.className = `text-xs truncate cursor-pointer ${isSelf ? 'font-bold' : 'font-medium'} ${isSelected ? 'text-blue-700' : 'text-gray-700'}`
   name.textContent = agent.name
   name.onclick = (e) => { e.stopPropagation(); onInspect(agent.name) }
   div.appendChild(name)
+
+  const emoji = document.createElement('span')
+  emoji.className = 'text-xs shrink-0'
+  emoji.textContent = agent.kind === 'ai' ? '🤖' : '🧠'
+  div.appendChild(emoji)
+
+  const del = document.createElement('button')
+  del.className = 'opacity-0 group-hover:opacity-100 ml-auto text-orange-400 hover:text-orange-700 text-xs'
+  del.textContent = '×'
+  del.title = `Delete ${agent.name}`
+  del.onclick = (e) => { e.stopPropagation(); onDelete(agent.name) }
+  div.appendChild(del)
 
   return div
 }
@@ -42,6 +50,7 @@ export interface RenderAgentsOptions {
   roomMemberIds: string[]
   hasSelectedRoom: boolean
   onInspect: (agentId: string) => void
+  onDelete: (agentName: string) => void
 }
 
 export const renderAgents = (
@@ -61,6 +70,7 @@ export const renderAgents = (
     container.appendChild(renderAgentRow(
       agent, isInRoom, isGenerating, isSelf, isSelected,
       () => opts.onInspect(agent.id),
+      () => opts.onDelete(agent.name),
     ))
   }
 }

@@ -47,7 +47,7 @@ const splitProviderModel = (fullModel: string): { provider: string; model: strin
   const provider = fullModel.slice(0, idx)
   const model = fullModel.slice(idx + 1)
   // Known cloud prefixes; everything else is treated as Ollama (e.g. "qwen:14b")
-  const cloudPrefixes = new Set(['groq', 'cerebras', 'openrouter', 'mistral', 'sambanova'])
+  const cloudPrefixes = new Set(['groq', 'cerebras', 'openrouter', 'mistral', 'sambanova', 'anthropic', 'gemini'])
   return cloudPrefixes.has(provider) ? { provider, model } : { provider: 'ollama', model: fullModel }
 }
 
@@ -113,15 +113,14 @@ export const createAIAgent = (
   }
   let includeFlowStepPrompt: boolean = config.includeFlowStepPrompt ?? true
   let includeTools: boolean = config.includeTools ?? true
-  let maxHistoryChars: number | undefined = config.maxHistoryChars
-  let maxContextTokens: number | undefined = config.maxContextTokens
+  let promptsEnabled: boolean = config.promptsEnabled ?? true
+  let contextEnabled: boolean = config.contextEnabled ?? true
   let maxToolResultCharsCfg: number | undefined = config.maxToolResultChars
   let maxToolIterationsCfg: number = config.maxToolIterations ?? 5
 
-  // Resolve the system+history token budget at request time:
-  //   explicit override > auto from model window > fallback 8000.
-  const resolveMaxContextTokens = (): number => {
-    if (maxContextTokens !== undefined && maxContextTokens > 0) return maxContextTokens
+  // Resolve the system+history token budget from the current model's context
+  // window (70% of modelMax, with a fallback constant when the window is unknown).
+  const resolveContextTokenBudget = (): number => {
     const { provider, model } = splitProviderModel(currentModel)
     const info = getContextWindowSync(provider, model)
     if (info.contextMax > 0) {
@@ -130,20 +129,9 @@ export const createAIAgent = (
     return AUTO_BUDGET_FALLBACK
   }
 
-  const resolveBudgetSource = (): { value: number; source: 'override' | 'auto' | 'fallback'; modelMax: number } => {
-    if (maxContextTokens !== undefined && maxContextTokens > 0) {
-      return { value: maxContextTokens, source: 'override', modelMax: 0 }
-    }
+  const resolveModelMax = (): number => {
     const { provider, model } = splitProviderModel(currentModel)
-    const info = getContextWindowSync(provider, model)
-    if (info.contextMax > 0) {
-      return {
-        value: Math.max(AUTO_BUDGET_FLOOR, Math.floor(info.contextMax * AUTO_BUDGET_FRACTION)),
-        source: 'auto',
-        modelMax: info.contextMax,
-      }
-    }
-    return { value: AUTO_BUDGET_FALLBACK, source: 'fallback', modelMax: 0 }
+    return getContextWindowSync(provider, model).contextMax
   }
   const getHousePrompt = options?.getHousePrompt
   const getResponseFormat = options?.getResponseFormat
@@ -185,8 +173,9 @@ export const createAIAgent = (
     includePrompts: includePromptsState,
     includeContext: includeContextState,
     includeFlowStepPrompt,
-    maxHistoryChars,
-    maxContextTokens: resolveMaxContextTokens(),
+    promptsEnabled,
+    contextEnabled,
+    contextTokenBudget: resolveContextTokenBudget(),
     // Merge room-level pruned IDs with agent-level compression IDs
     getCompressedIds: (roomId: string) => {
       const roomIds = getCompressedIds?.(roomId)
@@ -476,14 +465,10 @@ Respond with only the summary — no preamble or explanation.`
     updateIncludeFlowStepPrompt: (enabled: boolean) => { includeFlowStepPrompt = enabled },
     getIncludeTools: () => includeTools,
     updateIncludeTools: (enabled: boolean) => { includeTools = enabled },
-    getMaxHistoryChars: () => maxHistoryChars,
-    updateMaxHistoryChars: (n: number | undefined) => {
-      maxHistoryChars = (typeof n === 'number' && n > 0) ? n : undefined
-    },
-    getMaxContextTokens: () => maxContextTokens,
-    updateMaxContextTokens: (n: number | undefined) => {
-      maxContextTokens = (typeof n === 'number' && n > 0) ? n : undefined
-    },
+    getPromptsEnabled: () => promptsEnabled,
+    updatePromptsEnabled: (enabled: boolean) => { promptsEnabled = enabled },
+    getContextEnabled: () => contextEnabled,
+    updateContextEnabled: (enabled: boolean) => { contextEnabled = enabled },
     getMaxToolResultChars: () => maxToolResultCharsCfg,
     updateMaxToolResultChars: (n: number | undefined) => {
       maxToolResultCharsCfg = (typeof n === 'number' && n > 0) ? n : undefined
@@ -512,7 +497,7 @@ Respond with only the summary — no preamble or explanation.`
         roomId,
         roomName: roomCtx?.profile.name ?? '',
         sections: previewSections,
-        budget: resolveBudgetSource(),
+        modelMax: resolveModelMax(),
         historyEstimate: { messages: windowed.length, chars: historyChars },
       }
     },
@@ -527,8 +512,8 @@ Respond with only the summary — no preamble or explanation.`
       includeContext: { ...includeContextState },
       includeFlowStepPrompt,
       includeTools,
-      maxHistoryChars,
-      maxContextTokens,
+      promptsEnabled,
+      contextEnabled,
       maxToolResultChars: maxToolResultCharsCfg,
       maxToolIterations: maxToolIterationsCfg,
     }),

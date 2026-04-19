@@ -115,7 +115,8 @@ const render = (container: HTMLElement, opts: RenderOpts): void => {
   for (const agentId of opts.memberIds) {
     const agent = opts.agents[agentId]
     if (!agent) continue
-    container.appendChild(renderChip(agent, opts.mutedAgentIds.has(agentId), roomName, opts.send, opts.inspectAgent))
+    const isGenerating = agent.state === 'generating'
+    container.appendChild(renderChip(agent, opts.mutedAgentIds.has(agentId), isGenerating, roomName, opts.send, opts.inspectAgent))
   }
 
   container.appendChild(renderAddButton(opts, roomName))
@@ -124,6 +125,7 @@ const render = (container: HTMLElement, opts: RenderOpts): void => {
 const renderChip = (
   agent: AgentEntry,
   isMuted: boolean,
+  isGenerating: boolean,
   roomName: string,
   send: (data: unknown) => void,
   inspectAgent: (agentId: string) => void,
@@ -132,30 +134,31 @@ const renderChip = (
   const bg = isMuted ? 'bg-gray-100 text-gray-500' : 'bg-blue-50 text-blue-700'
   chip.className = `inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${bg} group/chip`
 
-  const emoji = document.createElement('span')
-  emoji.textContent = agent.kind === 'ai' ? '🤖' : '🧠'
-  chip.appendChild(emoji)
+  const dot = document.createElement('button')
+  const dotColor = isMuted
+    ? 'bg-gray-400'
+    : isGenerating
+      ? 'bg-yellow-400 typing-indicator'
+      : 'bg-green-400'
+  dot.className = `inline-block w-2 h-2 rounded-full shrink-0 cursor-pointer ${dotColor}`
+  dot.title = isMuted ? `Unmute ${agent.name}` : `Mute ${agent.name}`
+  dot.onclick = (e) => {
+    e.stopPropagation()
+    send({ type: 'set_muted', roomName, agentName: agent.name, muted: !isMuted })
+  }
+  chip.appendChild(dot)
 
   const name = document.createElement('span')
-  name.className = 'font-medium cursor-pointer hover:underline'
+  const nameStyle = isMuted ? 'line-through' : ''
+  name.className = `font-medium cursor-pointer hover:underline ${nameStyle}`
   name.textContent = agent.name
   name.title = `Inspect ${agent.name}`
   name.onclick = (e) => { e.stopPropagation(); inspectAgent(agent.id) }
   chip.appendChild(name)
 
-  if (agent.kind === 'ai') {
-    const muteBtn = document.createElement('button')
-    // Muted: always visible (state must be legible at rest). Unmuted: hover-reveal.
-    const visibility = isMuted ? '' : 'opacity-0 group-hover/chip:opacity-100'
-    muteBtn.className = `${visibility} text-xs hover:text-amber-600`
-    muteBtn.textContent = isMuted ? '🔕' : '🔔'
-    muteBtn.title = isMuted ? `Unmute ${agent.name}` : `Mute ${agent.name}`
-    muteBtn.onclick = (e) => {
-      e.stopPropagation()
-      send({ type: 'set_muted', roomName, agentName: agent.name, muted: !isMuted })
-    }
-    chip.appendChild(muteBtn)
-  }
+  const emoji = document.createElement('span')
+  emoji.textContent = agent.kind === 'ai' ? '🤖' : '🧠'
+  chip.appendChild(emoji)
 
   const removeBtn = document.createElement('button')
   removeBtn.className = 'opacity-0 group-hover/chip:opacity-100 text-orange-400 hover:text-orange-700 text-xs ml-0.5'

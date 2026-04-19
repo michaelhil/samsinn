@@ -32,6 +32,11 @@ export const renderMessage = (
   const getAgent = (id: string): AgentInfo | undefined =>
     agents instanceof Map ? agents.get(id) : agents[id]
 
+  const isJoinLeave = msg.type === 'join' || msg.type === 'leave'
+  const ageMs = Date.now() - msg.timestamp
+  // Join/leave messages auto-fade 10s after posting; skip rendering if already expired.
+  if (isJoinLeave && ageMs > 10_000) return
+
   const div = document.createElement('div')
   div.setAttribute('data-msg-id', msg.id)
   const isSystem = msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.senderId === 'system'
@@ -153,4 +158,13 @@ export const renderMessage = (
   }
 
   container.appendChild(div)
+
+  if (isJoinLeave) {
+    const remaining = Math.max(0, 10_000 - ageMs)
+    setTimeout(() => {
+      if (!div.isConnected) return
+      div.classList.add('msg-fading')
+      setTimeout(() => { if (div.isConnected) div.remove() }, 500)
+    }, remaining)
+  }
 }

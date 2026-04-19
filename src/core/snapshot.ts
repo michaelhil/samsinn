@@ -15,6 +15,11 @@
 // v5: Extended Context panel — includePrompts.skills, includeContext,
 //     includeFlowStepPrompt, maxContextTokens. All additive; missing fields
 //     resolve to defaults at load that preserve v4 behavior.
+// v6: Removed maxHistoryChars and maxContextTokens. Context budget now comes
+//     exclusively from the model's context window (70% of modelMax, fallback
+//     8000 when unknown). v5 snapshots containing those fields still load —
+//     the factory ignores unknown keys on AIAgentConfig, so removal is a
+//     silent drop at load time.
 // ============================================================================
 
 import type { Agent, AIAgentConfig } from './types/agent.ts'
@@ -27,7 +32,7 @@ import { dirname } from 'node:path'
 
 // --- Version ---
 
-export const SNAPSHOT_VERSION = 5
+export const SNAPSHOT_VERSION = 6
 
 // --- Snapshot schema ---
 
@@ -48,7 +53,7 @@ export interface AgentSnapshot {
 }
 
 export interface SystemSnapshot {
-  readonly version: '5'
+  readonly version: '6'
   readonly timestamp: number
   readonly rooms: ReadonlyArray<RoomSnapshot>
   readonly agents: ReadonlyArray<AgentSnapshot>
@@ -119,7 +124,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
   const artifacts = system.house.artifacts.list({ includeResolved: true })
 
   return {
-    version: '5',
+    version: '6',
     timestamp: Date.now(),
     rooms,
     agents,
@@ -154,10 +159,18 @@ const migrateV4ToV5 = (raw: Record<string, unknown>): Record<string, unknown> =>
   return { ...raw, version: '5' }
 }
 
+// v5 → v6: removed maxHistoryChars, maxContextTokens. Old values linger in
+// the raw JSON; the factory ignores them on load. Version bump only.
+const migrateV5ToV6 = (raw: Record<string, unknown>): Record<string, unknown> => {
+  if (raw.version !== '5') return raw
+  return { ...raw, version: '6' }
+}
+
 const migrate = (raw: Record<string, unknown>): Record<string, unknown> => {
   let out = raw
   out = migrateV3ToV4(out)
   out = migrateV4ToV5(out)
+  out = migrateV5ToV6(out)
   return out
 }
 

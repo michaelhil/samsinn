@@ -25,8 +25,6 @@ export type WSInbound =
       readonly includeContext?: IncludeContext
       readonly includeFlowStepPrompt?: boolean
       readonly includeTools?: boolean
-      readonly maxHistoryChars?: number | null
-      readonly maxContextTokens?: number | null
       readonly maxToolResultChars?: number | null
       readonly maxToolIterations?: number
       readonly tools?: ReadonlyArray<string>

@@ -198,7 +198,9 @@ Click **+ Room**. Optionally add a **Room Prompt** — a shared instruction that
 
 Click the **mode badge** (top of the room panel) to switch between broadcast and flow.
 
-Use the **R** dot next to an agent in the room to edit the room prompt. Use the **×** to mute/remove. Use the **⏸** to pause the room.
+Each agent chip in the room header shows a status dot (green = idle, yellow = generating, grey = muted). Click the dot to toggle mute in that room. Hover the chip for the **×** to remove from the room. Use the **⏸** in the room panel to pause the room.
+
+The sidebar agent list has a hover-reveal **×** on each row for deleting the agent entirely.
 
 ### Flows
 

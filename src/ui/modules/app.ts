@@ -30,7 +30,7 @@ import { openTextEditorModal, createModal, createButtonRow, createTextarea } fro
 import { createWorkspace } from './workspace.ts'
 import { wsDispatch } from './ws-dispatch.ts'
 import { batched } from '../lib/nanostores.ts'
-import { showToast, roomNameToId, roomIdToName, agentIdToName, populateModelSelect, getShowAllModels, setShowAllModels } from './ui-utils.ts'
+import { showToast, roomNameToId, roomIdToName, agentIdToName, populateModelSelect, getShowAllModels, setShowAllModels, safeFetchJson } from './ui-utils.ts'
 import {
   updateOllamaHealthUI, updateOllamaMetricsUI,
   wireOllamaDashboard, openOllamaDashboard,
@@ -400,6 +400,10 @@ $agentListView.subscribe(({ agents, myAgentId, selectedAgentId, selectedRoomId, 
       $selectedRoomId.set(null)
       $selectedAgentId.set(agentId)
     },
+    onDelete: (agentName) => {
+      if (!confirm(`Delete agent ${agentName}? This cannot be undone.`)) return
+      void safeFetchJson(`/api/agents/${encodeURIComponent(agentName)}`, { method: 'DELETE' })
+    },
   })
   updateAgentsLabel()
 })
@@ -730,9 +734,15 @@ chatForm.onsubmit = (e) => {
   chatInput.value = ''
 }
 
-document.getElementById('btn-create-room')!.onclick = () => roomModal.showModal()
+document.getElementById('btn-create-room')!.onclick = (e) => {
+  e.stopPropagation()
+  roomModal.showModal()
+}
 
-document.getElementById('btn-create-agent')!.onclick = () => void openCreateAgentModalShared()
+document.getElementById('btn-create-agent')!.onclick = (e) => {
+  e.stopPropagation()
+  void openCreateAgentModalShared()
+}
 
 // "Show all models" toggle in agent-modal: persist preference + re-populate
 // the visible model select without reopening the modal.
