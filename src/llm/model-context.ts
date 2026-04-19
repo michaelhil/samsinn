@@ -17,6 +17,16 @@ export interface ContextInfo {
 // Source: each provider's public docs as of early 2026. When in doubt, omit
 // rather than guess — the UI falls back to "unknown" which is honest.
 const CLOUD_TABLE: Record<string, Record<string, number>> = {
+  anthropic: {
+    'claude-haiku-4-5':   200_000,
+    'claude-sonnet-4-5':  200_000,
+    'claude-opus-4-5':    200_000,
+  },
+  gemini: {
+    'gemini-2.5-flash-lite': 1_048_576,
+    'gemini-2.5-flash':      1_048_576,
+    'gemini-2.5-pro':        2_097_152,
+  },
   cerebras: {
     'llama3.1-8b': 8192,
     'qwen-3-235b-a22b-instruct-2507': 64000,

@@ -20,17 +20,19 @@ import type { MergedProviders } from './providers-store.ts'
 //   - entry in PROVIDER_PROFILES
 //   - entry in buildProvidersFromConfig in providers-setup.ts
 export const PROVIDER_PROFILES = {
-  cerebras:   { baseUrl: 'https://api.cerebras.ai/v1',    defaultMaxConcurrent: 2 },
-  groq:       { baseUrl: 'https://api.groq.com/openai/v1', defaultMaxConcurrent: 3 },
-  openrouter: { baseUrl: 'https://openrouter.ai/api/v1',   defaultMaxConcurrent: 1 },
-  mistral:    { baseUrl: 'https://api.mistral.ai/v1',      defaultMaxConcurrent: 2 },
-  sambanova:  { baseUrl: 'https://api.sambanova.ai/v1',    defaultMaxConcurrent: 2 },
+  anthropic:  { baseUrl: 'https://api.anthropic.com/v1',                          defaultMaxConcurrent: 3 },
+  gemini:     { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultMaxConcurrent: 3 },
+  cerebras:   { baseUrl: 'https://api.cerebras.ai/v1',                            defaultMaxConcurrent: 2 },
+  groq:       { baseUrl: 'https://api.groq.com/openai/v1',                        defaultMaxConcurrent: 3 },
+  openrouter: { baseUrl: 'https://openrouter.ai/api/v1',                          defaultMaxConcurrent: 1 },
+  mistral:    { baseUrl: 'https://api.mistral.ai/v1',                             defaultMaxConcurrent: 2 },
+  sambanova:  { baseUrl: 'https://api.sambanova.ai/v1',                           defaultMaxConcurrent: 2 },
 } as const
 
 export type CloudProviderName = keyof typeof PROVIDER_PROFILES
 
 export const DEFAULT_PROVIDER_ORDER: ReadonlyArray<string> =
-  ['cerebras', 'groq', 'openrouter', 'mistral', 'sambanova', 'ollama']
+  ['anthropic', 'gemini', 'cerebras', 'groq', 'openrouter', 'mistral', 'sambanova', 'ollama']
 
 export interface CloudProviderConfig {
   readonly apiKey: string
