@@ -20,7 +20,7 @@ import { resolveRoom } from './resolve.ts'
 export const createListArtifactTypesTool = (house: House): Tool => ({
   name: 'list_artifact_types',
   description: 'Lists all registered artifact types with their descriptions and body schemas.',
-  usage: 'Use to discover what kinds of artifacts you can create (task lists, polls, flows, etc.).',
+  usage: 'Use to discover what kinds of artifacts you can create (task lists, polls, macros, etc.).',
   returns: 'Array of { type, description, bodySchema }.',
   parameters: { type: 'object', properties: {}, required: [] },
   execute: async (_params, _context) => ({
@@ -36,13 +36,13 @@ export const createListArtifactTypesTool = (house: House): Tool => ({
 export const createListArtifactsTool = (house: House): Tool => ({
   name: 'list_artifacts',
   description: 'Lists artifacts visible to the current room (scoped to it and system-wide artifacts). Filter by type or include resolved.',
-  usage: 'Use to check active task lists, open polls, or available flow blueprints scoped to this room and system-wide. Omit roomName to use the current room.',
+  usage: 'Use to check active task lists, open polls, or available macro blueprints scoped to this room and system-wide. Omit roomName to use the current room.',
   returns: 'Array of artifact objects with id, type, title, body, scope, resolution.',
   parameters: {
     type: 'object',
     properties: {
       roomName: { type: 'string', description: 'Room name (omit to use current room)' },
-      type: { type: 'string', description: 'Filter by artifact type (e.g. "task_list", "poll", "flow")' },
+      type: { type: 'string', description: 'Filter by artifact type (e.g. "task_list", "poll", "macro")' },
       includeResolved: { type: 'boolean', description: 'Include resolved/closed artifacts (default: false)' },
     },
     required: [],
@@ -61,13 +61,13 @@ export const createListArtifactsTool = (house: House): Tool => ({
 
 export const createAddArtifactTool = (house: House): Tool => ({
   name: 'add_artifact',
-  description: 'Creates a new artifact (task list, poll, flow blueprint, etc.).',
-  usage: 'Use to create a shared task list, start a poll, or define a reusable flow. Use list_artifact_types to see available types and required body fields.',
+  description: 'Creates a new artifact (task list, poll, macro blueprint, etc.).',
+  usage: 'Use to create a shared task list, start a poll, or define a reusable macro. Use list_artifact_types to see available types and required body fields.',
   returns: 'The created artifact object.',
   parameters: {
     type: 'object',
     properties: {
-      type: { type: 'string', description: 'Type of artifact to create (e.g. "task_list", "poll", "flow")' },
+      type: { type: 'string', description: 'Type of artifact to create (e.g. "task_list", "poll", "macro")' },
       title: { type: 'string', description: 'Human-readable name for this artifact' },
       body: { type: 'object', description: 'Type-specific body data (see list_artifact_types for schema)' },
       scope: {

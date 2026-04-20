@@ -49,7 +49,7 @@ export const PROMPT_KEYS = [
 
 export const CONTEXT_KEYS = [
   { code: 'participants', section: 'ctx_participants', label: 'Participants list' },
-  { code: 'flow',         section: 'ctx_flow',         label: 'Flow section' },
+  { code: 'macro',         section: 'ctx_flow',         label: 'Macro section' },
   { code: 'artifacts',    section: 'ctx_artifacts',    label: 'Artifacts' },
   { code: 'activity',     section: 'ctx_activity',     label: 'Activity in other rooms' },
   { code: 'knownAgents',  section: 'ctx_knownAgents',  label: 'Known agents', warning: 'breaks [[Name]] mentions' },
@@ -232,13 +232,13 @@ export const buildPromptsGroup = (deps: GroupDeps): HTMLElement => {
   })
 }
 
-// --- Context group (includes flow-step row) ---
+// --- Context group (includes macro-step row) ---
 
 export const buildContextGroup = (deps: GroupDeps): HTMLElement => {
   const { preview, agentData, patchAgent, rerender } = deps
   const get = (k: string): PreviewSection | undefined => sectionByKey(preview, k)
   const includeContext = (agentData.includeContext as Record<string, boolean>) ?? {}
-  const includeFlowStepPrompt = (agentData.includeFlowStepPrompt as boolean) ?? true
+  const includeMacroStepPrompt = (agentData.includeMacroStepPrompt as boolean) ?? true
   const contextEnabled = (agentData.contextEnabled as boolean) ?? true
 
   const totalTokens = CONTEXT_KEYS.reduce((s, c) => s + (get(c.section)?.tokens ?? 0), 0)
@@ -259,33 +259,33 @@ export const buildContextGroup = (deps: GroupDeps): HTMLElement => {
     )
   })
 
-  // Flow-step instructions — moved here from Advanced.
-  const flowRow = document.createElement('div')
-  flowRow.className = 'flex items-center gap-1'
-  const flowLabel = document.createElement('label')
-  flowLabel.className = 'inline-flex items-center gap-1 cursor-pointer'
-  flowLabel.setAttribute('data-group-child-label', '')
-  const flowCb = document.createElement('input')
-  flowCb.type = 'checkbox'
-  flowCb.className = 'rounded'
-  flowCb.checked = includeFlowStepPrompt
-  flowCb.setAttribute('data-group-child', '')
-  const flowText = document.createElement('span')
-  flowText.textContent = 'Flow step instructions'
-  flowLabel.appendChild(flowCb)
-  flowLabel.appendChild(flowText)
-  flowRow.appendChild(flowLabel)
-  const flowWarn = document.createElement('span')
-  flowWarn.className = 'text-xs text-amber-600 ml-1'
-  flowWarn.textContent = '⚠ off may break flow routing'
-  flowWarn.style.display = includeFlowStepPrompt ? 'none' : 'inline'
-  flowRow.appendChild(flowWarn)
-  flowCb.onchange = async () => {
-    flowWarn.style.display = flowCb.checked ? 'none' : 'inline'
-    ;(agentData as Record<string, unknown>).includeFlowStepPrompt = flowCb.checked
-    await patchAgent({ includeFlowStepPrompt: flowCb.checked })
+  // Macro-step instructions — moved here from Advanced.
+  const macroRow = document.createElement('div')
+  macroRow.className = 'flex items-center gap-1'
+  const macroLabel = document.createElement('label')
+  macroLabel.className = 'inline-flex items-center gap-1 cursor-pointer'
+  macroLabel.setAttribute('data-group-child-label', '')
+  const macroCb = document.createElement('input')
+  macroCb.type = 'checkbox'
+  macroCb.className = 'rounded'
+  macroCb.checked = includeMacroStepPrompt
+  macroCb.setAttribute('data-group-child', '')
+  const macroText = document.createElement('span')
+  macroText.textContent = 'Macro step instructions'
+  macroLabel.appendChild(macroCb)
+  macroLabel.appendChild(macroText)
+  macroRow.appendChild(macroLabel)
+  const macroWarn = document.createElement('span')
+  macroWarn.className = 'text-xs text-amber-600 ml-1'
+  macroWarn.textContent = '⚠ off may break macro routing'
+  macroWarn.style.display = includeMacroStepPrompt ? 'none' : 'inline'
+  macroRow.appendChild(macroWarn)
+  macroCb.onchange = async () => {
+    macroWarn.style.display = macroCb.checked ? 'none' : 'inline'
+    ;(agentData as Record<string, unknown>).includeMacroStepPrompt = macroCb.checked
+    await patchAgent({ includeMacroStepPrompt: macroCb.checked })
   }
-  rows.push(flowRow)
+  rows.push(macroRow)
 
   return mkGroup({
     label: 'Context',

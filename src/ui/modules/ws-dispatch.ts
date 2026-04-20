@@ -20,7 +20,8 @@ import {
   $currentDeliveryMode,
   $roomPaused,
   $turnInfo,
-  $flowStatus,
+  $macroStatus,
+  $selectedMacroIdByRoom,
   $artifacts,
   $thinkingPreviews,
   $thinkingTools,
@@ -40,7 +41,14 @@ import type { UIMessage, RoomProfile, ArtifactInfo } from './render-types.ts'
 import type { WSOutbound } from '../../core/types/ws-protocol.ts'
 import type { Message, AgentProfile, RoomProfile as ServerRoomProfile } from '../../core/types/messaging.ts'
 import type { Artifact } from '../../core/types/artifact.ts'
-import { showToast } from './ui-utils.ts'
+import { showToast, roomNameToId } from './ui-utils.ts'
+
+// --- Pending create hooks ---
+// Callers (e.g. the Macro create flow) register a hook keyed by requestId
+// before sending add_artifact. When the matching artifact_created arrives,
+// the hook fires and is removed. Single-fire; lives only in memory.
+export type PendingCreateHook = (artifactId: string, artifactType: string) => void
+export const pendingCreateHooks = new Map<string, PendingCreateHook>()
 
 // === Mappers from server wire types → UI types ===
 
@@ -130,17 +138,20 @@ const handlers: Handlers = {
     for (const a of msg.agents) agentMap[a.id] = toAgentEntry(a)
     $agents.set(agentMap)
 
-    // Room states: paused, members, muted
+    // Room states: paused, members, muted, selectedMacroId
     const paused = new Set<string>()
     const membersMap: Record<string, string[]> = {}
+    const selectionMap: Record<string, string | null> = {}
     if (msg.roomStates) {
       for (const [roomId, rs] of Object.entries(msg.roomStates)) {
         if (rs.paused) paused.add(roomId)
         if (rs.members) membersMap[roomId] = [...rs.members]
+        selectionMap[roomId] = rs.selectedMacroId ?? null
       }
     }
     $pausedRooms.set(paused)
     $roomMembers.set(membersMap)
+    $selectedMacroIdByRoom.set(selectionMap)
 
     // Clear transient state
     $unreadCounts.set({})
@@ -153,7 +164,7 @@ const handlers: Handlers = {
     $messageWarnings.set({})
     $mutedAgents.set(new Set())
     $turnInfo.set(null)
-    $flowStatus.set(null)
+    $macroStatus.set(null)
 
     // Auto-select first room if none selected
     if (!$selectedRoomId.get() && msg.rooms.length > 0) {
@@ -377,24 +388,57 @@ const handlers: Handlers = {
     $mutedAgents.set(muted)
   },
 
-  // --- Turn / flow ---
+  // --- Turn / macro ---
 
   turn_changed(msg) {
     $turnInfo.set({ roomName: msg.roomName, agentName: msg.agentName, waitingForHuman: msg.waitingForHuman })
   },
 
-  flow_event(msg) {
-    $flowStatus.set({ roomName: msg.roomName, event: msg.event, detail: msg.detail })
+  macro_event(msg) {
+    $macroStatus.set({ roomName: msg.roomName, event: msg.event, detail: msg.detail })
+    // Macro lifecycle no longer mutates mode or pause — those are purely user-controlled now.
+  },
 
-    if (msg.event === 'completed' || msg.event === 'cancelled') {
-      $currentDeliveryMode.set('broadcast')
-      $roomPaused.set(true)
-      const selId = $selectedRoomId.get()
-      if (selId) {
-        const paused = new Set($pausedRooms.get())
-        paused.add(selId)
-        $pausedRooms.set(paused)
-      }
+  macro_selection_changed(msg) {
+    const roomId = roomNameToId(msg.roomName)
+    if (!roomId) return
+    const current = $selectedMacroIdByRoom.get()
+    $selectedMacroIdByRoom.set({ ...current, [roomId]: msg.macroArtifactId })
+    // Toast: look up title from current artifact list; fall back to id.
+    if (msg.macroArtifactId === null) {
+      showToast(document.body, 'Macro selection cleared (macro deleted)', { position: 'fixed', durationMs: 4000 })
+    } else {
+      const artifact = Object.values($artifacts.get()).find(a => a.id === msg.macroArtifactId)
+      const name = artifact?.title ?? 'macro'
+      showToast(document.body, `Selected: ${name}`, { position: 'fixed', durationMs: 2500 })
+    }
+  },
+
+  artifact_created(msg) {
+    // Route to anyone listening on this requestId (see pendingCreateHooks below).
+    const hook = pendingCreateHooks.get(msg.requestId)
+    if (hook) {
+      pendingCreateHooks.delete(msg.requestId)
+      hook(msg.artifactId, msg.artifactType)
+    }
+  },
+
+  mode_auto_switched(msg) {
+    showToast(
+      document.body,
+      `Two AI agents in "${msg.roomName}" — switched to Manual. Click 📣 to go back to Broadcast.`,
+      { position: 'fixed', durationMs: 7000 },
+    )
+  },
+
+  next_result(msg) {
+    if (!msg.advanced) {
+      if (msg.reason) showToast(document.body, `Next: ${msg.reason}`, { type: 'error', position: 'fixed' })
+      return
+    }
+    if (msg.activatedAgentName) {
+      const note = msg.queued ? ' (queued)' : ''
+      showToast(document.body, `Activated ${msg.activatedAgentName}${note}`, { position: 'fixed', durationMs: 2500 })
     }
   },
 

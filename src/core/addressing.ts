@@ -2,7 +2,7 @@
 // Addressing — Parse [[AgentName]] and [[tag:TagName]] patterns from content.
 //
 // Used by Room to determine directed delivery targets.
-// Works in both flow and broadcast mode as a universal delivery override.
+// Works in both macro and broadcast mode as a universal delivery override.
 //
 // Syntax:
 //   [[AgentName]]    — direct a named agent

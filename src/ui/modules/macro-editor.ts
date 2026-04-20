@@ -1,38 +1,38 @@
 // ============================================================================
-// Flow Editor Modal — Create/edit agent sequence flows.
+// Macro Editor Modal — Create/edit agent sequence macros.
 // ============================================================================
 
 import { createModal, createButtonRow } from './modal.ts'
 import type { AgentInfo } from './render-types.ts'
 
-interface FlowStepInput {
+interface MacroStepInput {
   agentId: string
   agentName: string
   stepPrompt: string
 }
 
-export const openFlowEditorModal = (
+export const openMacroEditorModal = (
   agents: Map<string, AgentInfo>,
   myAgentId: string,
   onSave: (name: string, steps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>, loop: boolean, description?: string) => void,
   existingName?: string,
-  existingSteps?: ReadonlyArray<FlowStepInput>,
+  existingSteps?: ReadonlyArray<MacroStepInput>,
   existingLoop?: boolean,
   existingDescription?: string,
 ): void => {
-  const steps: FlowStepInput[] = existingSteps
+  const steps: MacroStepInput[] = existingSteps
     ? existingSteps.map(s => ({ ...s }))
     : [...agents.values()].map(a => ({ agentId: a.id, agentName: a.name, stepPrompt: '' }))
 
   const { overlay, body: modal, close } = createModal({
-    title: existingName ? `Edit Flow: ${existingName}` : 'Create Flow',
+    title: existingName ? `Edit Macro: ${existingName}` : 'Create Macro',
   })
   modal.className = 'bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] flex flex-col'
   modal.onclick = (e) => e.stopPropagation()
 
   const nameInput = document.createElement('input')
   nameInput.className = 'w-full px-3 py-2 border rounded text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-purple-300'
-  nameInput.placeholder = 'Flow name'
+  nameInput.placeholder = 'Macro name'
   nameInput.value = existingName ?? ''
 
   const descInput = document.createElement('input')
@@ -128,7 +128,7 @@ export const openFlowEditorModal = (
     if (steps.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'text-sm text-gray-400 text-center py-4'
-      empty.textContent = 'No steps yet. Click "+ Add Step" to start building your flow.'
+      empty.textContent = 'No steps yet. Click "+ Add Step" to start building your macro.'
       stepsContainer.appendChild(empty)
     }
   }
@@ -148,18 +148,18 @@ export const openFlowEditorModal = (
   const btnRow = createButtonRow(
     close,
     () => {
-      const flowName = nameInput.value.trim()
-      if (!flowName) { nameInput.focus(); return }
+      const macroName = nameInput.value.trim()
+      if (!macroName) { nameInput.focus(); return }
       if (steps.length === 0) return
       const cleanSteps = steps.map(s => ({
         agentName: s.agentName,
         ...(s.stepPrompt.trim() ? { stepPrompt: s.stepPrompt.trim() } : {}),
       }))
       const desc = descInput.value.trim() || undefined
-      onSave(flowName, cleanSteps, loopCheckbox.checked, desc)
+      onSave(macroName, cleanSteps, loopCheckbox.checked, desc)
       close()
     },
-    'Save Flow',
+    'Save Macro',
     'bg-purple-500 hover:bg-purple-600',
   )
 

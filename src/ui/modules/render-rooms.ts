@@ -4,7 +4,7 @@ import type { RoomProfile, ArtifactInfo, ArtifactAction } from './render-types.t
 import {
   renderTaskListArtifact,
   renderPollArtifact,
-  renderFlowArtifact,
+  renderMacroArtifact,
   renderDocumentArtifact,
   renderMermaidArtifact,
   renderGenericArtifact,
@@ -18,6 +18,7 @@ export interface RenderRoomsOptions {
   generatingRoomIds: Set<string>
   onSelect: (roomId: string) => void
   onDelete?: (roomId: string, roomName: string) => void
+  onTogglePaused?: (roomId: string, roomName: string, nowPaused: boolean) => void
 }
 
 export const renderRooms = (
@@ -33,9 +34,19 @@ export const renderRooms = (
     const div = document.createElement('div')
     div.className = `px-3 py-1 cursor-pointer text-xs flex items-center gap-1.5 group relative ${isSelected ? 'bg-blue-50 font-semibold text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`
 
-    const dot = document.createElement('span')
+    // Status dot doubles as pause toggle (if onTogglePaused provided).
+    // Clicking the dot does NOT select the room — it only toggles pause.
+    const dot = document.createElement(opts.onTogglePaused ? 'button' : 'span')
+    const base = 'inline-block w-2 h-2 rounded-full shrink-0'
     const dotColor = isPaused ? 'bg-gray-300' : isThinking ? 'bg-yellow-400 typing-indicator' : 'bg-green-400'
-    dot.className = `inline-block w-2 h-2 rounded-full shrink-0 ${dotColor}`
+    dot.className = `${base} ${dotColor}`
+    if (opts.onTogglePaused) {
+      const btn = dot as HTMLButtonElement
+      btn.type = 'button'
+      btn.title = isPaused ? 'Paused — click to resume' : 'Active — click to pause'
+      btn.setAttribute('aria-pressed', isPaused ? 'true' : 'false')
+      btn.onclick = (e) => { e.stopPropagation(); opts.onTogglePaused!(room.id, room.name, !isPaused) }
+    }
     div.appendChild(dot)
 
     const name = document.createElement('span')
@@ -71,7 +82,7 @@ export const renderArtifacts = (
     let inner: HTMLElement
     if (artifact.type === 'task_list') inner = renderTaskListArtifact(artifact, onAction)
     else if (artifact.type === 'poll') inner = renderPollArtifact(artifact, myAgentId, onAction)
-    else if (artifact.type === 'flow') inner = renderFlowArtifact(artifact, onAction)
+    else if (artifact.type === 'macro') inner = renderMacroArtifact(artifact, onAction)
     else if (artifact.type === 'document') inner = renderDocumentArtifact(artifact, onAction)
     else if (artifact.type === 'mermaid') inner = renderMermaidArtifact(artifact, onAction)
     else inner = renderGenericArtifact(artifact, onAction)

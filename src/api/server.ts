@@ -95,26 +95,45 @@ export const createServer = (system: System, config?: ServerConfig) => {
     })
   }))
 
-  system.setOnFlowEvent(withAutoSave((roomId, event, detail) => {
+  system.setOnMacroEvent(withAutoSave((roomId, event, detail) => {
     const room = system.house.getRoom(roomId)
     const roomName = room?.profile.name ?? roomId
     // TS can't narrow the generic event/detail pair at this call site — narrow manually.
     switch (event) {
       case 'started':
-        wsManager.broadcast({ type: 'flow_event', roomName, event, detail: detail as { readonly flowId: string; readonly agentName: string } | undefined })
+        wsManager.broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string; readonly agentName: string } | undefined })
         break
       case 'step':
-        wsManager.broadcast({ type: 'flow_event', roomName, event, detail: detail as { readonly flowId: string; readonly stepIndex: number; readonly agentName: string } | undefined })
+        wsManager.broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string; readonly stepIndex: number; readonly agentName: string } | undefined })
         break
       case 'completed':
       case 'cancelled':
-        wsManager.broadcast({ type: 'flow_event', roomName, event, detail: detail as { readonly flowId: string } | undefined })
+        wsManager.broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string } | undefined })
         break
     }
   }))
 
   system.setOnArtifactChanged(withAutoSave((action, artifact) => {
     wsManager.broadcast({ type: 'artifact_changed', action, artifact })
+  }))
+
+  system.setOnModeAutoSwitched((roomId, toMode, reason) => {
+    const room = system.house.getRoom(roomId)
+    wsManager.broadcast({
+      type: 'mode_auto_switched',
+      roomName: room?.profile.name ?? roomId,
+      toMode,
+      reason,
+    })
+  })
+
+  system.setOnMacroSelectionChanged(withAutoSave((roomId, macroArtifactId) => {
+    const room = system.house.getRoom(roomId)
+    wsManager.broadcast({
+      type: 'macro_selection_changed',
+      roomName: room?.profile.name ?? roomId,
+      macroArtifactId,
+    })
   }))
 
   // Bookmark mutations arrive via REST; the callback only needs to schedule

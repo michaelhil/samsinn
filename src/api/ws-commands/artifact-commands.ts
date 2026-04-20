@@ -1,5 +1,5 @@
 import type { WSInbound } from '../../core/types/ws-protocol.ts'
-import { resolveFlowArtifact, isFlowError } from '../../core/flow-artifact.ts'
+import { resolveMacroArtifact, isMacroError } from '../../core/macro-artifact.ts'
 import { requireRoom, sendError, type CommandContext } from './types.ts'
 
 export const handleArtifactCommand = (msg: WSInbound, ctx: CommandContext): boolean => {
@@ -24,7 +24,7 @@ export const handleArtifactCommand = (msg: WSInbound, ctx: CommandContext): bool
           scope.push(room.profile.id)
         }
       }
-      system.house.artifacts.add({
+      const created = system.house.artifacts.add({
         type: msg.artifactType,
         title: msg.title,
         ...(msg.description !== undefined ? { description: msg.description } : {}),
@@ -32,6 +32,14 @@ export const handleArtifactCommand = (msg: WSInbound, ctx: CommandContext): bool
         scope,
         createdBy: session.agent.name,
       })
+      if (msg.requestId) {
+        ws.send(JSON.stringify({
+          type: 'artifact_created',
+          requestId: msg.requestId,
+          artifactId: created.id,
+          artifactType: created.type,
+        }))
+      }
       return true
     }
 
@@ -73,36 +81,35 @@ export const handleArtifactCommand = (msg: WSInbound, ctx: CommandContext): bool
       return true
     }
 
-    case 'start_flow': {
+    case 'run_macro': {
       const room = requireRoom(ws, system, msg.roomName)
       if (!room) return true
 
-      const artifact = system.house.artifacts.get(msg.flowArtifactId)
+      const artifact = system.house.artifacts.get(msg.macroArtifactId)
       if (!artifact) {
-        sendError(ws, `Flow artifact "${msg.flowArtifactId}" not found`)
+        sendError(ws, `Macro artifact "${msg.macroArtifactId}" not found`)
         return true
       }
-      const flow = resolveFlowArtifact(artifact, system.team, room.profile.roomPrompt)
-      if (isFlowError(flow)) {
-        sendError(ws, flow.error)
+      const macro = resolveMacroArtifact(artifact, system.team, room.profile.roomPrompt)
+      if (isMacroError(macro)) {
+        sendError(ws, macro.error)
         return true
       }
 
-      room.setPaused(true)
       room.post({
         senderId: session.agent.id,
         senderName: session.agent.name,
         content: msg.content,
         type: 'chat',
       })
-      room.startFlow(flow)
+      room.runMacro(macro)
       return true
     }
 
-    case 'cancel_flow': {
+    case 'stop_macro': {
       const room = requireRoom(ws, system, msg.roomName)
       if (!room) return true
-      room.cancelFlow()
+      room.stopMacro()
       return true
     }
 

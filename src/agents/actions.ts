@@ -30,6 +30,17 @@ export const addAgentToRoom = async (
   room.addMember(targetId)
   await target.join(room)
 
+  // Live-path auto-switch: Broadcast → Manual on second AI join.
+  // Skipped during snapshot restore (which bypasses this function and calls
+  // room.addMember directly).
+  if (target.kind === 'ai' && room.deliveryMode === 'broadcast') {
+    const aiMemberCount = room.getParticipantIds()
+      .filter(id => team.getAgent(id)?.kind === 'ai').length
+    if (aiMemberCount === 2) {
+      room.autoSwitchToManual('second-ai-joined')
+    }
+  }
+
   const content = invitedBy
     ? `[${targetName}] has joined (added by [${invitedBy}])`
     : `[${targetName}] has joined`

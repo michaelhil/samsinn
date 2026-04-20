@@ -130,7 +130,7 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
 
   mcpServer.tool(
     'update_agent_context',
-    'Update per-agent Context panel toggles and limits (includePrompts, includeContext, includeFlowStepPrompt, includeTools, maxToolResultChars, maxToolIterations).',
+    'Update per-agent Context panel toggles and limits (includePrompts, includeContext, includeMacroStepPrompt, includeTools, maxToolResultChars, maxToolIterations).',
     {
       name: z.string().describe('Agent name'),
       includePrompts: z.object({
@@ -142,17 +142,17 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
       }).optional().describe('Prompt-section toggles. Partial — only provided keys change.'),
       includeContext: z.object({
         participants: z.boolean().optional(),
-        flow: z.boolean().optional(),
+        macro: z.boolean().optional(),
         artifacts: z.boolean().optional(),
         activity: z.boolean().optional(),
         knownAgents: z.boolean().optional(),
       }).optional().describe('CONTEXT sub-section toggles. Partial.'),
-      includeFlowStepPrompt: z.boolean().optional().describe('Include [Step instruction: ...] suffix on flow messages (default: true).'),
+      includeMacroStepPrompt: z.boolean().optional().describe('Include [Step instruction: ...] suffix on macro messages (default: true).'),
       includeTools: z.boolean().optional().describe('Master tools on/off (false = send zero tool definitions).'),
       maxToolResultChars: z.number().nullable().optional().describe('Cap on each tool-result payload injected back into the loop.'),
       maxToolIterations: z.number().optional().describe('Max tool-call rounds per turn.'),
     },
-    async ({ name, includePrompts, includeContext, includeFlowStepPrompt, includeTools, maxToolResultChars, maxToolIterations }) => {
+    async ({ name, includePrompts, includeContext, includeMacroStepPrompt, includeTools, maxToolResultChars, maxToolIterations }) => {
       try {
         const agent = resolveAgent(system, name)
         const ai = agent as AIAgent
@@ -161,7 +161,7 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
         }
         if (includePrompts) ai.updateIncludePrompts(includePrompts)
         if (includeContext) ai.updateIncludeContext(includeContext)
-        if (typeof includeFlowStepPrompt === 'boolean') ai.updateIncludeFlowStepPrompt(includeFlowStepPrompt)
+        if (typeof includeMacroStepPrompt === 'boolean') ai.updateIncludeMacroStepPrompt(includeMacroStepPrompt)
         if (typeof includeTools === 'boolean') ai.updateIncludeTools(includeTools)
         if (maxToolResultChars === null) ai.updateMaxToolResultChars(undefined)
         else if (typeof maxToolResultChars === 'number') ai.updateMaxToolResultChars(maxToolResultChars)
@@ -171,7 +171,7 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
           name: agent.name,
           includePrompts: ai.getIncludePrompts(),
           includeContext: ai.getIncludeContext(),
-          includeFlowStepPrompt: ai.getIncludeFlowStepPrompt(),
+          includeMacroStepPrompt: ai.getIncludeMacroStepPrompt(),
           includeTools: ai.getIncludeTools(),
           maxToolResultChars: ai.getMaxToolResultChars() ?? null,
           maxToolIterations: ai.getMaxToolIterations() ?? null,

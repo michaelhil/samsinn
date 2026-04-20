@@ -6,7 +6,7 @@ import type { AIAgentConfig, IncludeContext, IncludePrompts, StateValue } from '
 import type { RoomState } from './room.ts'
 import type { Artifact } from './artifact.ts'
 import type { EvalEvent } from './agent-eval.ts'
-import type { FlowEventDetails, FlowEventName } from './flow.ts'
+import type { MacroEventDetails, MacroEventName } from './macro.ts'
 import type { OllamaHealth, GatewayMetrics } from './llm.ts'
 
 export type WSInbound =
@@ -23,7 +23,7 @@ export type WSInbound =
       readonly model?: string
       readonly includePrompts?: IncludePrompts
       readonly includeContext?: IncludeContext
-      readonly includeFlowStepPrompt?: boolean
+      readonly includeMacroStepPrompt?: boolean
       readonly includeTools?: boolean
       readonly maxToolResultChars?: number | null
       readonly maxToolIterations?: number
@@ -32,16 +32,21 @@ export type WSInbound =
   // Delivery mode
   | { readonly type: 'set_delivery_mode'; readonly roomName: string; readonly mode: 'broadcast' | 'manual' }
   | { readonly type: 'activate_agent'; readonly roomName: string; readonly agentName: string }
+  // Unified "Next" action — advances a running macro step, or round-robins the
+  // next eligible AI in bare Manual mode. Mode-aware on the server side.
+  | { readonly type: 'room_next'; readonly roomName: string }
   // Pause
   | { readonly type: 'set_paused'; readonly roomName: string; readonly paused: boolean }
   // Muting
   | { readonly type: 'set_muted'; readonly roomName: string; readonly agentName: string; readonly muted: boolean }
-  // Flow execution (blueprint lives in artifacts; these commands control execution only)
-  | { readonly type: 'start_flow'; readonly roomName: string; readonly flowArtifactId: string; readonly content: string }
-  | { readonly type: 'cancel_flow'; readonly roomName: string }
+  // Macro execution (blueprint lives in artifacts; these commands control execution only)
+  | { readonly type: 'run_macro'; readonly roomName: string; readonly macroArtifactId: string; readonly content: string }
+  | { readonly type: 'stop_macro'; readonly roomName: string }
+  // Sticky per-room selection. UI sets it via the macro popover; null clears.
+  | { readonly type: 'select_macro'; readonly roomName: string; readonly macroArtifactId: string }
   | { readonly type: 'cancel_generation'; readonly name: string }
   // Artifact management
-  | { readonly type: 'add_artifact'; readonly artifactType: string; readonly title: string; readonly description?: string; readonly body: Record<string, unknown>; readonly scope?: ReadonlyArray<string> }
+  | { readonly type: 'add_artifact'; readonly artifactType: string; readonly title: string; readonly description?: string; readonly body: Record<string, unknown>; readonly scope?: ReadonlyArray<string>; readonly requestId?: string }
   | { readonly type: 'update_artifact'; readonly artifactId: string; readonly title?: string; readonly body?: Record<string, unknown>; readonly resolution?: string }
   | { readonly type: 'remove_artifact'; readonly artifactId: string }
   | { readonly type: 'cast_vote'; readonly artifactId: string; readonly optionId: string }
@@ -61,13 +66,19 @@ export type WSOutbound =
   | { readonly type: 'delivery_mode_changed'; readonly roomName: string; readonly mode: DeliveryMode; readonly paused: boolean }
   | { readonly type: 'mute_changed'; readonly roomName: string; readonly agentName: string; readonly muted: boolean }
   | { readonly type: 'turn_changed'; readonly roomName: string; readonly agentName?: string; readonly waitingForHuman?: boolean }
-  | { readonly [E in FlowEventName]: { readonly type: 'flow_event'; readonly roomName: string; readonly event: E; readonly detail?: FlowEventDetails[E] } }[FlowEventName]
+  | { readonly [E in MacroEventName]: { readonly type: 'macro_event'; readonly roomName: string; readonly event: E; readonly detail?: MacroEventDetails[E] } }[MacroEventName]
   | { readonly type: 'artifact_changed'; readonly action: 'added' | 'updated' | 'removed' | 'resolved'; readonly artifact: Artifact }
   | { readonly type: 'membership_changed'; readonly roomId: string; readonly roomName: string; readonly agentId: string; readonly agentName: string; readonly action: 'added' | 'removed' }
   | { readonly type: 'room_deleted'; readonly roomName: string }
   | { readonly type: 'message_deleted'; readonly roomName: string; readonly messageId: string }
   | { readonly type: 'messages_cleared'; readonly roomName: string }
   | { readonly type: 'activation_result'; readonly roomName: string; readonly agentName: string; readonly ok: boolean; readonly queued: boolean; readonly reason?: string }
+  | { readonly type: 'next_result'; readonly roomName: string; readonly advanced: boolean; readonly activatedAgentName?: string; readonly queued?: boolean; readonly reason?: string }
+  | { readonly type: 'mode_auto_switched'; readonly roomName: string; readonly toMode: DeliveryMode; readonly reason: 'second-ai-joined' }
+  | { readonly type: 'macro_selection_changed'; readonly roomName: string; readonly macroArtifactId: string | null }
+  // Directed reply to the client that sent add_artifact with a requestId.
+  // Used by the UI to deterministically auto-select a freshly-created macro.
+  | { readonly type: 'artifact_created'; readonly requestId: string; readonly artifactId: string; readonly artifactType: string }
   | { readonly type: 'ollama_health'; readonly health: OllamaHealth }
   | { readonly type: 'ollama_metrics'; readonly metrics: GatewayMetrics }
   | { readonly type: 'agent_activity'; readonly agentName: string; readonly event: EvalEvent }

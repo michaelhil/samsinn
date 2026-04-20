@@ -8,8 +8,9 @@
 import type { Agent, AIAgent, AIAgentConfig, RouteMessage, Team } from './core/types/agent.ts'
 import type { DeliverFn, ResolveAgentName, ResolveTagFn } from './core/types/messaging.ts'
 import type {
-  House, HouseCallbacks, OnBookmarksChanged, OnDeliveryModeChanged, OnFlowEvent,
-  OnMembershipChanged, OnMessagePosted, OnRoomCreated, OnRoomDeleted, OnTurnChanged,
+  House, HouseCallbacks, OnBookmarksChanged, OnDeliveryModeChanged, OnMacroEvent,
+  OnMacroSelectionChanged, OnMembershipChanged, OnMessagePosted, OnModeAutoSwitched,
+  OnRoomCreated, OnRoomDeleted, OnTurnChanged,
 } from './core/types/room.ts'
 import type { OnArtifactChanged } from './core/types/artifact.ts'
 import type { OnEvalEvent } from './core/types/agent-eval.ts'
@@ -47,7 +48,7 @@ import {
 } from './tools/built-in/index.ts'
 import { createTaskListArtifactType } from './core/artifact-types/task-list.ts'
 import { pollArtifactType } from './core/artifact-types/poll.ts'
-import { createFlowArtifactType } from './core/artifact-types/flow.ts'
+import { createMacroArtifactType } from './core/artifact-types/macro.ts'
 import { documentArtifactType } from './core/artifact-types/document.ts'
 import { mermaidArtifactType } from './core/artifact-types/mermaid.ts'
 // Native-only tool calling — no capability probing needed
@@ -97,7 +98,9 @@ export interface System {
   readonly setOnMessagePosted: (callback: OnMessagePosted) => void
   readonly setOnTurnChanged: (callback: OnTurnChanged) => void
   readonly setOnDeliveryModeChanged: (callback: OnDeliveryModeChanged) => void
-  readonly setOnFlowEvent: (callback: OnFlowEvent) => void
+  readonly setOnMacroEvent: (callback: OnMacroEvent) => void
+  readonly setOnModeAutoSwitched: (callback: OnModeAutoSwitched) => void
+  readonly setOnMacroSelectionChanged: (callback: OnMacroSelectionChanged) => void
   readonly setOnArtifactChanged: (callback: OnArtifactChanged) => void
   readonly setOnRoomCreated: (callback: OnRoomCreated) => void
   readonly setOnRoomDeleted: (callback: OnRoomDeleted) => void
@@ -145,12 +148,14 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   const messagePosted = lateBinding<OnMessagePosted>()
   const turnChanged = lateBinding<OnTurnChanged>()
   const deliveryModeChanged = lateBinding<OnDeliveryModeChanged>()
-  const flowEvent = lateBinding<OnFlowEvent>()
+  const macroEvent = lateBinding<OnMacroEvent>()
   const artifactChanged = lateBinding<OnArtifactChanged>()
   const roomCreated = lateBinding<OnRoomCreated>()
   const roomDeleted = lateBinding<OnRoomDeleted>()
   const membershipChanged = lateBinding<OnMembershipChanged>()
   const bookmarksChanged = lateBinding<OnBookmarksChanged>()
+  const modeAutoSwitched = lateBinding<OnModeAutoSwitched>()
+  const macroSelectionChanged = lateBinding<OnMacroSelectionChanged>()
   const evalEvent = lateBinding<OnEvalEvent>()
   const providerBound = lateBinding<OnProviderBound>()
   const providerAllFailed = lateBinding<OnProviderAllFailed>()
@@ -192,12 +197,14 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     onMessagePosted: messagePosted.proxy,
     onTurnChanged: turnChanged.proxy,
     onDeliveryModeChanged: deliveryModeChanged.proxy,
-    onFlowEvent: flowEvent.proxy,
+    onMacroEvent: macroEvent.proxy,
     onArtifactChanged: artifactChanged.proxy,
     onRoomCreated: roomCreated.proxy,
     onRoomDeleted: roomDeleted.proxy,
     onBookmarksChanged: bookmarksChanged.proxy,
     onManualModeEntered: (roomId: string) => { cancelGenerationsInRoom(roomId) },
+    onModeAutoSwitched: modeAutoSwitched.proxy,
+    onMacroSelectionChanged: macroSelectionChanged.proxy,
     callSystemLLM: (options) => callLLM(llm, options),
   }
   const house = createHouse(houseCallbacks)
@@ -207,7 +214,7 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   // Register built-in artifact types — task_list needs store reference for checkAutoResolve
   house.artifactTypes.register(createTaskListArtifactType(house.artifacts))
   house.artifactTypes.register(pollArtifactType)
-  house.artifactTypes.register(createFlowArtifactType(team))
+  house.artifactTypes.register(createMacroArtifactType(team))
   house.artifactTypes.register(documentArtifactType)
   house.artifactTypes.register(mermaidArtifactType)
 
@@ -422,7 +429,9 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     setOnMessagePosted: messagePosted.set,
     setOnTurnChanged: turnChanged.set,
     setOnDeliveryModeChanged: deliveryModeChanged.set,
-    setOnFlowEvent: flowEvent.set,
+    setOnMacroEvent: macroEvent.set,
+    setOnModeAutoSwitched: modeAutoSwitched.set,
+    setOnMacroSelectionChanged: macroSelectionChanged.set,
     setOnArtifactChanged: artifactChanged.set,
     setOnRoomCreated: roomCreated.set,
     setOnRoomDeleted: roomDeleted.set,

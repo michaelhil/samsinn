@@ -28,7 +28,7 @@ import type {
 import { derivePhase, phaseLabel, THINKING_MARKER } from './thinking-phase.ts'
 import { openTextEditorModal, createModal, createButtonRow, createTextarea } from './modal.ts'
 import { createWorkspace } from './workspace.ts'
-import { wsDispatch } from './ws-dispatch.ts'
+import { wsDispatch, pendingCreateHooks } from './ws-dispatch.ts'
 import { batched } from '../lib/nanostores.ts'
 import { showToast, roomNameToId, roomIdToName, agentIdToName, populateModelSelect, getShowAllModels, setShowAllModels, safeFetchJson } from './ui-utils.ts'
 import {
@@ -60,7 +60,8 @@ import {
   $currentDeliveryMode,
   $roomPaused,
   $turnInfo,
-  $flowStatus,
+  $macroStatus,
+  $selectedMacroIdByRoom,
   $pinnedMessages,
   $ollamaHealth,
   $ollamaMetrics,
@@ -89,7 +90,10 @@ const {
   agentList, roomMembers, noRoomState, agentArea, chatArea, pinnedMessagesDiv,
   workspaceBar, workspacePane, workspaceContent, workspaceLabel, workspaceAddRow,
   artifactInput, btnArtifactSubmit, messagesDiv, chatForm, chatInput,
-  modeSelector, pauseToggle, roomModeInfo,
+  roomStatusDot, btnModeBroadcast, btnModeManual,
+  btnMacroPicker, btnMacroList, btnMacroNext, btnMacroCreate,
+  macroChip, macroChipName, macroChipStep, btnMacroStop,
+  roomModeInfo,
   nameModal, nameForm, roomModal, roomForm, agentModal, agentForm,
   sidebar, btnCollapseSidebar,
   agentsHeader, agentsToggle,
@@ -117,12 +121,23 @@ const firstChunkSeen = new Set<string>()
 
 // === Lazy imports ===
 
-const lazyFlowEditor = async (
+const lazyMacroEditor = async (
   agents: Map<string, AgentInfo>, myAgentId: string,
   onSave: (name: string, steps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>, loop: boolean, description?: string) => void,
 ) => {
-  const { openFlowEditorModal } = await import('./flow-editor.ts')
-  openFlowEditorModal(agents, myAgentId, onSave)
+  const { openMacroEditorModal } = await import('./macro-editor.ts')
+  openMacroEditorModal(agents, myAgentId, onSave)
+}
+
+const lazyMacroEditorEdit = async (
+  agents: Map<string, AgentInfo>, myAgentId: string,
+  existingSteps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>,
+  existingLoop: boolean, existingName: string, existingDescription: string | undefined,
+  onSave: (name: string, steps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>, loop: boolean, description?: string) => void,
+) => {
+  const { openMacroEditorModal } = await import('./macro-editor.ts')
+  const stepsWithPrompt = existingSteps.map(s => ({ agentId: s.agentId, agentName: s.agentName, stepPrompt: s.stepPrompt ?? '' }))
+  openMacroEditorModal(agents, myAgentId, onSave, existingName, stepsWithPrompt, existingLoop, existingDescription)
 }
 
 const lazySkillEditor = async (name?: string) => {
@@ -275,53 +290,71 @@ const fetchArtifactsForRoom = async (roomId: string, roomName: string): Promise<
   } catch { /* ignore */ }
 }
 
-// === Mode selector rendering ===
+// === Room header status rendering (pause dot, mode icons, macro group, chip) ===
 
-const refreshModeSelector = (): void => {
-  modeSelector.innerHTML = ''
-  const modes = [
-    { value: 'broadcast', label: 'Broadcast' },
-    { value: 'manual', label: 'Manual' },
-  ]
-  for (const m of modes) {
-    const opt = document.createElement('option')
-    opt.value = m.value
-    opt.textContent = m.label
-    modeSelector.appendChild(opt)
-  }
-  // Flow options
-  const roomId = $selectedRoomId.get()
-  const artifacts = roomId ? $selectedRoomArtifacts.get().filter(a => !a.resolvedAt && a.type === 'flow') : []
-  const sep = document.createElement('option')
-  sep.disabled = true
-  sep.textContent = '── Flows ──'
-  modeSelector.appendChild(sep)
-  for (const flow of artifacts) {
-    const flowBody = flow.body as { loop?: boolean }
-    const opt = document.createElement('option')
-    opt.value = `flow:${flow.id}`
-    opt.textContent = `${flow.title}${flowBody.loop ? ' ↻' : ''}`
-    modeSelector.appendChild(opt)
-  }
-  const createOpt = document.createElement('option')
-  createOpt.value = '__create_flow__'
-  createOpt.textContent = '+ Create Flow'
-  modeSelector.appendChild(createOpt)
+// Per-room UI expand state for the macro group. In-memory only — resets on
+// reload by design (per refactor spec). Key: roomId.
+const macroGroupExpanded = new Map<string, boolean>()
 
-  const mode = $currentDeliveryMode.get()
-  if (mode === 'flow') {
-    const activeFlowOpt = Array.from(modeSelector.options).find(o => o.value.startsWith('flow:'))
-    if (activeFlowOpt) modeSelector.value = activeFlowOpt.value
-  } else {
-    modeSelector.value = mode
-  }
-
+const refreshRoomControls = (): void => {
   const paused = $roomPaused.get()
-  pauseToggle.textContent = paused ? '▶' : '⏸'
-  pauseToggle.title = paused ? 'Resume delivery' : 'Pause delivery'
-  pauseToggle.className = `w-6 h-6 flex items-center justify-center text-sm rounded hover:bg-gray-200 ${paused ? 'text-green-600' : 'text-gray-400'}`
-  modeSelector.disabled = paused
-  modeSelector.classList.toggle('opacity-50', paused)
+  const mode = $currentDeliveryMode.get()
+  const macroStatus = $macroStatus.get()
+  const isMacroRunning = !!macroStatus &&
+    macroStatus.event !== 'completed' &&
+    macroStatus.event !== 'cancelled'
+
+  const roomId = $selectedRoomId.get()
+  const selection = roomId ? $selectedMacroIdByRoom.get()[roomId] ?? null : null
+  const macros = roomId
+    ? $selectedRoomArtifacts.get().filter(a => !a.resolvedAt && a.type === 'macro')
+    : []
+
+  // Pause dot
+  roomStatusDot.setAttribute('aria-pressed', paused ? 'true' : 'false')
+  roomStatusDot.title = paused ? 'Paused — click to resume' : 'Active — click to pause'
+
+  // Mode icons
+  btnModeBroadcast.setAttribute('aria-pressed', mode === 'broadcast' ? 'true' : 'false')
+  btnModeManual.setAttribute('aria-pressed', mode === 'manual' ? 'true' : 'false')
+
+  // Macro group expand state (per-room)
+  const expanded = roomId ? (macroGroupExpanded.get(roomId) ?? false) : false
+  btnMacroPicker.setAttribute('aria-pressed', expanded ? 'true' : 'false')
+  btnMacroList.classList.toggle('hidden', !expanded)
+  btnMacroNext.classList.toggle('hidden', !expanded)
+  btnMacroCreate.classList.toggle('hidden', !expanded)
+
+  // Disabled states inside the group
+  const noMacros = macros.length === 0
+  btnMacroList.disabled = noMacros
+  btnMacroNext.disabled = isMacroRunning ? false : (noMacros || !selection)
+
+  // Helpful tooltip hint
+  if (btnMacroNext.disabled) {
+    btnMacroNext.title = noMacros
+      ? 'No macros in this room — click ＋ to create one'
+      : 'Select a macro first (📋)'
+  } else {
+    btnMacroNext.title = isMacroRunning
+      ? 'Advance to the next step'
+      : 'Start the selected macro'
+  }
+
+  // Running-macro chip
+  if (isMacroRunning) {
+    macroChip.classList.remove('hidden')
+    const detail = (macroStatus!.detail ?? {}) as { macroId?: string; stepIndex?: number; agentName?: string }
+    const runningId = detail.macroId
+    const artifact = runningId
+      ? $selectedRoomArtifacts.get().find(a => a.id === runningId)
+      : undefined
+    macroChipName.textContent = artifact?.title ?? 'macro'
+    const stepIdx = typeof detail.stepIndex === 'number' ? detail.stepIndex : undefined
+    macroChipStep.textContent = stepIdx !== undefined ? `step ${stepIdx + 1}` : ''
+  } else {
+    macroChip.classList.add('hidden')
+  }
 }
 
 // === Ollama dashboard (extracted to ollama-dashboard.ts) ===
@@ -398,6 +431,9 @@ $roomListView.subscribe(({ rooms, selectedRoomId, pausedRooms, unreadCounts, gen
       $selectedRoomId.set(id)
     },
     onDelete: handleDeleteRoom,
+    onTogglePaused: (_id, roomName, nowPaused) => {
+      send({ type: 'set_paused', roomName, paused: nowPaused })
+    },
   })
   roomsToggle.textContent = `▾ Rooms (${Object.keys(rooms).length})`
 })
@@ -495,7 +531,7 @@ $selectedRoomId.listen((roomId, prevRoomId) => {
     requestAnimationFrame(() => { messagesDiv.style.scrollBehavior = '' })
 
     // Apply room-specific state
-    refreshModeSelector()
+    refreshRoomControls()
     workspace.show()
   } else if (!$selectedAgentId.get()) {
     noRoomState.classList.remove('hidden')
@@ -656,18 +692,21 @@ $selectedRoomArtifacts.subscribe((artifacts) => {
       workspaceContent.innerHTML = '<p class="text-xs text-gray-400 italic py-0.5">No artifacts yet</p>'
     }
   }
-  // Update mode selector (flow artifacts may have changed)
-  refreshModeSelector()
+  // Update mode selector (macro artifacts may have changed)
+  refreshRoomControls()
 })
 
-// --- Mode / turn / flow info (batched: mode + pause + artifacts all feed mode selector) ---
-// Note: $selectedRoomArtifacts subscription also calls refreshModeSelector for flow changes.
+// --- Mode / turn / macro info (batched: mode + pause + artifacts all feed mode selector) ---
+// Note: $selectedRoomArtifacts subscription also calls refreshRoomControls for macro changes.
 // This batched subscription handles mode/pause state changes.
 const $modeView = batched(
   [$currentDeliveryMode, $roomPaused],
   (mode: string, paused: boolean) => ({ mode, paused }),
 )
-$modeView.listen(() => refreshModeSelector())
+$modeView.listen(() => refreshRoomControls())
+
+// Re-render when the sticky selection changes (enables/disables Next).
+$selectedMacroIdByRoom.listen(() => refreshRoomControls())
 
 $turnInfo.listen((info) => {
   if (info?.agentName) {
@@ -676,14 +715,13 @@ $turnInfo.listen((info) => {
   }
 })
 
-$flowStatus.listen((status) => {
+$macroStatus.listen((status) => {
+  refreshRoomControls()
   if (!status) return
   if (status.event === 'step') {
     const detail = status.detail
-    roomModeInfo.textContent = `Flow step ${((detail?.stepIndex as number) ?? 0) + 1}: ${detail?.agentName ?? '...'}`
+    roomModeInfo.textContent = `Macro step ${((detail?.stepIndex as number) ?? 0) + 1}: ${detail?.agentName ?? '...'}`
     roomModeInfo.className = 'text-xs text-purple-500 h-4 font-medium'
-  } else if (status.event === 'completed') {
-    refreshModeSelector()
   }
 })
 
@@ -747,13 +785,6 @@ chatForm.onsubmit = (e) => {
   const roomName = roomIdToName(roomId)
   if (!roomName) return
 
-  const selectedMode = modeSelector.value
-  if (selectedMode.startsWith('flow:')) {
-    send({ type: 'start_flow', roomName, flowArtifactId: selectedMode.slice(5), content })
-    chatInput.value = ''
-    chatInput.placeholder = 'Type a message...'
-    return
-  }
   send({ type: 'post_message', target: { rooms: [roomName] }, content })
   chatInput.value = ''
 }
@@ -791,7 +822,8 @@ window.addEventListener('providers-changed', () => {
   })()
 })
 
-pauseToggle.onclick = () => {
+// --- Pause status dot (header) ---
+roomStatusDot.onclick = () => {
   const roomId = $selectedRoomId.get()
   if (!roomId) return
   const roomName = roomIdToName(roomId)
@@ -799,29 +831,153 @@ pauseToggle.onclick = () => {
   send({ type: 'set_paused', roomName, paused: !$roomPaused.get() })
 }
 
-modeSelector.onchange = () => {
+// --- Mode icon pair (Broadcast / Manual) ---
+const setMode = (mode: 'broadcast' | 'manual'): void => {
   const roomId = $selectedRoomId.get()
   if (!roomId) return
   const roomName = roomIdToName(roomId)
   if (!roomName) return
-  const val = modeSelector.value
+  send({ type: 'set_delivery_mode', roomName, mode })
+}
+btnModeBroadcast.onclick = () => setMode('broadcast')
+btnModeManual.onclick = () => setMode('manual')
 
-  if (val === '__create_flow__') {
-    refreshModeSelector()
-    const agentsMap = new Map(Object.entries($agents.get()).map(([id, a]) => [id, a as AgentInfo]))
-    lazyFlowEditor(agentsMap, $myAgentId.get() ?? '', (name, steps, loop, description) => {
-      send({ type: 'add_artifact', artifactType: 'flow', title: name, body: { steps, loop }, scope: [roomName], ...(description !== undefined ? { description } : {}) })
+// --- Macro chip stop button ---
+btnMacroStop.onclick = () => {
+  const roomId = $selectedRoomId.get()
+  if (!roomId) return
+  const roomName = roomIdToName(roomId)
+  if (!roomName) return
+  send({ type: 'stop_macro', roomName })
+}
+
+// --- Macro group: toggle expand/collapse per room ---
+btnMacroPicker.onclick = (e) => {
+  e.stopPropagation()
+  const roomId = $selectedRoomId.get()
+  if (!roomId) return
+  const wasOpen = macroGroupExpanded.get(roomId) ?? false
+  // Close any open list popover when collapsing.
+  if (wasOpen) closeMacroListPopover()
+  macroGroupExpanded.set(roomId, !wasOpen)
+  refreshRoomControls()
+}
+
+// --- Macro list popover (opened by 📋 button) ---
+let macroListPopoverEl: HTMLElement | null = null
+const closeMacroListPopover = (): void => {
+  macroListPopoverEl?.remove()
+  macroListPopoverEl = null
+  document.removeEventListener('click', onDocClickForListPopover, true)
+}
+const onDocClickForListPopover = (ev: MouseEvent): void => {
+  if (!macroListPopoverEl) return
+  const t = ev.target as Node
+  if (!macroListPopoverEl.contains(t) && t !== btnMacroList) closeMacroListPopover()
+}
+
+btnMacroList.onclick = (e) => {
+  e.stopPropagation()
+  if (macroListPopoverEl) { closeMacroListPopover(); return }
+
+  const roomId = $selectedRoomId.get()
+  const roomName = roomId ? roomIdToName(roomId) : null
+  if (!roomName || !roomId) return
+  const macros = $selectedRoomArtifacts.get().filter(a => !a.resolvedAt && a.type === 'macro')
+  if (macros.length === 0) return   // button is disabled in this state — defensive
+
+  const selection = $selectedMacroIdByRoom.get()[roomId] ?? null
+
+  macroListPopoverEl = document.createElement('div')
+  macroListPopoverEl.className = 'macro-popover'
+
+  for (const m of macros) {
+    const body = m.body as { loop?: boolean }
+    const row = document.createElement('div')
+    row.className = 'macro-item'
+
+    const label = document.createElement('span')
+    label.className = 'flex-1 truncate'
+    const isSelected = m.id === selection
+    label.textContent = `${isSelected ? '✓ ' : ''}${m.title}${body.loop ? ' ↻' : ''}`
+    if (isSelected) label.style.fontWeight = '600'
+
+    const selectBtn = document.createElement('button')
+    selectBtn.className = 'text-xs px-2 py-0.5 text-blue-600 hover:text-blue-800'
+    selectBtn.textContent = isSelected ? '✓' : 'Select'
+    selectBtn.title = isSelected ? 'Already selected' : `Select ${m.title}`
+    selectBtn.disabled = isSelected
+    selectBtn.onclick = () => {
+      send({ type: 'select_macro', roomName, macroArtifactId: m.id })
+      closeMacroListPopover()
+    }
+
+    const editBtn = document.createElement('button')
+    editBtn.className = 'text-xs px-2 py-0.5 text-gray-500 hover:text-gray-800'
+    editBtn.textContent = '✎'
+    editBtn.title = `Edit ${m.title}`
+    editBtn.onclick = () => {
+      closeMacroListPopover()
+      const agentsMap = new Map(Object.entries($agents.get()).map(([id, a]) => [id, a as AgentInfo]))
+      const existingSteps = (body as { steps?: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }> }).steps ?? []
+      lazyMacroEditorEdit(agentsMap, $myAgentId.get() ?? '', existingSteps, !!body.loop, m.title, (m.body as { description?: string }).description, (name, steps, loop, description) => {
+        send({ type: 'update_artifact', artifactId: m.id, title: name, body: { steps, loop, ...(description !== undefined ? { description } : {}) } })
+      })
+    }
+
+    row.appendChild(label)
+    row.appendChild(selectBtn)
+    row.appendChild(editBtn)
+    macroListPopoverEl.appendChild(row)
+  }
+
+  const rect = btnMacroList.getBoundingClientRect()
+  macroListPopoverEl.style.top = `${rect.bottom + 4}px`
+  macroListPopoverEl.style.right = `${window.innerWidth - rect.right}px`
+  document.body.appendChild(macroListPopoverEl)
+
+  setTimeout(() => document.addEventListener('click', onDocClickForListPopover, true), 0)
+}
+
+// --- Macro group: Next (start or advance) ---
+btnMacroNext.onclick = () => {
+  const roomId = $selectedRoomId.get()
+  if (!roomId) return
+  const roomName = roomIdToName(roomId)
+  if (!roomName) return
+  // Auto-flush any unsent composer text (Send-then-Next UX).
+  const pending = chatInput.value.trim()
+  if (pending) {
+    send({ type: 'post_message', target: { rooms: [roomName] }, content: pending })
+    chatInput.value = ''
+  }
+  send({ type: 'room_next', roomName })
+}
+
+// --- Macro group: Create (opens editor, auto-selects on save) ---
+btnMacroCreate.onclick = () => {
+  const roomId = $selectedRoomId.get()
+  if (!roomId) return
+  const roomName = roomIdToName(roomId)
+  if (!roomName) return
+  const agentsMap = new Map(Object.entries($agents.get()).map(([id, a]) => [id, a as AgentInfo]))
+  lazyMacroEditor(agentsMap, $myAgentId.get() ?? '', (name, steps, loop, description) => {
+    const requestId = crypto.randomUUID()
+    // Register a one-shot hook that fires when the server echoes artifact_created.
+    pendingCreateHooks.set(requestId, (artifactId, artifactType) => {
+      if (artifactType !== 'macro') return
+      send({ type: 'select_macro', roomName, macroArtifactId: artifactId })
     })
-    return
-  }
-  if (val.startsWith('flow:')) {
-    const content = chatInput.value.trim()
-    if (!content) { chatInput.placeholder = 'Type a message to start the flow...'; chatInput.focus(); return }
-    send({ type: 'start_flow', roomName, flowArtifactId: val.slice(5), content })
-    chatInput.value = ''; chatInput.placeholder = 'Type a message...'
-    return
-  }
-  send({ type: 'set_delivery_mode', roomName, mode: val })
+    send({
+      type: 'add_artifact',
+      artifactType: 'macro',
+      title: name,
+      body: { steps, loop },
+      scope: [roomName],
+      requestId,
+      ...(description !== undefined ? { description } : {}),
+    })
+  })
 }
 
 roomForm.onsubmit = (e) => {

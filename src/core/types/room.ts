@@ -10,7 +10,7 @@ import type {
   ResolveAgentName,
   ResolveTagFn,
 } from './messaging.ts'
-import type { Flow, FlowExecution, FlowEventDetails, FlowEventName } from './flow.ts'
+import type { Macro, MacroRun, MacroEventDetails, MacroEventName } from './macro.ts'
 import type { ArtifactStore, ArtifactTypeRegistry, OnArtifactChanged } from './artifact.ts'
 import type { LLMCallOptions } from './llm.ts'
 
@@ -19,11 +19,16 @@ import type { LLMCallOptions } from './llm.ts'
 export type OnMessagePosted = (roomId: string, message: Message) => void
 export type OnDeliveryModeChanged = (roomId: string, mode: DeliveryMode) => void
 export type OnTurnChanged = (roomId: string, agentId?: string, waitingForHuman?: boolean) => void
-export type OnFlowEvent = <E extends FlowEventName>(roomId: string, event: E, detail?: FlowEventDetails[E]) => void
+export type OnMacroEvent = <E extends MacroEventName>(roomId: string, event: E, detail?: MacroEventDetails[E]) => void
 export type OnRoomCreated = (profile: RoomProfile) => void
 export type OnRoomDeleted = (roomId: string, roomName: string) => void
 export type OnMembershipChanged = (roomId: string, roomName: string, agentId: string, agentName: string, action: 'added' | 'removed') => void
 export type OnBookmarksChanged = () => void
+// Fired when a room auto-switches Broadcast → Manual on the second AI join.
+// UI toasts a one-off hint so the user can flip back to Broadcast if desired.
+export type OnModeAutoSwitched = (roomId: string, toMode: DeliveryMode, reason: 'second-ai-joined') => void
+// Fired when a room's sticky macro selection changes. null when cleared (e.g. macro deleted).
+export type OnMacroSelectionChanged = (roomId: string, macroArtifactId: string | null) => void
 
 // === Bookmarks — system-wide message snippets (Phase 1) ===
 
@@ -39,10 +44,14 @@ export interface RoomState {
   readonly paused: boolean
   readonly muted: ReadonlyArray<string>
   readonly members: ReadonlyArray<string>
-  readonly flowExecution?: {
-    readonly flowId: string
+  readonly activeMacroRun?: {
+    readonly macroId: string
     readonly stepIndex: number
   }
+  // Sticky selection — the macro the user has picked for this room.
+  // Independent from activeMacroRun: a selection can exist without a run,
+  // and a run's macro is always the selected one (they match while running).
+  readonly selectedMacroId?: string
 }
 
 // === Room — self-contained component: stores messages and delivers to members ===
@@ -62,7 +71,10 @@ export interface Room {
 
   // Delivery mode
   readonly deliveryMode: DeliveryMode
-  readonly setDeliveryMode: (mode: Exclude<DeliveryMode, 'flow'>) => void
+  readonly setDeliveryMode: (mode: DeliveryMode) => void
+  // System-initiated auto-switch to manual (fires onModeAutoSwitched in addition
+  // to the usual onDeliveryModeChanged + onManualModeEntered). No-op if already manual.
+  readonly autoSwitchToManual: (reason: 'second-ai-joined') => void
 
   // Pause — room-level, prevents all delivery (join/leave and addressing still work)
   readonly paused: boolean
@@ -76,10 +88,17 @@ export interface Room {
   readonly isMuted: (agentId: string) => boolean
   readonly getMutedIds: () => ReadonlySet<string>
 
-  // Flow execution — blueprint is now an artifact; Room only manages execution
-  readonly startFlow: (flow: Flow) => void   // caller resolves artifact → constructs Flow → passes here
-  readonly cancelFlow: () => void
-  readonly flowExecution: FlowExecution | undefined
+  // Macro run — blueprint is an artifact; Room manages the run (overlay on top of mode)
+  readonly runMacro: (macro: Macro) => void   // caller resolves artifact → constructs Macro → passes here
+  readonly stopMacro: () => void
+  readonly activeMacroRun: MacroRun | undefined
+  // Advance to the next macro step. Only valid while a macro is running in Manual mode
+  // (or any time the UI/agent explicitly drives the step). Returns true if advanced.
+  readonly advanceMacroStep: () => boolean
+
+  // Sticky macro selection (persisted per room)
+  readonly selectedMacroId: string | undefined
+  readonly setSelectedMacroId: (id: string | undefined) => void
 
   // Compression tracking — IDs of messages pruned from history (tombstones)
   readonly getCompressedIds: () => ReadonlySet<string>
@@ -95,6 +114,7 @@ export interface RoomRestoreParams {
   readonly mode: DeliveryMode
   readonly paused: boolean
   readonly compressedIds?: ReadonlyArray<string>
+  readonly selectedMacroId?: string
 }
 
 // === CreateResult — returned when name uniqueness is enforced ===
@@ -115,12 +135,14 @@ export interface HouseCallbacks {
   readonly onMessagePosted?: OnMessagePosted
   readonly onTurnChanged?: OnTurnChanged
   readonly onDeliveryModeChanged?: OnDeliveryModeChanged
-  readonly onFlowEvent?: OnFlowEvent
+  readonly onMacroEvent?: OnMacroEvent
   readonly onArtifactChanged?: OnArtifactChanged
   readonly onRoomCreated?: OnRoomCreated
   readonly onRoomDeleted?: OnRoomDeleted
   readonly onBookmarksChanged?: OnBookmarksChanged
   readonly onManualModeEntered?: (roomId: string) => void
+  readonly onModeAutoSwitched?: OnModeAutoSwitched
+  readonly onMacroSelectionChanged?: OnMacroSelectionChanged
   readonly callSystemLLM?: (options: LLMCallOptions) => Promise<string>
 }
 

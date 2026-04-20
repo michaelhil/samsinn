@@ -9,7 +9,7 @@
 ## What you can do with it
 
 - **Run a panel of AI specialists** — a Researcher, Analyst, and Writer in the same room, bouncing ideas off each other and you
-- **Automate multi-step workflows** — define a Flow (ordered agent sequence) and trigger it with a single message
+- **Automate multi-step workflows** — define a Macro (ordered agent sequence) and trigger it with a single message
 - **Track tasks collaboratively** — agents and humans share a todo list per room; agents complete todos and record results
 - **Give agents tools** — agents can search the web, do math, remember facts across sessions, delegate subtasks, manage rooms, and query each other
 - **Self-extending agents** — agents create Skills (behavioral templates) and write new tools at runtime, making the system grow its own capabilities
@@ -63,9 +63,9 @@ A room is a shared conversation space. Agents must be explicitly added to a room
 Each room has:
 - A **name** and optional **room prompt** (instructions all agents in the room receive in their context)
 - An explicit **member list**
-- A **delivery mode** (`broadcast` or `flow`)
+- A **delivery mode** (`broadcast` or `macro`)
 - A **shared todo list**
-- Optional **flows** (orchestration sequences)
+- Optional **macros** (orchestration sequences)
 
 ### Agents
 
@@ -83,7 +83,7 @@ Controls which agents receive each message in a room:
 | Mode | Who receives each message |
 |---|---|
 | **Broadcast** | Every non-muted member (default) |
-| **Flow** | One agent at a time, in a predefined sequence |
+| **Macro** | One agent at a time, in a predefined sequence |
 | **Manual** | Humans only — AI peers are skipped; each AI is activated explicitly via a ▶ button on its chip |
 
 **Directed addressing** — write `[[AgentName]]` anywhere in a message to override the mode and deliver only to that agent. Inert in manual mode (only the explicit ▶ click fires an agent).
@@ -94,9 +94,9 @@ Controls which agents receive each message in a room:
 
 **Pause** — pause a room to halt all delivery temporarily (useful while re-configuring it).
 
-### Flows
+### Macros
 
-A flow is an ordered sequence of agents. When a flow is active, each message from one step automatically triggers the next agent in sequence, until the flow completes (or loops).
+A macro is an ordered sequence of agents. When a macro is active, each message from one step automatically triggers the next agent in sequence, until the macro completes (or loops).
 
 Each step can have a **step prompt** — extra instructions injected only when that agent is processing its step.
 
@@ -199,7 +199,7 @@ Click **+ Room**. Optionally add a **Room Prompt** — a shared instruction that
 
 ### Managing delivery
 
-Click the **mode selector** (top of the room panel) to switch between broadcast, manual, and flow.
+Click the **mode selector** (top of the room panel) to switch between broadcast, manual, and macro.
 
 Each agent chip in the room header shows a status dot (green = idle, yellow = generating, grey = muted). Click the dot to toggle mute in that room. Hover the chip for the **×** to remove from the room. Use the **⏸** in the room panel to pause the room.
 
@@ -209,9 +209,9 @@ Each agent chip in the room header shows a status dot (green = idle, yellow = ge
 
 The sidebar agent list has a hover-reveal **×** on each row for deleting the agent entirely.
 
-### Flows
+### Macros
 
-Open the **Flow Editor** (link in the room header). Create a flow by selecting agents in order, optionally writing per-step prompts. Start a flow by selecting it and sending a trigger message.
+Open the **Macro Editor** (link in the room header). Create a macro by selecting agents in order, optionally writing per-step prompts. Start a macro by selecting it and sending a trigger message.
 
 ### Todos
 
@@ -382,7 +382,7 @@ npx @modelcontextprotocol/inspector bun run src/main.ts --headless
 
 **Delivery control:** `set_delivery_mode`, `set_paused`, `set_muted`
 
-**Flows:** `add_flow`, `list_flows`, `start_flow`, `cancel_flow`
+**Macros:** `run_macro`, `stop_macro` (macros are artifacts — create via `add_artifact` with `artifactType: 'macro'`)
 
 **Todos:** `list_todos`, `add_todo`, `update_todo`
 
@@ -423,14 +423,14 @@ Base URL: `http://localhost:3000`
 | `PUT` | `/api/rooms/:name/mute` | Mute / unmute agent |
 | `POST` | `/api/rooms/:name/agents/:agentName/activate` | Manual mode — catch the agent up and force one turn |
 
-### Flows
+### Macros
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/rooms/:name/flows` | List flows |
-| `POST` | `/api/rooms/:name/flows` | Create flow |
-| `POST` | `/api/rooms/:name/flows/start` | Start flow |
-| `POST` | `/api/rooms/:name/flows/cancel` | Cancel active flow |
+| `GET` | `/api/rooms/:name/macros` | List macros |
+| `POST` | `/api/rooms/:name/macros` | Create macro |
+| `POST` | `/api/rooms/:name/macros/start` | Start macro |
+| `POST` | `/api/rooms/:name/macros/cancel` | Cancel active macro |
 
 ### Todos
 
@@ -492,10 +492,10 @@ On connection, the server sends a `snapshot` message with the full current state
 { type: 'activate_agent';   roomName: string; agentName: string }
 { type: 'set_paused';       roomName: string; paused: boolean }
 { type: 'set_muted';        roomName: string; agentName: string; muted: boolean }
-{ type: 'add_flow';         roomName: string; name: string; steps: FlowStep[]; loop?: boolean }
-{ type: 'remove_flow';      roomName: string; flowId: string }
-{ type: 'start_flow';       roomName: string; flowId: string; content: string }
-{ type: 'cancel_flow';      roomName: string }
+{ type: 'add_flow';         roomName: string; name: string; steps: MacroStep[]; loop?: boolean }
+{ type: 'remove_flow';      roomName: string; macroId: string }
+{ type: 'run_macro';       roomName: string; macroId: string; content: string }
+{ type: 'stop_macro';      roomName: string }
 { type: 'cancel_generation'; name: string }
 { type: 'add_todo';         roomName: string; content: string; assignee?: string; dependencies?: string[] }
 { type: 'update_todo';      roomName: string; todoId: string; status?: TodoStatus; assignee?: string; content?: string; result?: string }
@@ -517,7 +517,7 @@ On connection, the server sends a `snapshot` message with the full current state
 { type: 'mute_changed';      roomName: string; agentName: string; muted: boolean }
 { type: 'activation_result'; roomName: string; agentName: string; ok: boolean; queued: boolean; reason?: string }
 { type: 'turn_changed';      roomName: string; agentName?: string; waitingForHuman?: boolean }
-{ type: 'flow_event';        roomName: string; event: 'started' | 'step' | 'completed' | 'cancelled'; detail?: Record<string, unknown> }
+{ type: 'macro_event';        roomName: string; event: 'started' | 'step' | 'completed' | 'cancelled'; detail?: Record<string, unknown> }
 { type: 'todo_changed';      roomName: string; action: 'added' | 'updated' | 'removed'; todo: TodoItem }
 { type: 'error';             message: string }
 ```
@@ -547,13 +547,13 @@ Models with native function-calling (e.g. `qwen2.5`, `llama3.1`) use the OpenAI 
 ```
 src/
   core/
-    types.ts              — All type definitions (Message, Room, Agent, Flow, Todo, …)
+    types.ts              — All type definitions (Message, Room, Agent, Macro, Todo, …)
     room.ts               — Room: messages, member management, delivery dispatch
     room-todos.ts         — Per-room todo store (CRUD operations)
-    room-flows.ts         — Per-room flow store (flow lifecycle + step advancement)
+    room-macros.ts         — Per-room macro store (macro lifecycle + step advancement)
     house.ts              — House: room collection + house-level prompts
     delivery.ts           — routeMessage(): routes to rooms and agent DMs
-    delivery-modes.ts     — Broadcast and flow delivery implementations
+    delivery-modes.ts     — Broadcast and macro delivery implementations
     addressing.ts         — [[AgentName]] directed addressing parser
     tool-registry.ts      — Tool store: register, registerAll, get, list, has
     snapshot.ts           — System serialisation + versioned restore (JSON file)
@@ -600,7 +600,7 @@ src/
     ws-commands/          — WebSocket command handlers grouped by domain
       room-commands.ts    — create/delete/join/leave room, delivery mode, pause, mute
       agent-commands.ts   — spawn, remove, mute agent
-      flow-commands.ts    — add/remove/start/cancel flow
+      macro-commands.ts    — add/remove/start/cancel macro
       todo-commands.ts    — add/update/remove todo
       message-commands.ts — post message
   ui/
@@ -608,7 +608,7 @@ src/
     modules/
       app.ts              — Application orchestrator
       ws-client.ts        — WebSocket client with reconnect
-      ui-renderer.ts      — DOM rendering (messages, agents, rooms, flows, todos)
+      ui-renderer.ts      — DOM rendering (messages, agents, rooms, macros, todos)
       modal.ts            — Modal dialogs
   main.ts                 — createSystem() factory + entry point
   bootstrap.ts            — Startup orchestration (snapshot, tools, MCP, server)
@@ -628,13 +628,13 @@ docs/
 
 ## Persistence
 
-State is auto-saved to `data/snapshot.json` after each message (debounced 5 seconds). On next startup, rooms, agents, message history, flows, todos, mute state, and delivery modes are all restored exactly as they were.
+State is auto-saved to `data/snapshot.json` after each message (debounced 5 seconds). On next startup, rooms, agents, message history, macros, todos, mute state, and delivery modes are all restored exactly as they were.
 
 A graceful shutdown (`Ctrl+C`) drains any in-flight agent evaluations, then flushes the snapshot immediately.
 
 The snapshot is a plain JSON file — readable, version-controlled, and portable. It carries a version number; the system validates it on load and will refuse to start if the snapshot is from a newer build, preventing silent data corruption.
 
-**Note:** Active flow execution state (which step a flow is on) is not persisted. After a restart, rooms restore to broadcast mode and flows must be restarted manually.
+**Note:** Active macro execution state (which step a macro is on) is not persisted. After a restart, rooms restore to broadcast mode and macros must be restarted manually.
 
 ---
 
@@ -661,7 +661,7 @@ Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapsh
 
 **Tool protocol** — agents using text-protocol models produce `::TOOL::` lines which are parsed and executed in a ReAct loop. Agents using native-capable models use structured tool calls. The `ToolCapabilityCache` detects capability once per model and caches the result. Tool results are truncated to 4,000 characters by default to prevent context overflow; this limit is configurable per agent via `maxToolResultChars` in `AIAgentConfig`.
 
-**LLM context structure** — every agent evaluation assembles: house rules → room prompt → agent system prompt → skills (scope-matched behavioral templates) → auto-generated context (room, flow, participants, artifacts, tools) → response format → history (old + `[NEW]` tagged recent messages). The `context-builder.ts` is the single source of truth for what agents see.
+**LLM context structure** — every agent evaluation assembles: house rules → room prompt → agent system prompt → skills (scope-matched behavioral templates) → auto-generated context (room, macro, participants, artifacts, tools) → response format → history (old + `[NEW]` tagged recent messages). The `context-builder.ts` is the single source of truth for what agents see.
 
 **External tools** — the `loadExternalTools()` function scans `./tools/`, `~/.samsinn/tools/`, and `SAMSINN_TOOLS_DIR` for `.ts` files with a default Tool or Tool[] export. Loaded before snapshot restore so restored agents have access to them. Conflicts with built-in tool names are silently skipped.
 
@@ -679,9 +679,9 @@ Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapsh
 | v0.5.14 | Unified `AgentHistory` struct (rooms/DMs/incoming in one place); flush-on-pass (agents never re-evaluate passed messages); `ConcurrencyManager` extraction; snapshot migration framework; tool result truncation (4,000 char default, configurable); comprehensive file splitting (tools/built-in/, api/routes/, api/ws-commands/, mcp/tools/); config object consolidation; delivery-mode bug fix; graceful shutdown with eval drain |
 | v0.5.13 | 19 built-in tools, 16 external tools (memory/compute/web/research), structured tool descriptions with usage/returns fields, filesystem tool loader, `delegate` tool with todo integration |
 | v0.5.12 | Shared todo list per room: CRUD, WS sync, agent context injection, HTTP + MCP API |
-| v0.5.11 | Delivery modes simplified to broadcast + flow; room pause; [[AgentName]] addressing; muting; Markdown rendering |
+| v0.5.11 | Delivery modes simplified to broadcast + macro; room pause; [[AgentName]] addressing; muting; Markdown rendering |
 | v0.5.10 | MCP server (23 tools, 3 resources), headless stdio mode |
-| v0.5.9 | Flows: ordered agent sequences with per-step prompts, loop support |
+| v0.5.9 | Macros: ordered agent sequences with per-step prompts, loop support |
 | v0.5.8 | Filesystem tool loader, external tool directories, conflict detection |
 | v0.5.7 | Room prompt field in UI; onMessagePosted callback; room pause dots |
 

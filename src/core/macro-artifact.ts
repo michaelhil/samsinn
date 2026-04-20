@@ -1,43 +1,43 @@
 // ============================================================================
-// Flow Artifact — Shared helper for resolving a flow artifact into a Flow object.
+// Macro Artifact — Shared helper for resolving a macro artifact into a Macro.
 //
 // Used by both the WS command handler (artifact-commands.ts) and the MCP tool
 // (message-tools.ts). Lives in src/core/ so both layers can import it without
 // cross-layer dependencies.
 //
 // Builds goal ancestry from the artifact's description and the room's roomPrompt,
-// giving each flow step's receiving agent context for *why* the flow was started.
+// giving each macro step's receiving agent context for *why* the macro was run.
 // ============================================================================
 
-import type { Artifact, FlowArtifactBody } from './types/artifact.ts'
-import type { Flow, FlowStep } from './types/flow.ts'
+import type { Artifact, MacroArtifactBody } from './types/artifact.ts'
+import type { Macro, MacroStep } from './types/macro.ts'
 import type { Team } from './types/agent.ts'
 
-export interface ResolveFlowArtifactError {
+export interface ResolveMacroArtifactError {
   readonly error: string
 }
 
-export const resolveFlowArtifact = (
+export const resolveMacroArtifact = (
   artifact: Artifact,
   team: Team,
   roomPrompt?: string,
-): Flow | ResolveFlowArtifactError => {
-  if (artifact.type !== 'flow') {
-    return { error: `Artifact "${artifact.id}" is not a flow (type: ${artifact.type})` }
+): Macro | ResolveMacroArtifactError => {
+  if (artifact.type !== 'macro') {
+    return { error: `Artifact "${artifact.id}" is not a macro (type: ${artifact.type})` }
   }
 
-  const flowBody = artifact.body as unknown as FlowArtifactBody
-  const steps: FlowStep[] = (flowBody.steps ?? []).map(s => ({
+  const macroBody = artifact.body as unknown as MacroArtifactBody
+  const steps: MacroStep[] = (macroBody.steps ?? []).map(s => ({
     agentId: s.agentId || (team.getAgent(s.agentName)?.id ?? ''),
     agentName: s.agentName,
     ...(s.stepPrompt ? { stepPrompt: s.stepPrompt } : {}),
   }))
 
-  if (steps.length === 0) return { error: 'Flow has no steps' }
+  if (steps.length === 0) return { error: 'Macro has no steps' }
 
   const unresolvedStep = steps.find(s => !s.agentId)
   if (unresolvedStep) {
-    return { error: `Flow step agent "${unresolvedStep.agentName}" not found` }
+    return { error: `Macro step agent "${unresolvedStep.agentName}" not found` }
   }
 
   // Build goal ancestry: artifact title + optional room context
@@ -48,17 +48,17 @@ export const resolveFlowArtifact = (
   // Use description from top-level artifact field or fall back to body.description
   const artifactDescription =
     artifact.description ??
-    (typeof flowBody.description === 'string' ? flowBody.description : undefined)
+    (typeof macroBody.description === 'string' ? macroBody.description : undefined)
 
   return {
     id: artifact.id,
     name: artifact.title,
     steps,
-    loop: flowBody.loop ?? false,
+    loop: macroBody.loop ?? false,
     ...(artifactDescription !== undefined ? { artifactDescription } : {}),
     goalChain,
   }
 }
 
-export const isFlowError = (result: Flow | ResolveFlowArtifactError): result is ResolveFlowArtifactError =>
+export const isMacroError = (result: Macro | ResolveMacroArtifactError): result is ResolveMacroArtifactError =>
   'error' in result

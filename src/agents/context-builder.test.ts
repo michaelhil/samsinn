@@ -100,7 +100,7 @@ describe('context-builder includePrompts', () => {
     expect(sys).not.toContain('=== RESPONSE FORMAT ===')
   })
 
-  test('contextEnabled: false suppresses participants/flow/artifacts/activity/knownAgents', () => {
+  test('contextEnabled: false suppresses participants/macro/artifacts/activity/knownAgents', () => {
     const sections = buildSystemSections(mkDeps({ contextEnabled: false }), 'room-1')
     const toggleableKeys = ['ctx_participants', 'ctx_flow', 'ctx_artifacts', 'ctx_activity', 'ctx_knownAgents']
     for (const key of toggleableKeys) {
@@ -179,8 +179,8 @@ describe('context-builder skills + context-data toggles', () => {
   })
 })
 
-describe('context-builder flow stepPrompt toggle', () => {
-  test('includeFlowStepPrompt=true emits [Step instruction: ...] suffix', () => {
+describe('context-builder macro stepPrompt toggle', () => {
+  test('includeMacroStepPrompt=true emits [Step instruction: ...] suffix', () => {
     const msg: Message = {
       id: 'm1', roomId: 'room-1', senderId: 'other', senderName: 'Other',
       content: 'hi', timestamp: Date.now(), type: 'chat',
@@ -188,13 +188,13 @@ describe('context-builder flow stepPrompt toggle', () => {
     }
     const result = buildContext(mkDeps({
       history: mkHistory('room-1', 'General', undefined, [msg]),
-      includeFlowStepPrompt: true,
+      includeMacroStepPrompt: true,
     }), 'room-1')
     const content = result.messages.map(m => m.content).join('\n')
     expect(content).toContain('[Step instruction: do X]')
   })
 
-  test('includeFlowStepPrompt=false suppresses suffix', () => {
+  test('includeMacroStepPrompt=false suppresses suffix', () => {
     const msg: Message = {
       id: 'm1', roomId: 'room-1', senderId: 'other', senderName: 'Other',
       content: 'hi', timestamp: Date.now(), type: 'chat',
@@ -202,7 +202,7 @@ describe('context-builder flow stepPrompt toggle', () => {
     }
     const result = buildContext(mkDeps({
       history: mkHistory('room-1', 'General', undefined, [msg]),
-      includeFlowStepPrompt: false,
+      includeMacroStepPrompt: false,
     }), 'room-1')
     const content = result.messages.map(m => m.content).join('\n')
     expect(content).not.toContain('[Step instruction:')

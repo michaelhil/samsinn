@@ -31,7 +31,7 @@ export const handleAgentCommand = async (msg: WSInbound, ctx: CommandContext): P
         if (msg.model) aiAgent.updateModel(msg.model)
         if (msg.includePrompts) aiAgent.updateIncludePrompts(msg.includePrompts)
         if (msg.includeContext) aiAgent.updateIncludeContext(msg.includeContext)
-        if (typeof msg.includeFlowStepPrompt === 'boolean') aiAgent.updateIncludeFlowStepPrompt(msg.includeFlowStepPrompt)
+        if (typeof msg.includeMacroStepPrompt === 'boolean') aiAgent.updateIncludeMacroStepPrompt(msg.includeMacroStepPrompt)
         if (typeof msg.includeTools === 'boolean') aiAgent.updateIncludeTools(msg.includeTools)
         if (msg.maxToolResultChars === null) aiAgent.updateMaxToolResultChars(undefined)
         else if (typeof msg.maxToolResultChars === 'number') aiAgent.updateMaxToolResultChars(msg.maxToolResultChars)

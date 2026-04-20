@@ -1,5 +1,5 @@
 // ============================================================================
-// Delivery Modes — Pure functions for each room delivery strategy.
+// Delivery Modes — Pure functions for each delivery strategy.
 //
 // Each mode function receives an `eligible` set (members minus user-muted)
 // and delivers accordingly. Room.post() computes eligible once and passes it
@@ -7,24 +7,28 @@
 //
 // Modes:
 //   broadcast  — deliver to all eligible members
-//   flow       — deliver to current step agent (if eligible)
+//   manual     — deliver to humans + sender (AI peers catch up at activation)
+//
+// Macro step delivery is NOT a mode; it overlays on top of the room's mode
+// via room.runMacro(). The helpers here (advanceMacroStep, deliverMacroStep)
+// are used by the overlay.
 // ============================================================================
 
 import type { DeliverFn, Message } from './types/messaging.ts'
-import type { Flow, FlowDeliveryContext, FlowExecution } from './types/flow.ts'
+import type { Macro, MacroStepContext, MacroRun } from './types/macro.ts'
 
-// --- Shared flow context builder ---
-// Single source of truth for FlowDeliveryContext construction.
-// Used by both startFlow (room.ts) and deliverFlow (subsequent steps).
+// --- Shared macro step context builder ---
+// Single source of truth for MacroStepContext construction.
+// Used by both runMacro (room.ts) and deliverMacroStep (subsequent steps).
 
-export const buildFlowDeliveryContext = (flow: Flow, stepIndex: number): FlowDeliveryContext => ({
-  flowName: flow.name,
+export const buildMacroStepContext = (macro: Macro, stepIndex: number): MacroStepContext => ({
+  macroName: macro.name,
   stepIndex,
-  totalSteps: flow.steps.length,
-  loop: flow.loop,
-  steps: flow.steps.map(s => ({ agentName: s.agentName })),
-  ...(flow.artifactDescription !== undefined ? { artifactDescription: flow.artifactDescription } : {}),
-  ...(flow.goalChain !== undefined ? { goalChain: flow.goalChain } : {}),
+  totalSteps: macro.steps.length,
+  loop: macro.loop,
+  steps: macro.steps.map(s => ({ agentName: s.agentName })),
+  ...(macro.artifactDescription !== undefined ? { artifactDescription: macro.artifactDescription } : {}),
+  ...(macro.goalChain !== undefined ? { goalChain: macro.goalChain } : {}),
 })
 
 // --- Broadcast mode ---
@@ -39,9 +43,9 @@ export const deliverBroadcast = (
   }
 }
 
-// --- Flow mode ---
+// --- Macro step delivery (overlay, invoked when a macro run is active) ---
 
-export interface FlowResult {
+export interface MacroStepResult {
   readonly advanced: boolean
   readonly completed: boolean
   readonly looped: boolean
@@ -49,36 +53,36 @@ export interface FlowResult {
   readonly nextAgentName?: string
 }
 
-export const deliverFlow = (
+export const deliverMacroStep = (
   message: Message,
-  execution: FlowExecution,
+  run: MacroRun,
   eligible: ReadonlySet<string>,
   senderId: string,
   deliver: DeliverFn,
-): FlowResult => {
-  const currentStep = execution.flow.steps[execution.stepIndex]
+): MacroStepResult => {
+  const currentStep = run.macro.steps[run.stepIndex]
   if (!currentStep) {
-    return { advanced: false, completed: true, looped: false, nextStepIndex: execution.stepIndex }
+    return { advanced: false, completed: true, looped: false, nextStepIndex: run.stepIndex }
   }
 
-  // Only the expected step agent's chat response advances the flow.
+  // Only the expected step agent's chat response advances the macro.
   // Pass messages do not advance — the step stays open waiting for a real response.
   if (senderId !== currentStep.agentId || message.type === 'pass') {
-    return { advanced: false, completed: false, looped: false, nextStepIndex: execution.stepIndex }
+    return { advanced: false, completed: false, looped: false, nextStepIndex: run.stepIndex }
   }
 
   // Advance to next step — find next eligible agent
-  const result = advanceFlowStep(execution, eligible)
+  const result = advanceMacroStep(run, eligible)
 
   if (!result.completed && result.nextAgentId) {
-    const nextStep = execution.flow.steps[result.nextStepIndex]!
-    const flowContext = buildFlowDeliveryContext(execution.flow, result.nextStepIndex)
+    const nextStep = run.macro.steps[result.nextStepIndex]!
+    const macroContext = buildMacroStepContext(run.macro, result.nextStepIndex)
     const enriched = {
       ...message,
       metadata: {
         ...message.metadata,
         ...(nextStep.stepPrompt ? { stepPrompt: nextStep.stepPrompt } : {}),
-        flowContext,
+        macroContext,
       },
     }
     deliver(result.nextAgentId, enriched)
@@ -87,10 +91,10 @@ export const deliverFlow = (
   return { advanced: true, ...result }
 }
 
-// --- Flow step advancement (pure, no delivery side effects) ---
-// Uses agentId directly from FlowStep — no name resolution needed.
+// --- Macro step advancement (pure, no delivery side effects) ---
+// Uses agentId directly from MacroStep — no name resolution needed.
 
-interface FlowAdvanceResult {
+interface MacroAdvanceResult {
   readonly completed: boolean
   readonly looped: boolean
   readonly nextStepIndex: number
@@ -98,15 +102,15 @@ interface FlowAdvanceResult {
   readonly nextAgentName?: string
 }
 
-export const advanceFlowStep = (
-  execution: FlowExecution,
+export const advanceMacroStep = (
+  run: MacroRun,
   eligible: ReadonlySet<string>,
-): FlowAdvanceResult => {
-  let nextIndex = execution.stepIndex + 1
+): MacroAdvanceResult => {
+  let nextIndex = run.stepIndex + 1
   let looped = false
 
-  if (nextIndex >= execution.flow.steps.length) {
-    if (execution.flow.loop) {
+  if (nextIndex >= run.macro.steps.length) {
+    if (run.macro.loop) {
       nextIndex = 0
       looped = true
     } else {
@@ -116,10 +120,10 @@ export const advanceFlowStep = (
 
   // Find next eligible step agent (skip muted/non-members).
   // Loop up to stepsLength times to avoid infinite cycle when all are ineligible.
-  const stepsLength = execution.flow.steps.length
+  const stepsLength = run.macro.steps.length
   let attempts = 0
   while (attempts < stepsLength) {
-    const nextStep = execution.flow.steps[nextIndex]!
+    const nextStep = run.macro.steps[nextIndex]!
 
     if (eligible.has(nextStep.agentId)) {
       return { completed: false, looped, nextStepIndex: nextIndex, nextAgentId: nextStep.agentId, nextAgentName: nextStep.agentName }
@@ -127,12 +131,12 @@ export const advanceFlowStep = (
 
     // Skip ineligible agent
     nextIndex = (nextIndex + 1) % stepsLength
-    if (nextIndex === 0 && !execution.flow.loop) {
+    if (nextIndex === 0 && !run.macro.loop) {
       return { completed: true, looped: false, nextStepIndex: nextIndex }
     }
     attempts++
   }
 
-  // All agents ineligible — flow is effectively complete
+  // All agents ineligible — macro is effectively complete
   return { completed: true, looped: false, nextStepIndex: nextIndex }
 }

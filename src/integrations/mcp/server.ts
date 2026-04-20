@@ -17,7 +17,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { System } from '../../main.ts'
 import type { Artifact, OnArtifactChanged } from '../../core/types/artifact.ts'
-import type { OnDeliveryModeChanged, OnFlowEvent, OnTurnChanged } from '../../core/types/room.ts'
+import type { OnDeliveryModeChanged, OnMacroEvent, OnTurnChanged } from '../../core/types/room.ts'
 import { registerAllMCPTools } from './tools/index.ts'
 import { registerMCPResources } from './resources.ts'
 
@@ -55,9 +55,9 @@ export const wireEventNotifications = (system: System, mcpServer: McpServer): vo
     sendNotification({ type: 'delivery_mode_changed', roomName: room?.profile.name, mode })
   }
 
-  const onFlowEvent: OnFlowEvent = (roomId, event, detail) => {
+  const onMacroEvent: OnMacroEvent = (roomId, event, detail) => {
     const room = system.house.getRoom(roomId)
-    sendNotification({ type: 'flow_event', roomName: room?.profile.name, event, detail })
+    sendNotification({ type: 'macro_event', roomName: room?.profile.name, event, detail })
   }
 
   const onArtifactChanged: OnArtifactChanged = (action: string, artifact: Artifact) => {
@@ -66,7 +66,7 @@ export const wireEventNotifications = (system: System, mcpServer: McpServer): vo
 
   system.setOnTurnChanged(onTurnChanged)
   system.setOnDeliveryModeChanged(onDeliveryModeChanged)
-  system.setOnFlowEvent(onFlowEvent)
+  system.setOnMacroEvent(onMacroEvent)
   system.setOnArtifactChanged(onArtifactChanged)
 }
 

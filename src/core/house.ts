@@ -30,8 +30,8 @@ const DEFAULT_RESPONSE_FORMAT = `- Write your message as natural text. Your resp
 export const createHouse = (callbacks: HouseCallbacks = {}): House => {
   const {
     deliver, resolveAgentName, resolveTag, resolveKind, onMessagePosted, onTurnChanged,
-    onDeliveryModeChanged, onFlowEvent, onRoomCreated, onRoomDeleted,
-    onBookmarksChanged, onManualModeEntered, callSystemLLM,
+    onDeliveryModeChanged, onMacroEvent, onRoomCreated, onRoomDeleted,
+    onBookmarksChanged, onManualModeEntered, onModeAutoSwitched, callSystemLLM,
   } = callbacks
 
   const rooms = new Map<string, Room>()
@@ -56,6 +56,17 @@ export const createHouse = (callbacks: HouseCallbacks = {}): House => {
 
   // Wire onArtifactChanged to post system messages in scoped rooms on significant events.
   const artifactChangedHandler: OnArtifactChanged = (action: 'added' | 'updated' | 'removed' | 'resolved', artifact: Artifact) => {
+    // Clear sticky macro selection from any room whose selectedMacroId == removed macro.
+    // Fires on both 'removed' and 'resolved' (macros resolve via explicit remove; covers both cautiously).
+    if (action === 'removed' && artifact.type === 'macro') {
+      for (const room of rooms.values()) {
+        if (room.selectedMacroId === artifact.id) {
+          room.setSelectedMacroId(undefined)
+          callbacks.onMacroSelectionChanged?.(room.profile.id, null)
+        }
+      }
+    }
+
     const typeDef = artifactTypeRegistry.get(artifact.type)
     const postOn = typeDef?.postSystemMessageOn ?? ['added', 'removed', 'resolved']
     const eventKey = classifyArtifactEvent(action, artifact)
@@ -89,7 +100,7 @@ export const createHouse = (callbacks: HouseCallbacks = {}): House => {
     nameIndex.has(name.toLowerCase())
 
   const makeRoomCallbacks = (): RoomCallbacks => ({
-    deliver, resolveAgentName, resolveTag, resolveKind, onMessagePosted, onTurnChanged, onDeliveryModeChanged, onFlowEvent, onManualModeEntered,
+    deliver, resolveAgentName, resolveTag, resolveKind, onMessagePosted, onTurnChanged, onDeliveryModeChanged, onMacroEvent, onManualModeEntered, onModeAutoSwitched,
   })
 
   const storeRoom = (config: RoomConfig, name: string): Room => {

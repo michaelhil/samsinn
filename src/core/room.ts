@@ -8,31 +8,35 @@
 //   1. Store message
 //   2. Compute eligible = members - userMuted
 //   3. Check paused flag (paused rooms store but don't deliver)
-//   4. Apply mode filter (broadcast / flow)
+//   4. If a macro is running, apply macro-step overlay
+//   5. Otherwise apply mode filter (broadcast / manual)
 //
 // User muting and mode filtering are independent concerns applied in sequence.
 // System code NEVER modifies the muted set — only explicit setMuted() calls do.
 //
-// [[AgentName]] addressing overrides any mode — delivers only to addressed agents.
+// [[AgentName]] addressing overrides in all modes (except manual for user messages,
+// where AI peers wake only on explicit activation or macro step).
 // Pause flag stops all delivery (join/leave and addressing still work).
 //
-// Flow blueprints are now Artifacts (system-level). Room only manages execution:
-// callers resolve the artifact, construct a Flow object, and pass it to startFlow().
+// Macro blueprints are Artifacts (system-level). Room owns the in-flight run:
+// callers resolve the artifact, construct a Macro object, and pass it to runMacro().
+// A running macro does NOT change the room's delivery mode — it overlays step
+// delivery on top of the current mode.
 // ============================================================================
 
 import type {
   DeliverFn, DeliveryMode, Message, PostParams,
   ResolveAgentName, ResolveTagFn, RoomProfile,
 } from './types/messaging.ts'
-import type { Flow } from './types/flow.ts'
+import type { Macro } from './types/macro.ts'
 import type {
-  OnDeliveryModeChanged, OnFlowEvent, OnMessagePosted, OnTurnChanged,
+  OnDeliveryModeChanged, OnMacroEvent, OnMessagePosted, OnTurnChanged,
   Room, RoomRestoreParams, RoomState,
 } from './types/room.ts'
 import { DEFAULTS, SYSTEM_SENDER_ID } from './types/constants.ts'
 import { parseAddressedAgents } from './addressing.ts'
-import { advanceFlowStep, buildFlowDeliveryContext, deliverBroadcast, deliverFlow } from './delivery-modes.ts'
-import { createFlowExecutionState } from './room-flows.ts'
+import { advanceMacroStep, buildMacroStepContext, deliverBroadcast, deliverMacroStep } from './delivery-modes.ts'
+import { createMacroRunState } from './macro-runs.ts'
 
 export interface RoomCallbacks {
   readonly deliver?: DeliverFn
@@ -42,8 +46,9 @@ export interface RoomCallbacks {
   readonly onMessagePosted?: OnMessagePosted
   readonly onTurnChanged?: OnTurnChanged
   readonly onDeliveryModeChanged?: OnDeliveryModeChanged
-  readonly onFlowEvent?: OnFlowEvent
+  readonly onMacroEvent?: OnMacroEvent
   readonly onManualModeEntered?: (roomId: string) => void
+  readonly onModeAutoSwitched?: (roomId: string, toMode: DeliveryMode, reason: 'second-ai-joined') => void
 }
 
 export const createRoom = (
@@ -66,8 +71,9 @@ export const createRoom = (
   // --- State ---
   let mode: DeliveryMode = 'broadcast'
   let paused = false
+  let selectedMacroId: string | undefined
 
-  const flowState = createFlowExecutionState(profile.id, callbacks?.onFlowEvent)
+  const macroRunState = createMacroRunState(profile.id, callbacks?.onMacroEvent)
 
   // --- Eligible set: members minus user-muted ---
 
@@ -84,12 +90,9 @@ export const createRoom = (
     callbacks?.onDeliveryModeChanged?.(profile.id, mode)
   }
 
-  const endFlow = (flowId: string, event: 'completed' | 'cancelled'): void => {
-    flowState.clearExecution()
-    mode = 'broadcast'
-    paused = true
-    flowState.notifyFlowEvent(event, { flowId })
-    notifyModeChanged()
+  const endMacro = (macroId: string, event: 'completed' | 'cancelled'): void => {
+    macroRunState.clearRun()
+    macroRunState.notifyMacroEvent(event, { macroId })
   }
 
   // --- Post helpers ---
@@ -167,6 +170,38 @@ export const createRoom = (
 
     if (paused) return message
 
+    // Macro overlay: when a run is active, step-agent responses advance the macro.
+    // Non-step-agent messages still fall through to the room's base mode so humans
+    // and sender continue to see their own traffic.
+    const macroRun = macroRunState.getRun()
+    if (macroRun) {
+      const currentStep = macroRun.macro.steps[macroRun.stepIndex]
+      const isStepAgentResponse = currentStep && params.senderId === currentStep.agentId
+      if (isStepAgentResponse) {
+        // In Broadcast, auto-advance on valid step-agent response.
+        // In Manual, the step agent's response lands (delivered below as a normal
+        // manual-mode message), but we do NOT advance — the user clicks Next.
+        if (mode === 'broadcast') {
+          const result = deliverMacroStep(message, macroRun, eligible, params.senderId, deliver)
+          if (result.advanced) {
+            if (result.completed) {
+              endMacro(macroRun.macro.id, 'completed')
+            } else {
+              macroRunState.advanceStep(result.nextStepIndex)
+              macroRunState.notifyMacroEvent('step', {
+                macroId: macroRun.macro.id,
+                stepIndex: result.nextStepIndex,
+                agentName: result.nextAgentName ?? '',
+              })
+            }
+          }
+          return message
+        }
+        // Manual + macro: fall through to manual-mode delivery (humans + sender).
+        // The next step waits for user-triggered advanceMacroStep().
+      }
+    }
+
     switch (mode) {
       case 'broadcast':
         deliverBroadcast(message, eligible, deliver)
@@ -175,30 +210,11 @@ export const createRoom = (
       case 'manual': {
         // Deliver only to humans and to the sender (if AI) so senders still
         // track their own reply in history. AI peers are skipped entirely —
-        // they catch up at explicit activation time.
+        // they catch up at explicit activation time (or on a macro step).
         for (const id of eligible) {
           const kind = resolveKind?.(id)
           if (kind === 'human' || id === params.senderId) {
             deliverToOne(id, message)
-          }
-        }
-        break
-      }
-
-      case 'flow': {
-        const flowExecution = flowState.getExecution()
-        if (!flowExecution) break
-        const result = deliverFlow(message, flowExecution, eligible, params.senderId, deliver)
-        if (result.advanced) {
-          if (result.completed) {
-            endFlow(flowExecution.flow.id, 'completed')
-          } else {
-            flowState.advanceStep(result.nextStepIndex)
-            flowState.notifyFlowEvent('step', {
-              flowId: flowExecution.flow.id,
-              stepIndex: result.nextStepIndex,
-              agentName: result.nextAgentName ?? '',
-            })
           }
         }
         break
@@ -210,43 +226,42 @@ export const createRoom = (
 
   // --- Delivery mode controls ---
 
-  const setDeliveryMode = (newMode: Exclude<DeliveryMode, 'flow'>): void => {
-    const flowExecution = flowState.getExecution()
-    if (flowExecution) {
-      const flowId = flowExecution.flow.id
-      flowState.clearExecution()
-      flowState.notifyFlowEvent('cancelled', { flowId })
-    }
+  const setDeliveryMode = (newMode: DeliveryMode): void => {
     const prevMode = mode
     mode = newMode
-    paused = false
     notifyModeChanged()
     if (newMode === 'manual' && prevMode !== 'manual') {
       callbacks?.onManualModeEntered?.(profile.id)
     }
   }
 
+  const autoSwitchToManual = (reason: 'second-ai-joined'): void => {
+    if (mode === 'manual') return
+    setDeliveryMode('manual')
+    callbacks?.onModeAutoSwitched?.(profile.id, 'manual', reason)
+  }
+
   // --- Muting ---
 
-  const handleFlowOnMute = (agentId: string, lastChatMsg: Message | undefined): void => {
-    const flowExecution = flowState.getExecution()
-    if (!flowExecution) return
-    const currentStep = flowExecution.flow.steps[flowExecution.stepIndex]
+  const handleMacroOnMute = (agentId: string, lastChatMsg: Message | undefined): void => {
+    const macroRun = macroRunState.getRun()
+    if (!macroRun) return
+    const currentStep = macroRun.macro.steps[macroRun.stepIndex]
     if (!currentStep || currentStep.agentId !== agentId) return
 
     const eligible = computeEligible()
-    const result = advanceFlowStep(flowExecution, eligible)
+    const result = advanceMacroStep(macroRun, eligible)
     if (result.completed) {
-      endFlow(flowExecution.flow.id, 'completed')
+      endMacro(macroRun.macro.id, 'completed')
     } else if (result.nextAgentId && lastChatMsg) {
-      flowState.advanceStep(result.nextStepIndex)
-      const nextStep = flowExecution.flow.steps[result.nextStepIndex]!
+      macroRunState.advanceStep(result.nextStepIndex)
+      const nextStep = macroRun.macro.steps[result.nextStepIndex]!
       const enriched = nextStep.stepPrompt
         ? { ...lastChatMsg, metadata: { ...lastChatMsg.metadata, stepPrompt: nextStep.stepPrompt } }
         : lastChatMsg
       deliverToOne(result.nextAgentId, enriched)
-      flowState.notifyFlowEvent('step', {
-        flowId: flowExecution.flow.id,
+      macroRunState.notifyMacroEvent('step', {
+        macroId: macroRun.macro.id,
         stepIndex: result.nextStepIndex,
         agentName: result.nextAgentName ?? '',
       })
@@ -284,65 +299,99 @@ export const createRoom = (
     }
     messages.push(muteMessage)
 
-    if (mode === 'flow' && isMuted) {
-      handleFlowOnMute(agentId, lastChatMsg)
-    }
+    if (isMuted) handleMacroOnMute(agentId, lastChatMsg)
   }
 
-  // --- Flow execution ---
-  // Blueprint is now an Artifact. Caller resolves artifact → constructs Flow → passes here.
+  // --- Macro lifecycle ---
+  // Blueprint is an Artifact. Caller resolves artifact → constructs Macro → passes here.
 
-  const cancelFlow = (): void => {
-    const flowExecution = flowState.getExecution()
-    if (!flowExecution) return
-    endFlow(flowExecution.flow.id, 'cancelled')
+  const stopMacro = (): void => {
+    const macroRun = macroRunState.getRun()
+    if (!macroRun) return
+    endMacro(macroRun.macro.id, 'cancelled')
   }
 
-  const startFlow = (flow: Flow): void => {
-    if (!flow || flow.steps.length === 0) return
+  const runMacro = (macro: Macro): void => {
+    if (!macro || macro.steps.length === 0) return
 
-    const existingExecution = flowState.getExecution()
-    if (existingExecution) {
-      flowState.notifyFlowEvent('cancelled', { flowId: existingExecution.flow.id })
+    const existingRun = macroRunState.getRun()
+    if (existingRun) {
+      macroRunState.notifyMacroEvent('cancelled', { macroId: existingRun.macro.id })
     }
 
-    paused = false
     const lastMsg = messages[messages.length - 1]
     if (!lastMsg || !deliver) return
 
-    flowState.setExecution({
-      flow,
+    macroRunState.setRun({
+      macro,
       triggerMessageId: lastMsg.id,
       stepIndex: 0,
     })
-    mode = 'flow'
-    notifyModeChanged()
 
     const eligible = computeEligible()
 
-    const syntheticExec = { ...flowState.getExecution()!, stepIndex: -1 }
-    const firstResult = advanceFlowStep(syntheticExec, eligible)
+    const syntheticRun = { ...macroRunState.getRun()!, stepIndex: -1 }
+    const firstResult = advanceMacroStep(syntheticRun, eligible)
 
     if (firstResult.completed) {
-      endFlow(flow.id, 'completed')
+      endMacro(macro.id, 'completed')
       return
     }
 
     const startIndex = firstResult.nextStepIndex
-    flowState.advanceStep(startIndex)
+    macroRunState.advanceStep(startIndex)
 
-    const startStep = flow.steps[startIndex]!
-    const flowContext = buildFlowDeliveryContext(flow, startIndex)
+    const startStep = macro.steps[startIndex]!
+    const macroContext = buildMacroStepContext(macro, startIndex)
     const enriched = {
       ...lastMsg,
       metadata: {
         ...lastMsg.metadata,
         ...(startStep.stepPrompt ? { stepPrompt: startStep.stepPrompt } : {}),
-        flowContext,
+        macroContext,
       },
     }
     deliverToOne(startStep.agentId, enriched)
-    flowState.notifyFlowEvent('started', { flowId: flow.id, agentName: startStep.agentName })
+    macroRunState.notifyMacroEvent('started', { macroId: macro.id, agentName: startStep.agentName })
+  }
+
+  // User-triggered step advance (Manual mode or explicit UI request).
+  // Delivers the most recent chat message to the next step agent.
+  const stepMacroForward = (): boolean => {
+    const macroRun = macroRunState.getRun()
+    if (!macroRun || !deliver) return false
+
+    const eligible = computeEligible()
+    const result = advanceMacroStep(macroRun, eligible)
+
+    if (result.completed) {
+      endMacro(macroRun.macro.id, 'completed')
+      return true
+    }
+
+    if (!result.nextAgentId) return false
+
+    const lastChatMsg = [...messages].reverse().find(m => m.type === 'chat' || m.type === 'pass') ?? messages[messages.length - 1]
+    if (!lastChatMsg) return false
+
+    macroRunState.advanceStep(result.nextStepIndex)
+    const nextStep = macroRun.macro.steps[result.nextStepIndex]!
+    const macroContext = buildMacroStepContext(macroRun.macro, result.nextStepIndex)
+    const enriched = {
+      ...lastChatMsg,
+      metadata: {
+        ...lastChatMsg.metadata,
+        ...(nextStep.stepPrompt ? { stepPrompt: nextStep.stepPrompt } : {}),
+        macroContext,
+      },
+    }
+    deliverToOne(result.nextAgentId, enriched)
+    macroRunState.notifyMacroEvent('step', {
+      macroId: macroRun.macro.id,
+      stepIndex: result.nextStepIndex,
+      agentName: result.nextAgentName ?? '',
+    })
+    return true
   }
 
   // --- Room interface ---
@@ -375,18 +424,20 @@ export const createRoom = (
 
     get deliveryMode() { return mode },
     setDeliveryMode,
+    autoSwitchToManual,
 
     get paused() { return paused },
     setPaused: (p: boolean): void => { paused = p },
 
     getRoomState: (): RoomState => {
-      const exec = flowState.getExecution()
+      const run = macroRunState.getRun()
       return {
         mode,
         paused,
         muted: [...muted],
         members: [...members],
-        ...(exec ? { flowExecution: { flowId: exec.flow.id, stepIndex: exec.stepIndex } } : {}),
+        ...(run ? { activeMacroRun: { macroId: run.macro.id, stepIndex: run.stepIndex } } : {}),
+        ...(selectedMacroId ? { selectedMacroId } : {}),
       }
     },
 
@@ -394,9 +445,12 @@ export const createRoom = (
     isMuted: (agentId: string): boolean => muted.has(agentId),
     getMutedIds: (): ReadonlySet<string> => new Set(muted),
 
-    startFlow,
-    cancelFlow,
-    get flowExecution() { return flowState.getExecution() },
+    runMacro,
+    stopMacro,
+    get activeMacroRun() { return macroRunState.getRun() },
+    advanceMacroStep: stepMacroForward,
+    get selectedMacroId() { return selectedMacroId },
+    setSelectedMacroId: (id: string | undefined): void => { selectedMacroId = id },
 
     injectMessages: (msgs: ReadonlyArray<Message>): void => {
       for (const msg of msgs) messages.push(msg)
@@ -415,6 +469,7 @@ export const createRoom = (
       if (state.compressedIds) {
         for (const id of state.compressedIds) compressedIds.add(id)
       }
+      selectedMacroId = state.selectedMacroId
     },
   }
 }

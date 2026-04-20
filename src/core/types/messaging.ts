@@ -85,12 +85,12 @@ export type DeliverFn = (agentId: string, message: Message) => void
 
 // === Delivery Modes — room has exactly one active mode ===
 // [[AgentName]] addressing and muting work as universal overrides in all modes.
+// A running macro overlays step delivery on top of the current mode; it is NOT
+// a delivery mode.
 
-export type DeliveryMode = 'broadcast' | 'flow' | 'manual'
+export type DeliveryMode = 'broadcast' | 'manual'
 
-// Modes that can be set directly via the delivery-mode endpoint.
-// 'flow' is excluded — it is entered only via startFlow().
-export const SETTABLE_DELIVERY_MODES = ['broadcast', 'manual'] as const satisfies ReadonlyArray<Exclude<DeliveryMode, 'flow'>>
+export const SETTABLE_DELIVERY_MODES = ['broadcast', 'manual'] as const satisfies ReadonlyArray<DeliveryMode>
 export type SettableDeliveryMode = typeof SETTABLE_DELIVERY_MODES[number]
 
 // === Delivery-side utility types ===

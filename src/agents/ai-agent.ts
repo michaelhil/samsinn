@@ -107,12 +107,12 @@ export const createAIAgent = (
   }
   const includeContextState: Required<IncludeContext> = {
     participants: config.includeContext?.participants ?? true,
-    flow: config.includeContext?.flow ?? true,
+    macro: config.includeContext?.macro ?? true,
     artifacts: config.includeContext?.artifacts ?? true,
     activity: config.includeContext?.activity ?? true,
     knownAgents: config.includeContext?.knownAgents ?? true,
   }
-  let includeFlowStepPrompt: boolean = config.includeFlowStepPrompt ?? true
+  let includeMacroStepPrompt: boolean = config.includeMacroStepPrompt ?? true
   let includeTools: boolean = config.includeTools ?? true
   let promptsEnabled: boolean = config.promptsEnabled ?? true
   let contextEnabled: boolean = config.contextEnabled ?? true
@@ -173,7 +173,7 @@ export const createAIAgent = (
     getSkills,
     includePrompts: includePromptsState,
     includeContext: includeContextState,
-    includeFlowStepPrompt,
+    includeMacroStepPrompt,
     promptsEnabled,
     contextEnabled,
     contextTokenBudget: resolveContextTokenBudget(),
@@ -471,8 +471,8 @@ Respond with only the summary — no preamble or explanation.`
         if (typeof v === 'boolean') includeContextState[key] = v
       }
     },
-    getIncludeFlowStepPrompt: () => includeFlowStepPrompt,
-    updateIncludeFlowStepPrompt: (enabled: boolean) => { includeFlowStepPrompt = enabled },
+    getIncludeMacroStepPrompt: () => includeMacroStepPrompt,
+    updateIncludeMacroStepPrompt: (enabled: boolean) => { includeMacroStepPrompt = enabled },
     getIncludeTools: () => includeTools,
     updateIncludeTools: (enabled: boolean) => { includeTools = enabled },
     getPromptsEnabled: () => promptsEnabled,
@@ -521,7 +521,7 @@ Respond with only the summary — no preamble or explanation.`
       tags: currentTags,
       includePrompts: { ...includePromptsState },
       includeContext: { ...includeContextState },
-      includeFlowStepPrompt,
+      includeMacroStepPrompt,
       includeTools,
       promptsEnabled,
       contextEnabled,

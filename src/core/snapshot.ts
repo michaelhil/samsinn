@@ -7,9 +7,9 @@
 //
 // Auto-saver: debounced timer (5s default), flushes on SIGINT/SIGTERM.
 //
-// v8: current. Older versions are rejected at load — no migration ladder.
-//     AIAgentConfig stores `persona` (renamed from systemPrompt); IncludePrompts
-//     uses `persona` key (renamed from `agent`).
+// v10: current. Older versions are rejected at load — no migration ladder.
+//      v10 adds RoomSnapshot.selectedMacroId (sticky per-room macro selection).
+//      v9 had the flow→macro rename + delivery mode reduction to broadcast/manual.
 // ============================================================================
 
 import type { Agent, AIAgentConfig } from './types/agent.ts'
@@ -22,7 +22,7 @@ import { dirname } from 'node:path'
 
 // --- Version ---
 
-export const SNAPSHOT_VERSION = 8
+export const SNAPSHOT_VERSION = 10
 
 // --- Snapshot schema ---
 
@@ -34,6 +34,7 @@ export interface RoomSnapshot {
   readonly paused: boolean
   readonly muted: ReadonlyArray<string>
   readonly compressedIds?: ReadonlyArray<string>
+  readonly selectedMacroId?: string
 }
 
 export interface AgentSnapshot {
@@ -43,7 +44,7 @@ export interface AgentSnapshot {
 }
 
 export interface SystemSnapshot {
-  readonly version: '8'
+  readonly version: '10'
   readonly timestamp: number
   readonly rooms: ReadonlyArray<RoomSnapshot>
   readonly agents: ReadonlyArray<AgentSnapshot>
@@ -96,6 +97,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
       paused: state.paused,
       muted: [...state.muted],
       compressedIds: room.getCompressedIds().size > 0 ? [...room.getCompressedIds()] : undefined,
+      ...(state.selectedMacroId ? { selectedMacroId: state.selectedMacroId } : {}),
     })
   }
 
@@ -116,7 +118,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
   const artifacts = system.house.artifacts.list({ includeResolved: true })
 
   return {
-    version: '8',
+    version: '10',
     timestamp: Date.now(),
     rooms,
     agents,
@@ -134,8 +136,9 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
 const isValidSnapshot = (raw: Record<string, unknown>): boolean =>
   raw.version === String(SNAPSHOT_VERSION)
 
-// No migration ladder — v8 is a clean break (persona rename). Older
-// snapshots are rejected by isValidSnapshot and the server starts fresh.
+// No migration ladder — v9 is a clean break (flow → macro rename, delivery
+// modes reduced to broadcast/manual). Older snapshots are rejected by
+// isValidSnapshot and the server starts fresh.
 
 // --- Save / Load ---
 
@@ -201,11 +204,10 @@ export const restoreFromSnapshot = async (
     room.restoreState({
       members: roomSnap.members,
       muted: roomSnap.muted,
-      // Flow execution is never persisted; restore flow rooms as broadcast.
-      // Manual mode is persisted — resumes the user's turn-taking session.
-      mode: roomSnap.deliveryMode === 'manual' ? 'manual' : 'broadcast',
+      mode: roomSnap.deliveryMode,
       paused: roomSnap.paused,
       compressedIds: roomSnap.compressedIds,
+      ...(roomSnap.selectedMacroId ? { selectedMacroId: roomSnap.selectedMacroId } : {}),
     })
     roomMap.set(room.profile.id, room)
   }

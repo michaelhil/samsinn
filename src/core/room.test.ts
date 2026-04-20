@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { createRoom } from './room.ts'
 import type { Message, RoomProfile } from './types/messaging.ts'
-import type { Flow } from './types/flow.ts'
+import type { Macro } from './types/macro.ts'
 import { SYSTEM_SENDER_ID } from './types/constants.ts'
 
 const makeProfile = (overrides?: Partial<RoomProfile>): RoomProfile => ({
@@ -504,20 +504,20 @@ describe('Room — Directed Addressing [[AgentName]]', () => {
 })
 
 // ============================================================================
-// Flow Tests
+// Macro Tests
 // ============================================================================
 
-// Helper: build a Flow object directly (replaces old room.addFlow pattern)
-const makeFlow = (overrides?: Partial<Flow>): Flow => ({
-  id: 'flow-1',
-  name: 'Test Flow',
+// Helper: build a Macro object directly (replaces old room.addFlow pattern)
+const makeFlow = (overrides?: Partial<Macro>): Macro => ({
+  id: 'macro-1',
+  name: 'Test Macro',
   steps: [{ agentId: 'a', agentName: 'Alice' }, { agentId: 'b', agentName: 'Bob' }],
   loop: false,
   ...overrides,
 })
 
-describe('Room — Flow mode', () => {
-  test('startFlow delivers to first step agent', () => {
+describe('Room — Macro mode', () => {
+  test('runMacro delivers to first step agent', () => {
     const { delivered, deliver } = trackDeliveries()
     const room = createRoom(makeProfile(), { deliver })
 
@@ -529,13 +529,14 @@ describe('Room — Flow mode', () => {
     room.post({ senderId: 'b', senderName: 'Bob', content: 'hi', type: 'chat' })
     delivered.length = 0
 
-    room.startFlow(makeFlow({ name: 'Pipeline' }))
-    expect(room.deliveryMode).toBe('flow')
+    room.runMacro(makeFlow({ name: 'Pipeline' }))
+    expect(room.deliveryMode).toBe('broadcast')   // overlay does not change mode
+    expect(room.activeMacroRun).toBeDefined()
     expect(delivered).toHaveLength(1)
     expect(delivered[0]!.agentId).toBe('a')
   })
 
-  test('flow advances when expected agent responds', () => {
+  test('macro advances when expected agent responds', () => {
     const { delivered, deliver } = trackDeliveries()
     const room = createRoom(makeProfile(), { deliver })
 
@@ -546,16 +547,16 @@ describe('Room — Flow mode', () => {
     room.post({ senderId: 'b', senderName: 'Bob', content: 'hi', type: 'chat' })
     delivered.length = 0
 
-    room.startFlow(makeFlow({ name: 'Pipeline' }))
+    room.runMacro(makeFlow({ name: 'Pipeline' }))
     delivered.length = 0
 
-    // Alice responds → flow advances to Bob
+    // Alice responds → macro advances to Bob
     room.post({ senderId: 'a', senderName: 'Alice', content: 'analysis done', type: 'chat' })
     expect(delivered).toHaveLength(1)
     expect(delivered[0]!.agentId).toBe('b')
   })
 
-  test('flow completes: switches to broadcast and pauses', () => {
+  test('macro completes: run clears; mode and pause remain user-controlled', () => {
     const { delivered, deliver } = trackDeliveries()
     const room = createRoom(makeProfile(), { deliver })
 
@@ -565,24 +566,23 @@ describe('Room — Flow mode', () => {
     room.post({ senderId: 'a', senderName: 'Alice', content: 'hi', type: 'chat' })
     room.post({ senderId: 'b', senderName: 'Bob', content: 'hi', type: 'chat' })
 
-    room.startFlow(makeFlow({ name: 'Pipeline' }))
+    room.runMacro(makeFlow({ name: 'Pipeline' }))
     delivered.length = 0
 
     // Alice responds
     room.post({ senderId: 'a', senderName: 'Alice', content: 'step1', type: 'chat' })
     delivered.length = 0
 
-    // Bob responds → flow complete
+    // Bob responds → macro complete
     room.post({ senderId: 'b', senderName: 'Bob', content: 'step2', type: 'chat' })
-    expect(room.deliveryMode).toBe('broadcast')
-    expect(room.paused).toBe(true)
-    expect(room.flowExecution).toBeUndefined()
-    // Members are NOT muted — pause handles cascade prevention
+    expect(room.deliveryMode).toBe('broadcast')   // untouched by macro lifecycle
+    expect(room.paused).toBe(false)               // no auto-pause
+    expect(room.activeMacroRun).toBeUndefined()
     expect(room.isMuted('a')).toBe(false)
     expect(room.isMuted('b')).toBe(false)
   })
 
-  test('flow with loop restarts from step 0', () => {
+  test('macro with loop restarts from step 0', () => {
     const { delivered, deliver } = trackDeliveries()
     const room = createRoom(makeProfile(), { deliver })
 
@@ -592,7 +592,7 @@ describe('Room — Flow mode', () => {
     room.post({ senderId: 'a', senderName: 'Alice', content: 'hi', type: 'chat' })
     room.post({ senderId: 'b', senderName: 'Bob', content: 'hi', type: 'chat' })
 
-    room.startFlow(makeFlow({ name: 'Loop', loop: true }))
+    room.runMacro(makeFlow({ name: 'Loop', loop: true }))
     delivered.length = 0
 
     // Complete one cycle: Alice → Bob
@@ -601,7 +601,7 @@ describe('Room — Flow mode', () => {
     room.post({ senderId: 'b', senderName: 'Bob', content: 'round1-b', type: 'chat' })
 
     // Should loop back to Alice
-    expect(room.deliveryMode).toBe('flow')
+    expect(room.activeMacroRun).toBeDefined()
     expect(delivered).toHaveLength(1)
     expect(delivered[0]!.agentId).toBe('a')
   })
@@ -619,7 +619,7 @@ describe('Room — Flow mode', () => {
     room.post({ senderId: 'b', senderName: 'Bob', content: 'hi', type: 'chat' })
     deliveredMeta.length = 0
 
-    room.startFlow(makeFlow({
+    room.runMacro(makeFlow({
       name: 'Prompted',
       steps: [
         { agentId: 'a', agentName: 'Alice', stepPrompt: 'Focus on risks' },
@@ -637,24 +637,26 @@ describe('Room — Flow mode', () => {
     expect(deliveredMeta[0]?.stepPrompt).toBe('Summarize findings')
   })
 
-  test('cancelFlow stops execution, switches to broadcast, pauses', () => {
+  test('stopMacro stops execution, switches to broadcast, pauses', () => {
     const { deliver } = trackDeliveries()
     const room = createRoom(makeProfile(), { deliver })
 
     room.addMember('a')
     room.post({ senderId: 'a', senderName: 'Alice', content: 'hi', type: 'chat' })
 
-    room.startFlow(makeFlow({ name: 'F', steps: [{ agentId: 'a', agentName: 'Alice' }], loop: true }))
-    expect(room.deliveryMode).toBe('flow')
+    room.runMacro(makeFlow({ name: 'F', steps: [{ agentId: 'a', agentName: 'Alice' }], loop: true }))
+    expect(room.activeMacroRun).toBeDefined()
 
-    room.cancelFlow()
+    room.stopMacro()
     expect(room.deliveryMode).toBe('broadcast')
-    expect(room.paused).toBe(true)
-    expect(room.flowExecution).toBeUndefined()
+    expect(room.paused).toBe(false)
+    expect(room.activeMacroRun).toBeUndefined()
     expect(room.isMuted('a')).toBe(false)
   })
 
-  test('off-turn posts during flow are stored but not delivered', () => {
+  test('off-turn posts during a macro fall through to the base mode (broadcast)', () => {
+    // New model: macro is an overlay, not a delivery mode. Only the step agent's
+    // response advances the macro; everyone else's posts obey the base mode.
     const { delivered, deliver } = trackDeliveries()
     const room = createRoom(makeProfile(), { deliver })
 
@@ -664,11 +666,11 @@ describe('Room — Flow mode', () => {
     room.post({ senderId: 'a', senderName: 'Alice', content: 'hi', type: 'chat' })
     room.post({ senderId: 'b', senderName: 'Bob', content: 'hi', type: 'chat' })
 
-    room.startFlow(makeFlow({ name: 'F' }))
+    room.runMacro(makeFlow({ name: 'F' }))
     delivered.length = 0
 
-    // Bob posts while Alice has the floor
+    // Bob posts while Alice has the floor — broadcast still applies.
     room.post({ senderId: 'b', senderName: 'Bob', content: 'interjection', type: 'chat' })
-    expect(delivered).toHaveLength(0) // not delivered, stored only
+    expect(delivered.length).toBeGreaterThan(0)
   })
 })

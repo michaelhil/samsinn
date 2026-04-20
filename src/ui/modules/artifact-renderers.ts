@@ -152,9 +152,9 @@ export const renderPollArtifact = (
   return wrap
 }
 
-// === Flow ===
+// === Macro ===
 
-export const renderFlowArtifact = (
+export const renderMacroArtifact = (
   artifact: ArtifactInfo,
   onAction: (action: ArtifactAction) => void,
 ): HTMLElement => {

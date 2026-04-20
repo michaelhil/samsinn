@@ -57,4 +57,4 @@ export { createMCPServer, wireEventNotifications, startMCPServerStdio } from './
 
 // Delivery modes
 export type { DeliveryMode } from './core/types/messaging.ts'
-export type { Flow, FlowStep, FlowExecution } from './core/types/flow.ts'
+export type { Macro, MacroStep, MacroRun } from './core/types/macro.ts'

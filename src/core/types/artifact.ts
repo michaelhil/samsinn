@@ -1,8 +1,8 @@
 // Artifact system — system-level collaborative objects (task lists, polls,
-// flow blueprints, documents). Artifacts live in House and are scoped to
+// macro blueprints, documents). Artifacts live in House and are scoped to
 // rooms via `scope`. The type system mirrors the Tool plugin pattern.
 
-import type { FlowStep } from './flow.ts'
+import type { MacroStep } from './macro.ts'
 import type { ToolContext } from './tool.ts'
 
 // === Embedded task item within a task_list artifact ===
@@ -41,8 +41,8 @@ export interface PollBody {
   readonly allowMultiple: boolean
 }
 
-export interface FlowArtifactBody {
-  readonly steps: ReadonlyArray<FlowStep>
+export interface MacroArtifactBody {
+  readonly steps: ReadonlyArray<MacroStep>
   readonly loop: boolean
   readonly description?: string
 }
@@ -68,13 +68,13 @@ export interface MermaidBody {
 // Union of all built-in artifact body shapes. Plugin-defined artifact types
 // fall outside this union; callers with a dynamic type name should narrow by
 // inspecting `artifact.type` and casting the body, or pattern-match here.
-export type ArtifactBody = TaskListBody | PollBody | FlowArtifactBody | DocumentBody | MermaidBody
+export type ArtifactBody = TaskListBody | PollBody | MacroArtifactBody | DocumentBody | MermaidBody
 
 // === Artifact instance ===
 
 export interface Artifact {
   readonly id: string
-  readonly type: string                         // artifact type name: 'task_list', 'poll', 'flow'
+  readonly type: string                         // artifact type name: 'task_list', 'poll', 'macro'
   readonly title: string                        // human-readable label
   readonly description?: string                 // optional longer description
   readonly body: Record<string, unknown>        // type-specific payload

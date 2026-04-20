@@ -8,7 +8,7 @@ const makeAgent = (overrides?: Partial<Agent>): Agent => ({
   name: `Agent ${counter}`,
   kind: 'ai',
   metadata: {},
-  state: { get: () => 'idle' as const, subscribe: () => () => {} },
+  state: { get: () => 'idle' as const, getContext: () => undefined, subscribe: () => () => {} },
   receive: () => {},
   join: async () => {},
   leave: () => {},

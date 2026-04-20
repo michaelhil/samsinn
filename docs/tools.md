@@ -221,7 +221,7 @@ Sets the delivery mode of a room to `broadcast`.
 
 **Returns:** `{ roomName, mode: "broadcast" }`
 
-**Usage:** Use to switch a room back to broadcast mode after a flow completes, or to ensure all members receive every message.
+**Usage:** Use to switch a room back to broadcast mode after a macro completes, or to ensure all members receive every message.
 
 ---
 
@@ -555,10 +555,10 @@ Compare two text strings and return a unified diff. Useful for code reviews, det
 Summarize a conversation history or long text into a compressed form. Would call the LLM recursively (or use a sliding window) to produce a condensed summary, then potentially store it as a note. Valuable for long-running rooms.
 
 ### `create_flow`
-Create a named flow in the current room from a list of agent names and optional per-step prompts. Currently flows can only be created from the UI or via WS/HTTP. Enabling agents to create flows programmatically unlocks dynamic orchestration.
+Create a named macro in the current room from a list of agent names and optional per-step prompts. Currently macros can only be created from the UI or via WS/HTTP. Enabling agents to create macros programmatically unlocks dynamic orchestration.
 
 ### `start_flow`
-Start a named flow in the current room with a trigger message. Pairs with `create_flow` for full programmatic flow management.
+Start a named macro in the current room with a trigger message. Pairs with `create_flow` for full programmatic macro management.
 
 ### `image_describe` (vision)
 Fetch an image URL and return a text description of its contents. Requires a vision-capable LLM. Useful for reading charts, screenshots, and diagrams shared in rooms.

@@ -153,7 +153,7 @@ export const $messageWarnings = map<Record<string, string[]>>({})
 export const $currentDeliveryMode = atom<string>('broadcast')
 export const $roomPaused = atom(false)
 
-// === Turn / flow info (ephemeral, set by WS events) ===
+// === Turn / macro info (ephemeral, set by WS events) ===
 
 export interface TurnInfo {
   readonly roomName: string
@@ -162,12 +162,16 @@ export interface TurnInfo {
 }
 export const $turnInfo = atom<TurnInfo | null>(null)
 
-export interface FlowStatus {
+export interface MacroStatus {
   readonly roomName: string
   readonly event: string
   readonly detail?: Record<string, unknown>
 }
-export const $flowStatus = atom<FlowStatus | null>(null)
+export const $macroStatus = atom<MacroStatus | null>(null)
+
+// Sticky per-room macro selection (artifact id). Hydrated from roomStates snapshot
+// and updated by macro_selection_changed events.
+export const $selectedMacroIdByRoom = map<Record<string, string | null>>({})
 
 // === Pinned messages ===
 

@@ -25,8 +25,21 @@ export const domRefs = {
   messagesDiv: $('#messages') as HTMLElement,
   chatForm: $('#chat-form') as HTMLFormElement,
   chatInput: $('#chat-input') as HTMLInputElement,
-  modeSelector: $('#mode-selector') as HTMLSelectElement,
-  pauseToggle: $('#btn-pause-toggle') as HTMLButtonElement,
+  // Pause status dot (header)
+  roomStatusDot: $('#room-status-dot') as HTMLButtonElement,
+  // Mode icon pair
+  btnModeBroadcast: $('#btn-mode-broadcast') as HTMLButtonElement,
+  btnModeManual: $('#btn-mode-manual') as HTMLButtonElement,
+  // Macro UI — toggle group (🎬 picker + list + next + create)
+  macroGroup: $('#macro-group') as HTMLElement,
+  btnMacroPicker: $('#btn-macro-picker') as HTMLButtonElement,
+  btnMacroList: $('#btn-macro-list') as HTMLButtonElement,
+  btnMacroNext: $('#btn-macro-next') as HTMLButtonElement,
+  btnMacroCreate: $('#btn-macro-create') as HTMLButtonElement,
+  macroChip: $('#macro-chip') as HTMLElement,
+  macroChipName: $('#macro-chip-name') as HTMLElement,
+  macroChipStep: $('#macro-chip-step') as HTMLElement,
+  btnMacroStop: $('#btn-macro-stop') as HTMLButtonElement,
   roomModeInfo: $('#room-mode-info') as HTMLElement,
   nameModal: $('#name-modal') as HTMLDialogElement,
   nameForm: $('#name-form') as HTMLFormElement,

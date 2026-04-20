@@ -76,7 +76,7 @@ export interface LLMCallMetrics {
 
 const streamWithRetry = async (
   provider: LLMProvider,
-  config: AIAgentConfig,
+  _config: AIAgentConfig,
   request: ChatRequest,
   onEvent?: (e: EvalEvent) => void,
   signal?: AbortSignal,
