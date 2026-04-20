@@ -84,8 +84,11 @@ Controls which agents receive each message in a room:
 |---|---|
 | **Broadcast** | Every non-muted member (default) |
 | **Flow** | One agent at a time, in a predefined sequence |
+| **Manual** | Humans only — AI peers are skipped; each AI is activated explicitly via a ▶ button on its chip |
 
-**Directed addressing** — write `[[AgentName]]` anywhere in a message to override the mode and deliver only to that agent. Works in both modes.
+**Directed addressing** — write `[[AgentName]]` anywhere in a message to override the mode and deliver only to that agent. Inert in manual mode (only the explicit ▶ click fires an agent).
+
+**Manual turn-taking** — switching a room into `manual` cancels any in-flight AI generation in that room, then holds every subsequent message until the user clicks ▶ on a specific AI chip. The activated agent catches up on any messages it missed and takes exactly one turn. Humans can post as many messages as they like between activations.
 
 **Muting** — mute any agent in any room from the UI. Muted agents are excluded from delivery in that room only.
 
@@ -196,9 +199,13 @@ Click **+ Room**. Optionally add a **Room Prompt** — a shared instruction that
 
 ### Managing delivery
 
-Click the **mode badge** (top of the room panel) to switch between broadcast and flow.
+Click the **mode selector** (top of the room panel) to switch between broadcast, manual, and flow.
 
 Each agent chip in the room header shows a status dot (green = idle, yellow = generating, grey = muted). Click the dot to toggle mute in that room. Hover the chip for the **×** to remove from the room. Use the **⏸** in the room panel to pause the room.
+
+**Manual mode** adds a ▶ button to every AI agent chip. Clicking ▶ gives that agent exactly one turn with the current room state. Muted agents' ▶ is hidden.
+
+**Bookmarks** — the 🔖 toolbar button opens a system-wide bookmark list. Hover any message to see its own 🔖 icon; click to add the message text to the list. Rows support in-line edit (pen) and delete (×). Clicking a row sends the text to the current room as a human message.
 
 The sidebar agent list has a hover-reveal **×** on each row for deleting the agent entirely.
 
@@ -411,9 +418,10 @@ Base URL: `http://localhost:3000`
 | `GET` | `/api/rooms/:name/members` | List members |
 | `POST` | `/api/rooms/:name/members` | Add agent to room |
 | `DELETE` | `/api/rooms/:name/members/:agentName` | Remove agent from room |
-| `PUT` | `/api/rooms/:name/delivery-mode` | Set delivery mode |
+| `PUT` | `/api/rooms/:name/delivery-mode` | Set delivery mode (`broadcast` / `manual`) |
 | `PUT` | `/api/rooms/:name/pause` | Pause / unpause |
 | `PUT` | `/api/rooms/:name/mute` | Mute / unmute agent |
+| `POST` | `/api/rooms/:name/agents/:agentName/activate` | Manual mode — catch the agent up and force one turn |
 
 ### Flows
 
@@ -439,8 +447,8 @@ Base URL: `http://localhost:3000`
 |---|---|---|
 | `GET` | `/api/agents` | List agents |
 | `POST` | `/api/agents` | Create AI agent |
-| `GET` | `/api/agents/:name` | Agent details |
-| `PATCH` | `/api/agents/:name` | Update system prompt / model |
+| `GET` | `/api/agents/:name` | Agent details (includes `tags` for both AI and human) |
+| `PATCH` | `/api/agents/:name` | Update system prompt / model / tags / description |
 | `DELETE` | `/api/agents/:name` | Remove agent |
 | `GET` | `/api/agents/:name/rooms` | Rooms agent is in |
 | `POST` | `/api/agents/:name/cancel` | Cancel active generation |
@@ -450,6 +458,17 @@ Base URL: `http://localhost:3000`
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/messages` | Post a message to rooms or agents |
+
+### Bookmarks
+
+System-wide message bookmarks, persisted in the snapshot. Newest bookmarks are returned first.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/bookmarks` | List all bookmarks |
+| `POST` | `/api/bookmarks` | Create bookmark `{ content }` |
+| `PUT` | `/api/bookmarks/:id` | Update content |
+| `DELETE` | `/api/bookmarks/:id` | Delete |
 
 ---
 
@@ -469,7 +488,8 @@ On connection, the server sends a `snapshot` message with the full current state
 { type: 'create_agent';     config: AIAgentConfig }
 { type: 'remove_agent';     name: string }
 { type: 'update_agent';     name: string; systemPrompt?: string; model?: string }
-{ type: 'set_delivery_mode'; roomName: string; mode: 'broadcast' }
+{ type: 'set_delivery_mode'; roomName: string; mode: 'broadcast' | 'manual' }
+{ type: 'activate_agent';   roomName: string; agentName: string }
 { type: 'set_paused';       roomName: string; paused: boolean }
 { type: 'set_muted';        roomName: string; agentName: string; muted: boolean }
 { type: 'add_flow';         roomName: string; name: string; steps: FlowStep[]; loop?: boolean }
@@ -495,6 +515,7 @@ On connection, the server sends a `snapshot` message with the full current state
 { type: 'agent_removed';     agentName: string }
 { type: 'delivery_mode_changed'; roomName: string; mode: DeliveryMode; paused: boolean }
 { type: 'mute_changed';      roomName: string; agentName: string; muted: boolean }
+{ type: 'activation_result'; roomName: string; agentName: string; ok: boolean; queued: boolean; reason?: string }
 { type: 'turn_changed';      roomName: string; agentName?: string; waitingForHuman?: boolean }
 { type: 'flow_event';        roomName: string; event: 'started' | 'step' | 'completed' | 'cancelled'; detail?: Record<string, unknown> }
 { type: 'todo_changed';      roomName: string; action: 'added' | 'updated' | 'removed'; todo: TodoItem }
