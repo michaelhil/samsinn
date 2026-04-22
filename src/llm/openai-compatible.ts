@@ -487,9 +487,36 @@ export const createOpenAICompatibleProvider = (config: OpenAICompatConfig): LLMP
 
             if (choice.delta?.tool_calls) {
               for (const tc of choice.delta.tool_calls) {
-                const idx = tc.index ?? 0
+                // Accumulator slot resolution:
+                //   1. Explicit `index` (OpenAI / Groq / Cerebras spec).
+                //   2. Existing slot with matching `id` (some providers).
+                //   3. No index, no id (Gemini via OpenAI-compat): stay on the
+                //      last slot unless its buffer is already a complete JSON
+                //      object AND the incoming fragment starts a fresh one —
+                //      which indicates a distinct parallel tool call. Without
+                //      this split, two `web_search` calls get concatenated into
+                //      `{...}{...}` which fails JSON.parse.
+                let idx: number
+                if (typeof tc.index === 'number') {
+                  idx = tc.index
+                } else if (tc.id) {
+                  const existing = toolAccum.findIndex(s => s?.id === tc.id)
+                  idx = existing >= 0 ? existing : toolAccum.length
+                } else {
+                  idx = Math.max(0, toolAccum.length - 1)
+                  const incomingArgs = tc.function?.arguments?.trim() ?? ''
+                  const current = toolAccum[idx]?.argsBuffer.trim() ?? ''
+                  if (incomingArgs.startsWith('{') && current.length > 0) {
+                    try {
+                      JSON.parse(current)
+                      // Current slot is a complete JSON object; incoming starts
+                      // a new object → it's a new tool call.
+                      idx = toolAccum.length
+                    } catch { /* still mid-object, keep accumulating */ }
+                  }
+                }
                 if (!toolAccum[idx]) toolAccum[idx] = { name: '', argsBuffer: '' }
-                const acc = toolAccum[idx]
+                const acc = toolAccum[idx]!
                 if (tc.id) acc.id = tc.id
                 if (tc.function?.name) acc.name = tc.function.name
                 if (tc.function?.arguments) acc.argsBuffer += tc.function.arguments

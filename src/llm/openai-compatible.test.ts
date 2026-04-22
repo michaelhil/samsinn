@@ -159,6 +159,35 @@ describe('createOpenAICompatibleProvider', () => {
     } finally { fx.stop() }
   })
 
+  test('streaming: parallel tool_calls without index split into separate slots (Gemini-style)', async () => {
+    // Gemini's OpenAI-compat streams parallel tool calls as full-object
+    // argument strings in successive deltas, with no `index` and no `id`.
+    // The accumulator must split them when it sees a complete-JSON buffer
+    // followed by a fresh '{' fragment — otherwise both args concatenate
+    // to `{...}{...}` and JSON.parse fails.
+    const fx = startFixture(() => ({
+      status: 200, body: '',
+      streamLines: [
+        JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { name: 'web_search', arguments: '{"query":"first"}' } }] } }] }),
+        JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { name: 'web_search', arguments: '{"query":"second"}' } }] } }] }),
+        JSON.stringify({ choices: [{ finish_reason: 'tool_calls', delta: {} }] }),
+        '[DONE]',
+      ],
+    }))
+    try {
+      const provider = createOpenAICompatibleProvider({ name: 'gemini', baseUrl: fx.url, getApiKey: () => 'k' })
+      const chunks: Array<{ delta: string; done: boolean; toolCalls?: ReadonlyArray<{ function: { name: string; arguments: Record<string, unknown> } }> }> = []
+      for await (const chunk of provider.stream!({ model: 'm', messages: [{ role: 'user', content: 'x' }] })) {
+        chunks.push(chunk as never)
+      }
+      const finalChunk = chunks.find(c => c.done)
+      expect(finalChunk?.toolCalls).toBeDefined()
+      expect(finalChunk?.toolCalls).toHaveLength(2)
+      expect(finalChunk?.toolCalls?.[0]?.function.arguments).toEqual({ query: 'first' })
+      expect(finalChunk?.toolCalls?.[1]?.function.arguments).toEqual({ query: 'second' })
+    } finally { fx.stop() }
+  })
+
   test('streaming: <think>...</think> extracted to thinking field', async () => {
     const fx = startFixture(() => ({
       status: 200, body: '',
