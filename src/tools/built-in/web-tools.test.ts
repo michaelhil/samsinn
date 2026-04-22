@@ -55,10 +55,27 @@ describe('createWebTools — registration', () => {
     expect(tools[0]!.name).toBe('web_search')
   })
 
-  test('brave takes priority when both configured', () => {
+  test('brave takes priority over google when both configured', () => {
     const tools = createWebTools({ braveApiKey: 'brave', googleApiKey: 'g', googleCseId: 'cx' })
     expect(tools.length).toBe(3)
     // Both would create web_search — brave wins (tried first in tryCreateSearchTool)
+    expect(tools[0]!.name).toBe('web_search')
+  })
+
+  test('tavilyApiKey → 3 tools including web_search', () => {
+    const tools = createWebTools({ tavilyApiKey: 'tvly-test' })
+    expect(tools.length).toBe(3)
+    expect(tools[0]!.name).toBe('web_search')
+  })
+
+  test('tavily takes priority over brave and google when all configured', () => {
+    const tools = createWebTools({
+      tavilyApiKey: 'tvly-key',
+      braveApiKey: 'brave',
+      googleApiKey: 'g',
+      googleCseId: 'cx',
+    })
+    expect(tools.length).toBe(3)
     expect(tools[0]!.name).toBe('web_search')
   })
 })

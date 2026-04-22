@@ -278,7 +278,7 @@ Drop a `.ts` file in `./tools/` (project-local) or `~/.samsinn/tools/` (user-glo
 | `web.ts` | `web_search`†, `fetch_url` |
 | `research.ts` | `arxiv_search`, `doi_lookup`, `semantic_scholar` |
 
-†`web_search` requires `BRAVE_API_KEY` or `SERPER_API_KEY`.
+†`web_search` requires one of `TAVILY_API_KEY` (default — LLM-optimized, free 1000/mo at [tavily.com](https://app.tavily.com/)), `BRAVE_API_KEY`, or `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID`. Precedence is Tavily → Brave → Google CSE.
 
 ---
 
@@ -292,8 +292,9 @@ All configuration is via environment variables. No config file is required.
 |---|---|---|
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
 | `PORT` | `3000` | HTTP/WebSocket port |
-| `BRAVE_API_KEY` | — | Enables `web_search` via Brave |
-| `SERPER_API_KEY` | — | Enables `web_search` via Serper (alternative to Brave) |
+| `TAVILY_API_KEY` | — | Enables `web_search` via Tavily (default — LLM-optimized, free 1000/mo) |
+| `BRAVE_API_KEY` | — | Enables `web_search` via Brave (used if Tavily not set) |
+| `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` | — | Enables `web_search` via Google CSE (used if Tavily and Brave not set) |
 | `SAMSINN_TOOLS_DIR` | — | Custom directory for external tools |
 
 Snapshot is saved to `data/snapshot.json` and auto-restored on startup.

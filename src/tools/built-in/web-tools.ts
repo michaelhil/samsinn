@@ -1,14 +1,17 @@
 // ============================================================================
 // Web Tools — web_search, web_fetch, web_extract_json
 //
-// web_search   — search the web via Brave or Google CSE (requires API key)
+// web_search   — search the web via Tavily, Brave, or Google CSE (requires API key)
 // web_fetch    — fetch any URL, returns cleaned Markdown
 // web_extract_json — fetch a JSON endpoint, optionally extract a nested path
 //
 // Registration:
 //   web_fetch and web_extract_json are always included.
-//   web_search is included only when a search provider is configured via env:
-//     BRAVE_API_KEY                         → Brave Search (preferred)
+//   web_search is included only when a search provider is configured via env.
+//   Provider precedence (first match wins):
+//     TAVILY_API_KEY                       → Tavily (default — LLM-optimized,
+//                                              free 1000 searches/month)
+//     BRAVE_API_KEY                        → Brave Search
 //     GOOGLE_CSE_API_KEY + GOOGLE_CSE_ID   → Google Custom Search
 //
 // Context budget:
@@ -22,6 +25,7 @@ import { htmlToMarkdown } from './html-to-md.ts'
 // === Configuration ===
 
 export interface WebToolsConfig {
+  readonly tavilyApiKey?: string
   readonly braveApiKey?: string
   readonly googleApiKey?: string
   readonly googleCseId?: string
@@ -87,10 +91,69 @@ interface SearchResult {
   readonly title: string
   readonly url: string
   readonly snippet: string
+  readonly score?: number
   readonly publishedAt?: string
 }
 
 // === Tool: web_search ===
+
+const buildTavilySearchTool = (apiKey: string): Tool => ({
+  name: 'web_search',
+  description: 'Searches the web (LLM-optimized via Tavily) and returns ranked results with cleaned content snippets and relevance scores.',
+  usage: 'Use to find current information, discover sources, or research a topic when you do not already have a specific URL. Tavily returns LLM-ready snippets — for many questions you may not need to follow up with web_fetch. Use web_fetch only when the snippet is insufficient.',
+  returns: '{ query, provider, results: Array<{ title, url, snippet, score?, publishedAt? }> }. results may be empty if nothing is found.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'The search query' },
+      count: { type: 'number', description: 'Number of results to return (default 5, max 10)' },
+      depth: { type: 'string', description: 'Search depth: "basic" (1 credit, default) or "advanced" (2 credits, deeper crawl)' },
+    },
+    required: ['query'],
+  },
+  execute: async (params, _context): Promise<ToolResult> => {
+    const query = params.query as string
+    const count = Math.min(Math.max(typeof params.count === 'number' ? params.count : 5, 1), 10)
+    const searchDepth = params.depth === 'advanced' ? 'advanced' : 'basic'
+    try {
+      const res = await fetchWithTimeout('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          query,
+          max_results: count,
+          search_depth: searchDepth,
+          include_answer: false,
+        }),
+      })
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          return { success: false, error: `Search API key rejected (HTTP ${res.status}). Check TAVILY_API_KEY.` }
+        }
+        if (res.status === 429) return { success: false, error: 'Search API rate limit exceeded (Tavily free tier is 1000/month). Try again later or upgrade.' }
+        return { success: false, error: `Search API returned HTTP ${res.status}` }
+      }
+      const json = await res.json() as {
+        results?: Array<{ title: string; url: string; content?: string; score?: number; published_date?: string }>
+      }
+      const results: SearchResult[] = (json.results ?? []).map(r => ({
+        title: r.title,
+        url: r.url,
+        snippet: r.content ?? '',
+        ...(typeof r.score === 'number' ? { score: r.score } : {}),
+        ...(r.published_date ? { publishedAt: r.published_date } : {}),
+      }))
+      return { success: true, data: { query, provider: 'tavily', results } }
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return { success: false, error: 'Search request timed out after 15s' }
+      return { success: false, error: `Search request failed: ${err instanceof Error ? err.message : 'unknown error'}` }
+    }
+  },
+})
 
 const buildBraveSearchTool = (apiKey: string): Tool => ({
   name: 'web_search',
@@ -181,6 +244,8 @@ const buildGoogleSearchTool = (apiKey: string, cseId: string): Tool => ({
 })
 
 const tryCreateSearchTool = (config: WebToolsConfig): Tool | undefined => {
+  // Precedence: Tavily (LLM-optimized default) → Brave → Google CSE.
+  if (config.tavilyApiKey) return buildTavilySearchTool(config.tavilyApiKey)
   if (config.braveApiKey) return buildBraveSearchTool(config.braveApiKey)
   if (config.googleApiKey && config.googleCseId) return buildGoogleSearchTool(config.googleApiKey, config.googleCseId)
   return undefined

@@ -400,8 +400,12 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   ])
 
   // Web tools — web_fetch and web_extract_json always registered;
-  // web_search registered only when BRAVE_API_KEY or GOOGLE_CSE_API_KEY+GOOGLE_CSE_ID is set.
+  // web_search registered when TAVILY_API_KEY (preferred), BRAVE_API_KEY, or
+  // GOOGLE_CSE_API_KEY+GOOGLE_CSE_ID is set. Tavily is the default — it's
+  // LLM-optimized (returns clean snippets + relevance scores) and has a
+  // generous free tier (1000 searches/month, no card required).
   toolRegistry.registerAll(createWebTools({
+    tavilyApiKey: process.env.TAVILY_API_KEY,
     braveApiKey: process.env.BRAVE_API_KEY,
     googleApiKey: process.env.GOOGLE_CSE_API_KEY,
     googleCseId: process.env.GOOGLE_CSE_ID,
