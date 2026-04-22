@@ -367,7 +367,16 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
         systemRemoveAgentFromRoom(id, profile.id)
       }
     }
-    return team.removeAgent(id)
+    const removed = team.removeAgent(id)
+    // Prune this ID from every surviving AI agent's "known agents" cache so
+    // it doesn't linger as a phantom entry after deletion.
+    if (removed) {
+      for (const other of team.listByKind('ai')) {
+        const ai = asAIAgent(other)
+        ai?.forgetAgent?.(id)
+      }
+    }
+    return removed
   }
 
   // Register built-in tools

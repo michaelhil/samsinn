@@ -86,19 +86,30 @@ export const getParticipantsForRoom = (
   roomId: string,
   history: AgentHistory,
   agentId: string,
+  getRoomMembers?: (roomId: string) => ReadonlyArray<AgentProfile>,
 ): ReadonlyArray<AgentProfile | string> => {
+  const seen = new Map<string, AgentProfile | string>()
+
+  // Preferred source: current room membership. Includes peers the agent
+  // has not yet seen speak (so the Participants list doesn't lie by omission).
+  if (getRoomMembers) {
+    for (const profile of getRoomMembers(roomId)) {
+      if (profile.id !== agentId) seen.set(profile.id, profile)
+    }
+  }
+
+  // Fallback / supplement: senders from message history. Preserves correctness
+  // when getRoomMembers is unavailable (tests, legacy call sites).
   const ctx = history.rooms.get(roomId)
   const historyMsgs = ctx?.history ?? []
   const fresh = history.incoming.filter(m => m.roomId === roomId)
-  const allMsgs = [...historyMsgs, ...fresh]
-
-  const senderIds = new Set<string>()
-  for (const msg of allMsgs) {
-    if (msg.senderId !== SYSTEM_SENDER_ID && msg.senderId !== agentId) {
-      senderIds.add(msg.senderId)
-    }
+  for (const msg of [...historyMsgs, ...fresh]) {
+    if (msg.senderId === SYSTEM_SENDER_ID || msg.senderId === agentId) continue
+    if (seen.has(msg.senderId)) continue
+    seen.set(msg.senderId, history.agentProfiles.get(msg.senderId) ?? msg.senderId)
   }
-  return [...senderIds].map(id => history.agentProfiles.get(id) ?? id)
+
+  return [...seen.values()]
 }
 
 // === Build deps ===
@@ -115,6 +126,10 @@ export interface BuildContextDeps {
   readonly getArtifactsForScope?: (roomId: string) => ReadonlyArray<Artifact>
   readonly getArtifactTypeDef?: (type: string) => ArtifactTypeDefinition | undefined
   readonly getCompressedIds?: (roomId: string) => ReadonlySet<string>
+  // Current room membership resolver. When provided, the Participants
+  // context section lists every member of the room — not only those whose
+  // messages the agent has observed.
+  readonly getRoomMembers?: (roomId: string) => ReadonlyArray<AgentProfile>
   readonly includePrompts?: IncludePrompts       // undefined = all on; missing keys = on
   readonly includeContext?: IncludeContext       // CONTEXT sub-section toggles
   readonly includeMacroStepPrompt?: boolean       // suffix on macro messages; default true
@@ -301,7 +316,7 @@ export const buildSystemSections = (
     optional: true,
   })
 
-  const participants = getParticipantsForRoom(triggerRoomId, deps.history, deps.agentId)
+  const participants = getParticipantsForRoom(triggerRoomId, deps.history, deps.agentId, deps.getRoomMembers)
   out.push({
     key: 'ctx_participants',
     label: 'Participants',

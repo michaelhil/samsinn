@@ -64,6 +64,10 @@ export interface AIAgentOptions {
   readonly getArtifactsForScope?: (roomId: string) => ReadonlyArray<Artifact>
   readonly getArtifactTypeDef?: (type: string) => ArtifactTypeDefinition | undefined
   readonly getCompressedIds?: (roomId: string) => ReadonlySet<string>
+  // Current room membership, resolved to profiles. Used by the Participants
+  // context section so an agent sees every peer in its room — not only those
+  // whose messages it has already observed.
+  readonly getRoomMembers?: (roomId: string) => ReadonlyArray<import('../core/types/messaging.ts').AgentProfile>
   readonly getSkills?: (roomName: string) => string
   readonly onEvalEvent?: (agentName: string, event: EvalEvent) => void
 }
@@ -139,6 +143,7 @@ export const createAIAgent = (
   const getArtifactsForScope = options?.getArtifactsForScope
   const getArtifactTypeDef = options?.getArtifactTypeDef
   const getCompressedIds = options?.getCompressedIds
+  const getRoomMembers = options?.getRoomMembers
   const getSkills = options?.getSkills
   const onEvalEvent = options?.onEvalEvent
 
@@ -173,6 +178,7 @@ export const createAIAgent = (
     contextEnabled,
     contextTokenBudget: resolveContextTokenBudget(),
     getCompressedIds: (roomId: string) => getCompressedIds?.(roomId) ?? new Set<string>(),
+    getRoomMembers,
   })
 
   // --- Evaluation loop: per-room generation with pending queue ---
@@ -517,6 +523,13 @@ export const createAIAgent = (
         for (const ctx of agentHistory.rooms.values()) ctx.history = []
         agentHistory.incoming.length = 0
       }
+    },
+    forgetAgent: (removedAgentId: string) => {
+      // Drop the cached profile so this agent no longer lists the removed
+      // participant under "Known agents". Messages that referenced the ID
+      // remain in history (with the sender name now resolving to raw id),
+      // but that's acceptable — history is immutable record.
+      agentHistory.agentProfiles.delete(removedAgentId)
     },
     deleteHistoryMessage: (roomId: string, messageId: string) => {
       const ctx = agentHistory.rooms.get(roomId)

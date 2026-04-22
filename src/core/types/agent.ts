@@ -99,6 +99,10 @@ export interface AIAgent extends Agent {
   readonly getMemoryStats?: () => AgentMemoryStats
   readonly clearHistory?: (roomId?: string) => void
   readonly deleteHistoryMessage?: (roomId: string, messageId: string) => boolean
+  // Remove a cached profile from this agent's knowledge of other agents.
+  // Called by System.removeAgent so surviving agents don't retain a stale
+  // "known agents" entry for a deleted participant.
+  readonly forgetAgent?: (agentId: string) => void
   // Returns a snapshot of the agent's current configuration (mutable fields resolved).
   // Use this when you need multiple config fields at once (e.g. for serialization).
   readonly getConfig: () => AIAgentConfig

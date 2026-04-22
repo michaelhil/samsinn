@@ -191,6 +191,16 @@ export const spawnAIAgent = async (
     getArtifactsForScope: (roomId: string) => house.artifacts.getForScope(roomId),
     getArtifactTypeDef: (type: string) => house.artifactTypes.get(type),
     getCompressedIds: (roomId: string) => house.getRoom(roomId)?.getCompressedIds() ?? new Set(),
+    getRoomMembers: (roomId: string) => {
+      const room = house.getRoom(roomId)
+      if (!room) return []
+      const profiles: Array<import('../core/types/messaging.ts').AgentProfile> = []
+      for (const id of room.getParticipantIds()) {
+        const a = team.getAgent(id)
+        if (a) profiles.push({ id: a.id, name: a.name, kind: a.kind, ...(a.metadata?.tags ? { tags: a.metadata.tags as ReadonlyArray<string> } : {}) })
+      }
+      return profiles
+    },
     getSkills: spawnOptions?.getSkills,
     onEvalEvent: spawnOptions?.onEvalEvent,
   }, spawnOptions?.overrideId)
