@@ -29,7 +29,7 @@ When in doubt: the `lateBinding` pattern is working. Ugly ≠ broken. Move on.
 - `bun run dev` — same, with watch mode
 - `bun run headless` — run as MCP server only (no HTTP UI); connects over stdio
 - `bun run check` — typecheck (`tsc --noEmit`); always run after non-trivial edits
-- `bun test` — run full suite. `bun test --filter '!Ollama'` skips Ollama integration tests
+- `bun test` — run full suite. `bun test -t '^(?!.*Ollama)'` skips Ollama integration tests (equivalent: `bun run test:unit`)
 - `bun test path/to/file.test.ts` — run one file; `bun test -t "pattern"` filters by test name
 - `bun run dev:remote` / `start:remote` — same as dev/start but with `OLLAMA_URL=http://192.168.0.222:11434`
 
