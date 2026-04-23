@@ -147,7 +147,13 @@
     .mute-btn.muted { background: color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger-hover); border-color: var(--danger); }
     .agent-muted { opacity: 0.5; }
     .sidebar-collapsed { width: 32px !important; min-width: 32px !important; max-width: 32px !important; overflow: hidden; }
-    .sidebar-collapsed .sidebar-content { display: none; }
+    /* `!important` needed because Tailwind's `.flex` and similar utilities
+       live in @layer utilities which outranks our @layer components. Same
+       reason `width` above uses !important. */
+    .sidebar-collapsed .sidebar-content { display: none !important; }
+    /* When the left icon group is hidden (via .sidebar-content above),
+       center the remaining expand button inside the 32px header. */
+    .sidebar-collapsed > :first-child { justify-content: center !important; }
     .workspace-handle { cursor: row-resize; }
     .workspace-handle:active { background: color-mix(in srgb, var(--accent) 25%, transparent); }
     /* Pause status dot (header + sidebar) */
@@ -202,7 +208,7 @@
     <aside id="sidebar" class="shrink-0 flex flex-col transition-all" style="width: fit-content; min-width: 120px; max-width: 200px; background: var(--surface); border-right: 1px solid var(--border);">
       <!-- Sidebar header — system icons only (title moved to footer) -->
       <div class="p-2 border-b flex items-center justify-between gap-1" style="border-color: var(--border);">
-        <div class="flex items-center gap-1">
+        <div class="sidebar-content flex items-center gap-1">
           <button id="btn-system-prompt" class="w-5 h-5 flex items-center justify-center" style="color: var(--text-muted);" title="System Prompt">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           </button>
