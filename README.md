@@ -162,6 +162,19 @@ Skills are loaded at startup and injected into agent context as a dedicated `===
 
 **Runtime skill creation** — agents can create new skills (`write_skill`) and bundle tools with them (`write_tool`) at runtime. Generated skills persist as files and survive restarts.
 
+### Packs
+
+A **pack** is a GitHub-hosted bundle of domain-specific skills and tools installed with one command — `install_pack atc` pulls `github.com/samsinn-packs/atc` and registers its contents into the running session, no restart needed.
+
+Packs namespace their contents: a tool named `plan` inside the `atc` pack is registered as `atc_plan`; the same-named tool inside `driving` is `driving_plan`. They coexist, and neither shadows a built-in `plan`. Skills get `<pack>/<name>` keys (`atc/chart-reader`).
+
+Three ways to install a pack:
+- `install_pack atc`                   → `github.com/samsinn-packs/atc`
+- `install_pack alice/my-pack`         → `github.com/alice/my-pack`
+- `install_pack https://github.com/...` → any full URL (https/ssh/git/file://)
+
+From the UI, use the **Packs** section in the sidebar. `update_pack` fast-forwards an install; `uninstall_pack` removes it. See [docs/packs.md](docs/packs.md) for authoring, layout, and publishing.
+
 ### Tools
 
 Agents invoke tools using the `::TOOL::` syntax (or native function-calling on supported models):
