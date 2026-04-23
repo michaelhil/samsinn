@@ -24,7 +24,29 @@ interface ServerConfig {
 
 // === Static file serving (path traversal protected) ===
 
-const serveStatic = async (pathname: string, uiPath: string, transpiler: Bun.Transpiler, distReady?: Promise<void>): Promise<Response | null> => {
+// Served in place of dist.css when the file is missing. A valid stylesheet
+// that paints a loud red banner across the top of the page with instructions
+// for the developer to recover. Simpler and more visible than a 404 +
+// console warning that nobody reads. `bun run start` chains `build:css`
+// before boot, so the user should only see this if they bypassed the
+// chained script (e.g. running `bun run src/main.ts` directly) or manually
+// deleted dist.css while the server is running.
+const MISSING_DIST_BANNER = `/* samsinn: dist.css missing — run "bun install && bun run build:css" */
+body::before {
+  content: "\u26a0 samsinn: CSS build missing. Run: bun install && bun run build:css";
+  position: fixed;
+  inset: 0 0 auto 0;
+  padding: 10px 16px;
+  background: #dc2626;
+  color: #ffffff;
+  font: 600 13px/1.3 system-ui, -apple-system, sans-serif;
+  z-index: 2147483647;
+  text-align: center;
+}
+body { padding-top: 40px; }
+`
+
+const serveStatic = async (pathname: string, uiPath: string, transpiler: Bun.Transpiler): Promise<Response | null> => {
   if (pathname === '/' || pathname === '/index.html') {
     const file = Bun.file(`${uiPath}/index.html`)
     if (await file.exists()) {
@@ -51,51 +73,17 @@ const serveStatic = async (pathname: string, uiPath: string, transpiler: Bun.Tra
   }
 
   if (pathname === '/dist.css') {
-    // If a boot-time build is in flight, wait for it so the first CSS
-    // request doesn't race to a 404 → unstyled flash.
-    if (distReady) await distReady
     const file = Bun.file(`${uiPath}/dist.css`)
     if (await file.exists()) {
       return new Response(file, { headers: { 'Content-Type': 'text/css', 'Cache-Control': 'no-cache' } })
     }
-    return new Response('/* dist.css missing — run `bun run build:css` */', {
-      status: 404,
-      headers: { 'Content-Type': 'text/css' },
+    return new Response(MISSING_DIST_BANNER, {
+      status: 200,
+      headers: { 'Content-Type': 'text/css', 'Cache-Control': 'no-store' },
     })
   }
 
   return null
-}
-
-// Build-on-boot: if dist.css is missing, run the Tailwind CLI synchronously
-// before accepting connections. On failure, log loudly — a silently missing
-// stylesheet produces an unstyled UI with no clue why.
-const ensureDistCss = async (uiPath: string): Promise<void> => {
-  const out = Bun.file(`${uiPath}/dist.css`)
-  if (await out.exists()) return
-  console.log('[css] dist.css missing — running one-shot Tailwind build…')
-  const t0 = Date.now()
-  try {
-    const proc = Bun.spawn([
-      'bunx', '@tailwindcss/cli',
-      '-i', `${uiPath}/input.css`,
-      '-o', `${uiPath}/dist.css`,
-      '--minify',
-    ], { stdout: 'inherit', stderr: 'inherit' })
-    const code = await proc.exited
-    if (code !== 0) {
-      console.error(`[css] ❌ Tailwind build failed (exit ${code}). UI will load unstyled until you run \`bun run build:css\`.`)
-      return
-    }
-    // Re-stat to confirm the file landed (the spawn could exit 0 with no output
-    // in pathological cases).
-    const after = Bun.file(`${uiPath}/dist.css`)
-    const size = (await after.exists()) ? after.size : 0
-    console.log(`[css] ✓ built dist.css in ${Date.now() - t0} ms (${size} B)`)
-  } catch (err) {
-    console.error(`[css] ❌ Could not spawn Tailwind CLI: ${err instanceof Error ? err.message : String(err)}.`)
-    console.error(`[css]   Run \`bun install\` to make sure @tailwindcss/cli is available, or pre-build with \`bun run build:css\`.`)
-  }
 }
 
 // === Server Factory ===
@@ -104,12 +92,6 @@ export const createServer = (system: System, config?: ServerConfig) => {
   const port = config?.port ?? DEFAULTS.port
   const uiPath = resolve(config?.uiPath ?? `${import.meta.dir}/../ui`)
   const transpiler = new Bun.Transpiler({ loader: 'ts' })
-
-  // Kick off dist.css build if missing. The Bun.serve setup below is
-  // synchronous, so by the time requests arrive this promise is usually
-  // resolved; if not, /dist.css returns 404 and the browser retries when
-  // the user refreshes. Errors log loudly inside ensureDistCss.
-  const distReady = ensureDistCss(uiPath)
 
   const wsManager = createWSManager(system)
 
@@ -244,7 +226,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
       if (apiResponse) return apiResponse
 
       // Static files
-      const staticResponse = await serveStatic(pathname, uiPath, transpiler, distReady)
+      const staticResponse = await serveStatic(pathname, uiPath, transpiler)
       if (staticResponse) return staticResponse
 
       return new Response('Not found', { status: 404 })

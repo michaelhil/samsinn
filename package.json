@@ -5,10 +5,10 @@
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
-    "start": "bun run src/main.ts",
+    "start": "bun run build:css && bun run src/main.ts",
+    "start:remote": "OLLAMA_URL=http://192.168.0.222:11434 bun run start",
     "dev": "bun run scripts/dev.ts",
     "dev:remote": "OLLAMA_URL=http://192.168.0.222:11434 bun run scripts/dev.ts",
-    "start:remote": "OLLAMA_URL=http://192.168.0.222:11434 bun run src/main.ts",
     "build:css": "bunx @tailwindcss/cli -i src/ui/input.css -o src/ui/dist.css --minify",
     "dev:server": "bun --watch src/main.ts",
     "dev:css": "bunx @tailwindcss/cli -i src/ui/input.css -o src/ui/dist.css --watch",
