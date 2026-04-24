@@ -8,18 +8,12 @@
 import { createWSClient, type WSClient } from './ws-client.ts'
 import { send, setWSClient } from './ws-send.ts'
 import { initMacroPanel, isMacroGroupExpanded } from './macro-panel.ts'
+import { initThinkingDisplay } from './thinking-display.ts'
+import { fetchRoomMessages, fetchRoomMembers, fetchRoomArtifacts } from './room-fetchers.ts'
 import { renderRooms, renderArtifacts } from './render-rooms.ts'
 import { renderAgents } from './render-agents.ts'
 import { mountRoomMembers, consumeAutoAddRoom, registerPendingCreateAdd, clearAutoAddRoom } from './render-room-members.ts'
 import { renderMessage } from './render-message.ts'
-import {
-  updateThinkingPreview,
-  updateThinkingTool,
-  updateThinkingLabel,
-  updateThinkingPreviewStyle,
-  showContextIcon,
-  addThinkingWarning,
-} from './render-thinking.ts'
 import type {
   UIMessage,
   RoomProfile,
@@ -38,17 +32,16 @@ import { populateModelSelect, getShowAllModels, setShowAllModels } from './model
 import { safeFetchJson } from './fetch-helpers.ts'
 import {
   updateOllamaHealthUI, updateOllamaMetricsUI,
-  wireOllamaDashboard, openOllamaDashboard,
+  wireOllamaDashboard,
   type OllamaDashboardElements,
 } from './ollama-dashboard.ts'
-import { startProvidersPanel, stopProvidersPanel } from './providers-panel.ts'
+import { stopProvidersPanel } from './providers-panel.ts'
+import { startLoggingStateDot } from './logging-panel.ts'
+import { initSettingsNav } from './settings-nav.ts'
 import {
-  openSummarySettingsModal,
-  openSummaryInspectModal,
   isSummaryGroupExpanded,
-  toggleSummaryGroup,
+  initSummaryPanel,
 } from './summary-panel.ts'
-import type { SummaryConfig } from '../../core/types/summary.ts'
 import {
   $myAgentId,
   $myName,
@@ -77,7 +70,6 @@ import {
   $pinnedMessages,
   $ollamaHealth,
   $ollamaMetrics,
-  $sidebarCollapsed,
   $agentContexts,
   $agentWarnings,
   $messageContexts,
@@ -103,7 +95,6 @@ const {
   btnSummaryToggle, btnSummarySettings, btnSummaryInspect, btnSummaryRegenerate,
   roomModeInfo,
   nameModal, nameForm, roomModal, roomForm, agentModal, agentForm,
-  sidebar, btnCollapseSidebar,
   agentsHeader, agentsToggle,
   artifactTypeSelect,
   ollamaStatusDot, ollamaDashboard, ollamaDashboardClose,
@@ -203,33 +194,7 @@ const submitArtifact = (): void => {
 }
 
 // === Data fetching (triggered by subscriptions) ===
-
-const fetchRoomMessages = async (roomId: string, roomName: string): Promise<void> => {
-  try {
-    const res = await fetch(`/api/rooms/${encodeURIComponent(roomName)}?limit=50`)
-    if (!res.ok) return
-    const data = await res.json() as { profile: RoomProfile; messages: UIMessage[] }
-    $roomMessages.setKey(data.profile.id, data.messages)
-  } catch { /* ignore */ }
-}
-
-const fetchRoomMembers = async (roomId: string, roomName: string): Promise<void> => {
-  try {
-    const res = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/members`)
-    if (!res.ok) return
-    const members = await res.json() as Array<{ id: string }>
-    $roomMembers.setKey(roomId, members.map(m => m.id))
-  } catch { /* ignore */ }
-}
-
-const fetchArtifactsForRoom = async (roomId: string, roomName: string): Promise<void> => {
-  try {
-    const res = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/artifacts`)
-    if (!res.ok) return
-    const artifacts = await res.json() as ArtifactInfo[]
-    for (const a of artifacts) $artifacts.setKey(a.id, a)
-  } catch { /* ignore */ }
-}
+// Lives in room-fetchers.ts — imported above.
 
 // === Room header status rendering (pause dot, mode icons, macro group, chip) ===
 
@@ -413,7 +378,7 @@ $selectedRoomId.listen((roomId, prevRoomId) => {
     }
 
     // Fetch artifacts
-    fetchArtifactsForRoom(roomId, room.name)
+    fetchRoomArtifacts(roomId, room.name)
 
     // Render messages — stamp roomId on the container for defensive checks
     messagesDiv.innerHTML = ''
@@ -525,68 +490,9 @@ $agents.listen((_agents, _old, _changedId) => {
   syncThinkingIndicators()
 })
 
-// --- Thinking preview content ---
-
-$thinkingPreviews.listen((previews, _old, changedId) => {
-  if (!changedId) return
-  const agentName = agentIdToName(changedId)
-  if (!agentName) return
-  // First chunk → switch label from "Sending to model..." to "Generating..."
-  if (!firstChunkSeen.has(changedId)) {
-    firstChunkSeen.add(changedId)
-    updateThinkingLabel(messagesDiv, agentName, `${agentName}: Generating...`)
-  }
-  updateThinkingPreview(messagesDiv, agentName, previews[changedId] ?? '')
-})
-
-$thinkingTools.listen((tools, _old, changedId) => {
-  if (!changedId) return
-  const agentName = agentIdToName(changedId)
-  if (!agentName) return
-  const toolText = tools[changedId] ?? ''
-  if (toolText === '__thinking__') {
-    // Model is in CoT thinking phase — update label, style preview as dimmed
-    updateThinkingLabel(messagesDiv, agentName, `${agentName}: Thinking...`)
-    updateThinkingPreviewStyle(messagesDiv, agentName, true)
-  } else if (toolText === '') {
-    // Thinking phase ended, response starting — update label, restore normal style
-    updateThinkingLabel(messagesDiv, agentName, `${agentName}: Generating...`)
-    updateThinkingPreviewStyle(messagesDiv, agentName, false)
-    firstChunkSeen.add(changedId) // treat as first chunk seen
-  } else {
-    updateThinkingTool(messagesDiv, agentName, toolText)
-    if (toolText.endsWith('...')) {
-      updateThinkingLabel(messagesDiv, agentName, `${agentName}: ${toolText}`)
-    } else {
-      updateThinkingLabel(messagesDiv, agentName, `${agentName}: Generating...`)
-    }
-  }
-})
-
-// --- Prompt context (for inspector icon on thinking indicator) ---
-$agentContexts.listen((contexts, _old, changedId) => {
-  if (!changedId) return
-  const agentName = agentIdToName(changedId)
-  if (!agentName) return
-  const ctx = contexts[changedId]
-  if (ctx) {
-    // Context ready → waiting for LLM to start generating (prefill phase)
-    updateThinkingLabel(messagesDiv, agentName, `${agentName}: Waiting for ${ctx.model}...`)
-    showContextIcon(messagesDiv, agentName, () => showContextModal(ctx, $agentWarnings.get()[changedId]))
-  }
-})
-
-// --- Eval warnings (context trimming, LLM errors, retries) ---
-$agentWarnings.listen((warnings, _old, changedId) => {
-  if (!changedId) return
-  const agentName = agentIdToName(changedId)
-  if (!agentName) return
-  const msgs = warnings[changedId] ?? []
-  // Show the latest warning (new ones are appended)
-  if (msgs.length > 0) {
-    addThinkingWarning(messagesDiv, agentName, msgs[msgs.length - 1]!)
-  }
-})
+// --- Thinking-indicator subscriptions live in thinking-display.ts.
+//     Preview / tools / contexts / warnings listeners wired by initThinkingDisplay. ---
+initThinkingDisplay({ messagesDiv, firstChunkSeen, showContextModal })
 
 // --- Artifacts → workspace ---
 $selectedRoomArtifacts.subscribe((artifacts) => {
@@ -668,12 +574,8 @@ $connected.listen((connected) => {
   if (connected) chatForm.querySelector('button')!.removeAttribute('disabled')
 })
 
-// --- Sidebar collapse ---
-$sidebarCollapsed.subscribe((collapsed) => {
-  sidebar.classList.toggle('sidebar-collapsed', collapsed)
-  btnCollapseSidebar.textContent = collapsed ? '▶' : '◀'
-  localStorage.setItem('samsinn-sidebar-collapsed', String(collapsed))
-})
+// --- Sidebar resize (drag handle on right edge; drag-to-left collapses) ---
+void import('./sidebar-resize.ts').then(m => m.initSidebarResize())
 
 // --- Ollama health/metrics ---
 $ollamaHealth.listen((health) => {
@@ -755,52 +657,12 @@ btnModeManual.onclick = () => setMode('manual')
 // --- Macro group (Stop, Picker, List, Next, Create) lives in macro-panel.ts.
 //     Wired once below via initMacroPanel. ---
 
-// --- Summary group: toggle expand + sub-actions ---
-btnSummaryToggle.onclick = (e) => {
-  e.stopPropagation()
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  toggleSummaryGroup(roomId)
-  refreshRoomControls()
-}
+// --- Summary group (Toggle, Settings, Inspect, Regenerate) lives in summary-panel.ts.
+//     Wired once below via initSummaryPanel. ---
 
-btnSummarySettings.onclick = async (e) => {
-  e.stopPropagation()
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const roomName = roomIdToName(roomId)
-  if (!roomName) return
-  try {
-    const resp = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/summary-config`)
-    if (!resp.ok) throw new Error(await resp.text())
-    const cfg = await resp.json() as SummaryConfig
-    openSummarySettingsModal(roomName, cfg, { send })
-  } catch (err) {
-    showToast(document.body, `Failed to load summary config: ${err instanceof Error ? err.message : String(err)}`, { type: 'error', position: 'fixed' })
-  }
-}
-
-btnSummaryInspect.onclick = (e) => {
-  e.stopPropagation()
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const roomName = roomIdToName(roomId)
-  if (!roomName) return
-  void openSummaryInspectModal(roomName, { send })
-}
-
-btnSummaryRegenerate.onclick = (e) => {
-  e.stopPropagation()
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const roomName = roomIdToName(roomId)
-  if (!roomName) return
-  send({ type: 'regenerate_summary', roomName, target: 'both' })
-  showToast(document.body, 'Regenerating summary + compression…', { position: 'fixed', durationMs: 2500 })
-}
-
-// Wire macro-panel handlers now that refreshRoomControls is in scope.
+// Wire macro + summary panel handlers now that refreshRoomControls is in scope.
 initMacroPanel({ onRefreshRoomControls: refreshRoomControls })
+initSummaryPanel({ onRefreshRoomControls: refreshRoomControls })
 
 roomForm.onsubmit = (e) => {
   e.preventDefault()
@@ -850,18 +712,11 @@ agentsHeader.onclick = () => {
   updateAgentsLabel()
 }
 
-// Tools + skills sidebar wiring lives in sidebar.ts.
-void import('./sidebar.ts').then(m => m.initSidebar())
-void import('./packs-panel.ts').then(m => m.initPacksPanel())
-void import('./logging-panel.ts').then(m => m.initLoggingPanel())
-
-btnCollapseSidebar.onclick = () => $sidebarCollapsed.set(!$sidebarCollapsed.get())
-
-// System-prompt modal lives in system-prompt-modal.ts.
-const btnSystemPrompt = $('#btn-system-prompt') as HTMLButtonElement
-btnSystemPrompt.onclick = () => {
-  void import('./system-prompt-modal.ts').then(m => m.openSystemPromptModal())
-}
+// Settings sidebar section — single nav entry to six modal rows.
+initSettingsNav()
+// Keep the logging recording dot fresh in the sidebar even when the
+// Logging modal isn't open.
+startLoggingStateDot()
 
 const btnClearMessages = $('#btn-clear-messages') as HTMLButtonElement
 btnClearMessages.onclick = () => {
@@ -916,21 +771,16 @@ void (async () => {
     if (!info) return
     const vEl = document.getElementById('app-version')
     if (vEl) vEl.textContent = `v${info.version}`
-    const linkEl = document.getElementById('app-repo-link') as HTMLAnchorElement | null
+    const linkEl = document.getElementById('app-repo-link') as HTMLButtonElement | null
     if (linkEl && info.repoUrl) {
-      linkEl.href = info.repoUrl
-      linkEl.style.display = 'flex'
+      linkEl.onclick = () => window.open(info.repoUrl, '_blank', 'noopener,noreferrer')
     }
   } catch { /* non-fatal */ }
 })()
 
-// Providers dashboard — Ollama wiring + cloud providers panel
+// Providers dashboard — one-time wiring. Opener lives in providers-modal.ts,
+// routed from the Settings > Providers sidebar row.
 wireOllamaDashboard(ollamaEls, send)
-
-document.getElementById('btn-ollama-dashboard')!.onclick = async () => {
-  await openOllamaDashboard(ollamaEls, send)
-  void startProvidersPanel()
-}
 
 // Stop polling when dashboard closes (reuses existing close event on the dialog).
 ollamaEls.dashboard.addEventListener('close', () => stopProvidersPanel())

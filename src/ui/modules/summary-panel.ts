@@ -6,7 +6,11 @@
 // ============================================================================
 
 import type { SummaryConfig, Aggressiveness } from '../../core/types/summary.ts'
-import type { WSClient } from './ws-client.ts'
+import { send } from './ws-send.ts'
+import { showToast } from './toast.ts'
+import { roomIdToName } from './identity-lookups.ts'
+import { domRefs } from './app-dom.ts'
+import { $selectedRoomId } from './stores.ts'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
@@ -27,7 +31,6 @@ export const toggleSummaryGroup = (roomId: string): boolean => {
 export const openSummarySettingsModal = (
   roomName: string,
   currentConfig: SummaryConfig,
-  ws: WSClient,
 ): void => {
   const modal = $<HTMLDialogElement>('summary-settings-modal')
   $<HTMLElement>('summary-settings-roomname').textContent = roomName
@@ -92,7 +95,7 @@ export const openSummarySettingsModal = (
         aggressiveness: agg.value as Aggressiveness,
       },
     }
-    ws.send({ type: 'set_summary_config', roomName, config })
+    send({ type: 'set_summary_config', roomName, config })
     modal.close()
   }
   // Re-bind: clear any prior listener
@@ -134,7 +137,6 @@ const isInspectOpenFor = (roomName: string): boolean => {
 
 export const openSummaryInspectModal = async (
   roomName: string,
-  ws: WSClient,
 ): Promise<void> => {
   const modal = $<HTMLDialogElement>('summary-inspect-modal')
   $<HTMLElement>('summary-inspect-roomname').textContent = roomName
@@ -161,13 +163,13 @@ export const openSummaryInspectModal = async (
   if (needSummary && needCompression) {
     inspectState.summaryRunning = true
     inspectState.compressionRunning = true
-    ws.send({ type: 'regenerate_summary', roomName, target: 'both' })
+    send({ type: 'regenerate_summary', roomName, target: 'both' })
   } else if (needSummary) {
     inspectState.summaryRunning = true
-    ws.send({ type: 'regenerate_summary', roomName, target: 'summary' })
+    send({ type: 'regenerate_summary', roomName, target: 'summary' })
   } else if (needCompression) {
     inspectState.compressionRunning = true
-    ws.send({ type: 'regenerate_summary', roomName, target: 'compression' })
+    send({ type: 'regenerate_summary', roomName, target: 'compression' })
   }
   renderInspect()
 
@@ -176,13 +178,13 @@ export const openSummaryInspectModal = async (
     inspectState.summaryText = ''
     inspectState.summaryRunning = true
     renderInspect()
-    ws.send({ type: 'regenerate_summary', roomName, target: 'summary' })
+    send({ type: 'regenerate_summary', roomName, target: 'summary' })
   }
   $<HTMLButtonElement>('summary-inspect-regen-compression').onclick = () => {
     inspectState.compressionText = ''
     inspectState.compressionRunning = true
     renderInspect()
-    ws.send({ type: 'regenerate_summary', roomName, target: 'compression' })
+    send({ type: 'regenerate_summary', roomName, target: 'compression' })
   }
   $<HTMLButtonElement>('summary-inspect-regen-both').onclick = () => {
     inspectState.summaryText = ''
@@ -190,7 +192,7 @@ export const openSummaryInspectModal = async (
     inspectState.summaryRunning = true
     inspectState.compressionRunning = true
     renderInspect()
-    ws.send({ type: 'regenerate_summary', roomName, target: 'both' })
+    send({ type: 'regenerate_summary', roomName, target: 'both' })
   }
 
   modal.showModal()
@@ -223,4 +225,62 @@ export const handleSummaryRunFailed = (roomName: string, target: 'summary' | 'co
   if (target === 'summary') { inspectState.summaryRunning = false; inspectState.summaryText = `[error] ${reason}` }
   else { inspectState.compressionRunning = false; inspectState.compressionText = `[error] ${reason}` }
   renderInspect()
+}
+
+// --- Summary group DOM handlers (header group: toggle, settings, inspect, regen) ---
+// Mirrors macro-panel.ts: one init function wires the 4 handlers; app.ts
+// calls it once at startup and passes onRefreshRoomControls so btnSummaryToggle
+// can trigger the shared refresh after toggling expansion.
+
+export interface SummaryPanelDeps {
+  readonly onRefreshRoomControls: () => void
+}
+
+export const initSummaryPanel = (deps: SummaryPanelDeps): void => {
+  const { btnSummaryToggle, btnSummarySettings, btnSummaryInspect, btnSummaryRegenerate } = domRefs
+
+  btnSummaryToggle.onclick = (e) => {
+    e.stopPropagation()
+    const roomId = $selectedRoomId.get()
+    if (!roomId) return
+    toggleSummaryGroup(roomId)
+    deps.onRefreshRoomControls()
+  }
+
+  btnSummarySettings.onclick = async (e) => {
+    e.stopPropagation()
+    const roomId = $selectedRoomId.get()
+    if (!roomId) return
+    const roomName = roomIdToName(roomId)
+    if (!roomName) return
+    try {
+      // Kept as bare fetch: the !ok branch reads response.text() to show
+      // the server's error message — safeFetchJson would lose that detail.
+      const resp = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/summary-config`)
+      if (!resp.ok) throw new Error(await resp.text())
+      const cfg = await resp.json() as SummaryConfig
+      openSummarySettingsModal(roomName, cfg)
+    } catch (err) {
+      showToast(document.body, `Failed to load summary config: ${err instanceof Error ? err.message : String(err)}`, { type: 'error', position: 'fixed' })
+    }
+  }
+
+  btnSummaryInspect.onclick = (e) => {
+    e.stopPropagation()
+    const roomId = $selectedRoomId.get()
+    if (!roomId) return
+    const roomName = roomIdToName(roomId)
+    if (!roomName) return
+    void openSummaryInspectModal(roomName)
+  }
+
+  btnSummaryRegenerate.onclick = (e) => {
+    e.stopPropagation()
+    const roomId = $selectedRoomId.get()
+    if (!roomId) return
+    const roomName = roomIdToName(roomId)
+    if (!roomName) return
+    send({ type: 'regenerate_summary', roomName, target: 'both' })
+    showToast(document.body, 'Regenerating summary + compression…', { position: 'fixed', durationMs: 2500 })
+  }
 }
