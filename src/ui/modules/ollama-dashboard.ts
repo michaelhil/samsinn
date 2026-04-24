@@ -4,6 +4,8 @@
 // Extracted from app.ts. All Ollama-specific DOM manipulation lives here.
 // ============================================================================
 
+import { safeFetchJson } from './fetch-helpers.ts'
+
 // === Types ===
 
 export interface OllamaDashboardElements {
@@ -116,7 +118,7 @@ export const updateOllamaMetricsUI = (metrics: Record<string, unknown>): void =>
 // === URL management ===
 
 export const refreshOllamaUrls = async (urlSelect: HTMLSelectElement): Promise<void> => {
-  const data = await fetch('/api/ollama/urls').then(r => r.ok ? r.json() : null).catch(() => null) as { current: string; saved: string[] } | null
+  const data = await safeFetchJson<{ current: string; saved: string[] }>('/api/ollama/urls')
   if (!data) return
   urlSelect.innerHTML = ''
   for (const url of data.saved) {

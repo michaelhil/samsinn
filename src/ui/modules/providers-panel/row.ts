@@ -21,7 +21,14 @@ export interface ProviderStatusEntry {
 // Where to send users to get an API key. Top-level consoles are more stable
 // than deep-link API-keys pages. Maintained inline here — edit when dashboards
 // move.
-const PROVIDER_URLS: Record<string, string> = {
+//
+// The record's key type is `CloudProviderName | 'ollama'`, so adding a new
+// provider to PROVIDER_PROFILES (which narrows CloudProviderName) forces a
+// matching entry here — TypeScript refuses to build otherwise. Prevents
+// forgotten URL updates without crossing server-side LLM config into UI
+// concerns.
+import type { CloudProviderName } from '../../../llm/providers-config.ts'
+const PROVIDER_URLS: Record<CloudProviderName | 'ollama', string> = {
   anthropic:  'https://console.anthropic.com',
   gemini:     'https://aistudio.google.com',
   cerebras:   'https://cloud.cerebras.ai',
