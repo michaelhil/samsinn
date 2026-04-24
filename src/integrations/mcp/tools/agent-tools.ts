@@ -57,10 +57,17 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
       model: z.string().describe('Model ID. Cloud models are provider-prefixed: "anthropic:claude-haiku-4-5", "gemini:gemini-2.5-flash", "groq:llama-3.3-70b-versatile", etc. Ollama models are bare: "llama3.2" or "qwen2.5:14b". Call GET /api/models for the live list.'),
       persona: z.string().describe('Persona defining who the agent is and how it should behave'),
       temperature: z.number().optional().describe('LLM temperature (0-1)'),
+      seed: z.number().int().optional().describe('Deterministic seed forwarded to every LLM call this agent issues (best-effort per provider — Ollama and OpenAI-family honor it; Anthropic/Gemini silently discard).'),
     },
-    async ({ name, model, persona, temperature }) => {
+    async ({ name, model, persona, temperature, seed }) => {
       try {
-        const agent = await system.spawnAIAgent({ name, model, persona, temperature })
+        const agent = await system.spawnAIAgent({
+          name,
+          model,
+          persona,
+          ...(temperature !== undefined ? { temperature } : {}),
+          ...(seed !== undefined ? { seed } : {}),
+        })
         return textResult({ id: agent.id, name: agent.name })
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to create agent')

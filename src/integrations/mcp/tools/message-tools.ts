@@ -4,6 +4,9 @@ import type { MessageTarget } from '../../../core/types/messaging.ts'
 import type { System } from '../../../main.ts'
 import { resolveMacroArtifact, isMacroError } from '../../../core/macro-artifact.ts'
 import { textResult, errorResult, resolveRoom } from './helpers.ts'
+import { asAIAgent } from '../../../agents/shared.ts'
+import { exportRoomConversation } from '../../../core/room-export.ts'
+import { waitForRoomIdle } from '../../../core/wait-for-idle.ts'
 
 export const registerMessageTools = (mcpServer: McpServer, system: System): void => {
   mcpServer.tool(
@@ -210,6 +213,47 @@ export const registerMessageTools = (mcpServer: McpServer, system: System): void
         return textResult({ removed: true })
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Failed to remove artifact')
+      }
+    },
+  )
+
+  mcpServer.tool(
+    'wait_for_idle',
+    'Wait for a room to become idle. Returns {idle, messageCount, lastMessageAt, elapsedMs}. Idle = no new message for quietMs AND all in-room AI agents resolved whenIdle. Polls every 500ms.',
+    {
+      roomName: z.string().describe('Room name'),
+      quietMs: z.number().int().default(5000).describe('Quiet period before idle fires (ms)'),
+      timeoutMs: z.number().int().default(120000).describe('Max wait before returning idle:false (ms)'),
+    },
+    async ({ roomName, quietMs, timeoutMs }) => {
+      try {
+        const room = resolveRoom(system, roomName)
+        const result = await waitForRoomIdle(room, {
+          quietMs,
+          timeoutMs,
+          inRoomAIAgents: () => room.getParticipantIds()
+            .map(id => system.team.getAgent(id))
+            .flatMap(a => { const ai = a ? asAIAgent(a) : null; return ai ? [ai] : [] }),
+        })
+        return textResult(result)
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'wait_for_idle failed')
+      }
+    },
+  )
+
+  mcpServer.tool(
+    'export_room',
+    'Export the full conversation of a room as JSON: {roomId, roomName, exportedAt, messageCount, messages}. Each message carries all telemetry fields the system records (tokens, provider, model, generationMs).',
+    {
+      roomName: z.string().describe('Room name'),
+    },
+    async ({ roomName }) => {
+      try {
+        const room = resolveRoom(system, roomName)
+        return textResult(exportRoomConversation(room))
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : 'export_room failed')
       }
     },
   )

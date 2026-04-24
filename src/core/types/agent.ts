@@ -169,6 +169,11 @@ export interface AIAgentConfig {
   readonly model: string
   readonly persona: string
   readonly temperature?: number
+  // Deterministic seed forwarded to every LLM call the agent issues, including
+  // tool-initiated sub-calls via ToolContext.llm. Coverage is best-effort per
+  // provider (Ollama + OpenAI/Groq/Cerebras/OpenRouter/Mistral/SambaNova honor
+  // it; Anthropic + Gemini silently discard). See README "Scripted runs".
+  readonly seed?: number
   readonly historyLimit?: number
   readonly tools?: ReadonlyArray<string>        // tool names this agent can use
   readonly maxToolIterations?: number           // default 5

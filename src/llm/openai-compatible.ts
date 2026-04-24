@@ -217,6 +217,11 @@ const buildOAIBody = (request: ChatRequest, stream: boolean, providerName: strin
   // Cerebras, OpenRouter). Providers that don't support it ignore the flag.
   if (stream) body.stream_options = { include_usage: true }
   if (request.temperature !== undefined) body.temperature = request.temperature
+  // Seed is emitted to every OpenAI-shape provider. Providers that support it
+  // (OpenAI, Groq, Cerebras, OpenRouter, Mistral, SambaNova) honor it; those
+  // that don't (Anthropic, Gemini) silently discard unknown fields. Keep the
+  // plumbing uniform; document per-provider coverage in the README.
+  if (request.seed !== undefined) body.seed = request.seed
   if (request.maxTokens !== undefined) body.max_tokens = request.maxTokens
   if (request.jsonMode) body.response_format = { type: 'json_object' }
   if (request.tools && request.tools.length > 0) body.tools = request.tools

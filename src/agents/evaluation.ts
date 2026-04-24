@@ -182,6 +182,7 @@ export const evaluate = async (
         model: config.model,
         messages: context as ReadonlyArray<{ role: 'system' | 'user' | 'assistant'; content: string }>,
         temperature: config.temperature,
+        ...(config.seed !== undefined ? { seed: config.seed } : {}),
         tools: toolDefinitions,
         think: config.thinking,
         ...(contextResult.systemBlocks ? { systemBlocks: contextResult.systemBlocks } : {}),
@@ -251,6 +252,7 @@ export const callLLM = async (
     model: options.model,
     messages,
     temperature: options.temperature,
+    ...(options.seed !== undefined ? { seed: options.seed } : {}),
     jsonMode: options.jsonMode,
   })
   return response.content
@@ -270,6 +272,7 @@ export const streamLLM = async function* (
     model: options.model,
     messages,
     temperature: options.temperature,
+    ...(options.seed !== undefined ? { seed: options.seed } : {}),
     jsonMode: options.jsonMode,
   }
 

@@ -5,6 +5,7 @@ import type { SettableDeliveryMode } from '../../core/types/messaging.ts'
 import type { SummaryConfig } from '../../core/types/summary.ts'
 import type { RouteEntry } from './types.ts'
 import { asAIAgent } from '../../agents/shared.ts'
+import { exportRoomConversation } from '../../core/room-export.ts'
 
 export const roomRoutes: RouteEntry[] = [
   {
@@ -39,6 +40,16 @@ export const roomRoutes: RouteEntry[] = [
       if (!room) return errorResponse(`Room "${name}" not found`, 404)
       const limit = parseInt(new URL(req.url).searchParams.get('limit') ?? '50', 10)
       return json({ profile: room.profile, messages: room.getRecent(limit) })
+    },
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/rooms\/([^/]+)\/export$/,
+    handler: (_req, match, { system }) => {
+      const name = decodeURIComponent(match[1]!)
+      const room = system.house.getRoom(name)
+      if (!room) return errorResponse(`Room "${name}" not found`, 404)
+      return json(exportRoomConversation(room))
     },
   },
   {

@@ -389,7 +389,7 @@ npx @modelcontextprotocol/inspector bun run src/main.ts --headless
 
 **Agent management:** `create_agent`, `list_agents`, `get_agent`, `remove_agent`, `update_agent_prompt`
 
-**Messaging:** `post_message`, `get_room_messages`
+**Messaging:** `post_message`, `get_room_messages`, `wait_for_idle`, `export_room`
 
 **Membership:** `add_to_room`, `remove_from_room`
 
@@ -402,6 +402,64 @@ npx @modelcontextprotocol/inspector bun run src/main.ts --headless
 **House config:** `get_house_prompts`, `set_house_prompts`
 
 **Resources:** `samsinn://rooms`, `samsinn://agents`, `samsinn://rooms/{name}/messages`
+
+---
+
+## Scripted runs
+
+Four primitives for scripting reproducible runs — the building blocks for a future batch-experiment runner (Phase 2). Each is usable today from the MCP stdio interface or the REST API.
+
+### Deterministic seed
+
+`AIAgentConfig.seed` (optional integer) is forwarded to every LLM call the agent issues, including tool-initiated sub-calls via `ToolContext.llm`. Surfaced on the `create_agent` MCP tool.
+
+| Provider | Seed honored |
+|---|---|
+| Ollama | ✅ (via `options.seed`) |
+| OpenAI | ✅ |
+| Groq | ✅ |
+| Cerebras | ✅ |
+| OpenRouter | ✅ (depends on upstream model) |
+| Mistral | ✅ |
+| SambaNova | ✅ |
+| Anthropic | ❌ silently discarded |
+| Gemini | ❌ silently discarded |
+
+Seed + high temperature still produces varied output (provider-dependent). For maximal reproducibility set `seed` and `temperature: 0`.
+
+### `wait_for_idle` MCP tool
+
+Blocks until a room has been quiet for `quietMs` (default 5000) AND every in-room AI agent has resolved `whenIdle()`, or `timeoutMs` (default 120000) elapses. Combining the two signals prevents false-idle during long thinking or long tool loops.
+
+```
+wait_for_idle({roomName: "trial-1", quietMs: 5000, timeoutMs: 60000})
+→ {idle: true, messageCount: 14, lastMessageAt: 1745...,  elapsedMs: 5100}
+```
+
+### Full conversation export
+
+`export_room` MCP tool **and** `GET /api/rooms/:name/export` return the same JSON: every message in the room with all telemetry it carries (tokens, provider, model, `generationMs`). Messages pass through unchanged — any future field on `Message` flows into exports automatically.
+
+```
+$ curl http://localhost:3000/api/rooms/trial-1/export | jq '.messageCount'
+14
+```
+
+Tool-call traces are not included (tool calls are internal to the evaluation loop, not persisted on messages).
+
+### Ephemeral mode
+
+`SAMSINN_EPHEMERAL=1` disables all snapshot I/O — no load at boot, no per-change auto-save, no shutdown flush. Every run starts clean and leaves no trace on disk. Intended for batch runs where each invocation should be independent.
+
+```bash
+SAMSINN_EPHEMERAL=1 bun run headless
+```
+
+Startup prints `[bootstrap] ephemeral mode — snapshot disabled` as confirmation.
+
+### What's not here yet (Phase 2)
+
+The runner itself — spec-file loader, variant orchestrator, result aggregator — is not included. The four primitives above are the vocabulary the runner will compose from. Expected to live in a sibling `experiments/` folder that drives a samsinn subprocess over MCP stdio.
 
 ---
 

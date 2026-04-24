@@ -76,12 +76,15 @@ const warnMissingTools = (agentName: string, requested: ReadonlyArray<string>, r
 
 // Build tool support — always uses native tool calling.
 // The pass tool is auto-injected so all agents can decline to respond.
+// `seed`, when provided, is threaded into every tool-initiated LLM sub-call
+// so reproducibility extends past the agent's main turn.
 export const buildToolSupport = async (
   toolNames: ReadonlyArray<string>,
   registry: ToolRegistry,
   agentRef: { readonly id: string; readonly name: string; readonly currentModel?: () => string },
   llmProvider: LLMProvider,
   maxResultChars?: number,
+  seed?: number,
 ): Promise<AgentToolSupport> => {
   // Always include the pass tool (auto-injected for all agents)
   const allToolNames = toolNames.includes('pass') ? toolNames : [...toolNames, 'pass']
@@ -95,8 +98,16 @@ export const buildToolSupport = async (
   const lazyContext: ToolContext = {
     get callerId() { return agentRef.id },
     get callerName() { return agentRef.name },
-    llm: (request) => callLLM(llmProvider, { ...request, model: agentRef.currentModel?.() ?? '' }),
-    llmStream: (request) => streamLLM(llmProvider, { ...request, model: agentRef.currentModel?.() ?? '' }),
+    llm: (request) => callLLM(llmProvider, {
+      ...request,
+      model: agentRef.currentModel?.() ?? '',
+      ...(seed !== undefined ? { seed } : {}),
+    }),
+    llmStream: (request) => streamLLM(llmProvider, {
+      ...request,
+      model: agentRef.currentModel?.() ?? '',
+      ...(seed !== undefined ? { seed } : {}),
+    }),
     maxResultChars,
   }
   const executor = createToolExecutor(registry, allToolNames, lazyContext)
@@ -116,7 +127,7 @@ const resolveAgentTools = async (
     warnMissingTools(config.name, requestedTools, toolRegistry)
   }
 
-  return buildToolSupport(requestedTools, toolRegistry, agentRef, llmProvider, config.maxToolResultChars)
+  return buildToolSupport(requestedTools, toolRegistry, agentRef, llmProvider, config.maxToolResultChars, config.seed)
 }
 
 // --- Spawn AI Agent ---

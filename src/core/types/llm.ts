@@ -66,6 +66,8 @@ export interface ChatRequest {
     readonly content: string
   }>
   readonly temperature?: number
+  // Deterministic seed; best-effort per provider (see AIAgentConfig.seed).
+  readonly seed?: number
   readonly maxTokens?: number
   readonly jsonMode?: boolean
   readonly tools?: ReadonlyArray<ToolDefinition>
@@ -163,4 +165,7 @@ export interface LLMCallOptions {
   }>
   readonly temperature?: number
   readonly jsonMode?: boolean
+  // Plumbed from the calling agent so tool-initiated LLM sub-calls inherit
+  // the same determinism as the agent's main turn.
+  readonly seed?: number
 }

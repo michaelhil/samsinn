@@ -27,6 +27,9 @@ const DRAIN_TIMEOUT_MS = 5_000
 
 export const bootstrap = async (): Promise<void> => {
   const headless = process.argv.includes('--headless')
+  // SAMSINN_EPHEMERAL=1 → batch/experiment mode: no snapshot load, no auto-save,
+  // no shutdown flush. Every run starts clean and leaves no trace on disk.
+  const ephemeral = process.env.SAMSINN_EPHEMERAL === '1'
 
   // In headless mode, redirect console.log to stderr (stdout is reserved for MCP protocol)
   if (headless) {
@@ -47,6 +50,7 @@ export const bootstrap = async (): Promise<void> => {
 
   const pkg = await Bun.file(`${import.meta.dir}/../package.json`).json() as { version: string }
   console.log(`Samsinn v${pkg.version}${headless ? ' (headless)' : ''}`)
+  if (ephemeral) console.log('[bootstrap] ephemeral mode — snapshot disabled')
   console.log(summariseProviderConfig(providerConfig))
 
   // Load filesystem tools and skills before snapshot restore so restored agents get them
@@ -55,13 +59,13 @@ export const bootstrap = async (): Promise<void> => {
   await loadSkills(system.skillsDir, system.skillStore, system.toolRegistry)
   await loadAllPacks(system.packsDir, system.toolRegistry, system.skillStore)
 
-  // Restore from snapshot if available
+  // Restore from snapshot if available (skipped entirely in ephemeral mode).
   const snapshotPath = resolve(import.meta.dir, '../data/snapshot.json')
-  const snapshot = await loadSnapshot(snapshotPath)
+  const snapshot = ephemeral ? null : await loadSnapshot(snapshotPath)
   if (snapshot) {
     await restoreFromSnapshot(system, snapshot)
     console.log(`Restored from snapshot: ${snapshot.rooms.length} rooms, ${snapshot.agents.length} agents`)
-  } else {
+  } else if (!ephemeral) {
     console.log('Fresh start — no snapshot found.')
   }
 
@@ -100,11 +104,13 @@ export const bootstrap = async (): Promise<void> => {
     const timeout = new Promise<void>(res => setTimeout(res, DRAIN_TIMEOUT_MS))
     const aiAgents = system.team.listAgents().flatMap(a => { const ai = asAIAgent(a); return ai ? [ai] : [] })
     await Promise.all(aiAgents.map(a => Promise.race([a.whenIdle(), timeout])))
-    try {
-      await autoSaver.flush()
-      console.log('Snapshot saved.')
-    } catch (err) {
-      console.error('Failed to save snapshot on shutdown:', err)
+    if (!ephemeral) {
+      try {
+        await autoSaver.flush()
+        console.log('Snapshot saved.')
+      } catch (err) {
+        console.error('Failed to save snapshot on shutdown:', err)
+      }
     }
     await mcpResult.disconnect()
     process.exit(0)
@@ -120,11 +126,13 @@ export const bootstrap = async (): Promise<void> => {
     await startMCPServerStdio(mcpServer)
     console.log('MCP server running on stdio')
   } else {
-    // Full mode: HTTP + WebSocket server with browser UI
+    // Full mode: HTTP + WebSocket server with browser UI.
+    // In ephemeral mode, pass undefined for onAutoSave so per-change writes
+    // don't hit disk either.
     const { createServer } = await import('./api/server.ts')
     createServer(system, {
       port: parseInt(process.env.PORT ?? String(DEFAULTS.port), 10),
-      onAutoSave: autoSaver.scheduleSave,
+      ...(ephemeral ? {} : { onAutoSave: autoSaver.scheduleSave }),
     })
   }
 }

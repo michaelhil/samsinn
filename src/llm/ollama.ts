@@ -126,6 +126,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
     }
 
     if (request.temperature !== undefined) options.temperature = request.temperature
+    if (request.seed !== undefined) options.seed = request.seed
     if (request.maxTokens !== undefined) options.num_predict = request.maxTokens
 
     body.options = options
@@ -198,6 +199,7 @@ export const createOllamaProvider = (initialBaseUrl: string): OllamaProviderExte
       num_ctx: request.numCtx ?? DEFAULT_NUM_CTX,
     }
     if (request.temperature !== undefined) streamOpts.temperature = request.temperature
+    if (request.seed !== undefined) streamOpts.seed = request.seed
     if (request.maxTokens !== undefined) streamOpts.num_predict = request.maxTokens
     body.options = streamOpts
     if (request.think !== undefined) body.think = request.think
