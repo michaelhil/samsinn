@@ -6,6 +6,8 @@
 // ============================================================================
 
 import { createWSClient, type WSClient } from './ws-client.ts'
+import { send, setWSClient } from './ws-send.ts'
+import { initMacroPanel, isMacroGroupExpanded } from './macro-panel.ts'
 import { renderRooms, renderArtifacts } from './render-rooms.ts'
 import { renderAgents } from './render-agents.ts'
 import { mountRoomMembers, consumeAutoAddRoom, registerPendingCreateAdd, clearAutoAddRoom } from './render-room-members.ts'
@@ -116,33 +118,12 @@ const $ = (sel: string) => document.querySelector(sel)!
 const workspace = createWorkspace({ bar: workspaceBar, pane: workspacePane, chatArea, label: workspaceLabel })
 
 // === WS client ===
-
+// The `client` reference is held in ws-send.ts so any UI module can call
+// `send(...)` without being threaded the client through imports.
 let client: WSClient | null = null
-const send = (data: unknown) => client?.send(data)
 
 // Thinking indicator ephemeral state (DOM-local, not in stores)
 const firstChunkSeen = new Set<string>()
-
-// === Lazy imports ===
-
-const lazyMacroEditor = async (
-  agents: Map<string, AgentInfo>, myAgentId: string,
-  onSave: (name: string, steps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>, loop: boolean, description?: string) => void,
-) => {
-  const { openMacroEditorModal } = await import('./macro-editor.ts')
-  openMacroEditorModal(agents, myAgentId, onSave)
-}
-
-const lazyMacroEditorEdit = async (
-  agents: Map<string, AgentInfo>, myAgentId: string,
-  existingSteps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>,
-  existingLoop: boolean, existingName: string, existingDescription: string | undefined,
-  onSave: (name: string, steps: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }>, loop: boolean, description?: string) => void,
-) => {
-  const { openMacroEditorModal } = await import('./macro-editor.ts')
-  const stepsWithPrompt = existingSteps.map(s => ({ agentId: s.agentId, agentName: s.agentName, stepPrompt: s.stepPrompt ?? '' }))
-  openMacroEditorModal(agents, myAgentId, onSave, existingName, stepsWithPrompt, existingLoop, existingDescription)
-}
 
 // === Action helpers ===
 
@@ -252,10 +233,8 @@ const fetchArtifactsForRoom = async (roomId: string, roomName: string): Promise<
 
 // === Room header status rendering (pause dot, mode icons, macro group, chip) ===
 
-// Per-room UI expand state for the macro group. In-memory only — resets on
-// reload by design (per refactor spec). Key: roomId.
-const macroGroupExpanded = new Map<string, boolean>()
-
+// Per-room UI expand state for the macro group lives in macro-panel.ts;
+// we read it via isMacroGroupExpanded() below.
 const refreshRoomControls = (): void => {
   const paused = $roomPaused.get()
   const mode = $currentDeliveryMode.get()
@@ -278,8 +257,8 @@ const refreshRoomControls = (): void => {
   btnModeBroadcast.setAttribute('aria-pressed', mode === 'broadcast' ? 'true' : 'false')
   btnModeManual.setAttribute('aria-pressed', mode === 'manual' ? 'true' : 'false')
 
-  // Macro group expand state (per-room)
-  const expanded = roomId ? (macroGroupExpanded.get(roomId) ?? false) : false
+  // Macro group expand state (per-room) — state lives in macro-panel.ts
+  const expanded = roomId ? isMacroGroupExpanded(roomId) : false
   btnMacroPicker.setAttribute('aria-pressed', expanded ? 'true' : 'false')
   btnMacroList.classList.toggle('hidden', !expanded)
   btnMacroNext.classList.toggle('hidden', !expanded)
@@ -773,26 +752,8 @@ const setMode = (mode: 'broadcast' | 'manual'): void => {
 btnModeBroadcast.onclick = () => setMode('broadcast')
 btnModeManual.onclick = () => setMode('manual')
 
-// --- Macro chip stop button ---
-btnMacroStop.onclick = () => {
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const roomName = roomIdToName(roomId)
-  if (!roomName) return
-  send({ type: 'stop_macro', roomName })
-}
-
-// --- Macro group: toggle expand/collapse per room ---
-btnMacroPicker.onclick = (e) => {
-  e.stopPropagation()
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const wasOpen = macroGroupExpanded.get(roomId) ?? false
-  // Close any open list popover when collapsing.
-  if (wasOpen) closeMacroListPopover()
-  macroGroupExpanded.set(roomId, !wasOpen)
-  refreshRoomControls()
-}
+// --- Macro group (Stop, Picker, List, Next, Create) lives in macro-panel.ts.
+//     Wired once below via initMacroPanel. ---
 
 // --- Summary group: toggle expand + sub-actions ---
 btnSummaryToggle.onclick = (e) => {
@@ -838,122 +799,8 @@ btnSummaryRegenerate.onclick = (e) => {
   showToast(document.body, 'Regenerating summary + compression…', { position: 'fixed', durationMs: 2500 })
 }
 
-// --- Macro list popover (opened by 📋 button) ---
-let macroListPopoverEl: HTMLElement | null = null
-const closeMacroListPopover = (): void => {
-  macroListPopoverEl?.remove()
-  macroListPopoverEl = null
-  document.removeEventListener('click', onDocClickForListPopover, true)
-}
-const onDocClickForListPopover = (ev: MouseEvent): void => {
-  if (!macroListPopoverEl) return
-  const t = ev.target as Node
-  if (!macroListPopoverEl.contains(t) && t !== btnMacroList) closeMacroListPopover()
-}
-
-btnMacroList.onclick = (e) => {
-  e.stopPropagation()
-  if (macroListPopoverEl) { closeMacroListPopover(); return }
-
-  const roomId = $selectedRoomId.get()
-  const roomName = roomId ? roomIdToName(roomId) : null
-  if (!roomName || !roomId) return
-  const macros = $selectedRoomArtifacts.get().filter(a => !a.resolvedAt && a.type === 'macro')
-  if (macros.length === 0) return   // button is disabled in this state — defensive
-
-  const selection = $selectedMacroIdByRoom.get()[roomId] ?? null
-
-  macroListPopoverEl = document.createElement('div')
-  macroListPopoverEl.className = 'macro-popover'
-
-  for (const m of macros) {
-    const body = m.body as { loop?: boolean }
-    const row = document.createElement('div')
-    row.className = 'macro-item'
-
-    const label = document.createElement('span')
-    label.className = 'flex-1 truncate'
-    const isSelected = m.id === selection
-    label.textContent = `${isSelected ? '✓ ' : ''}${m.title}${body.loop ? ' ↻' : ''}`
-    if (isSelected) label.style.fontWeight = '600'
-
-    const selectBtn = document.createElement('button')
-    selectBtn.className = 'text-xs px-2 py-0.5 text-accent hover:text-accent-hover'
-    selectBtn.textContent = isSelected ? '✓' : 'Select'
-    selectBtn.title = isSelected ? 'Already selected' : `Select ${m.title}`
-    selectBtn.disabled = isSelected
-    selectBtn.onclick = () => {
-      send({ type: 'select_macro', roomName, macroArtifactId: m.id })
-      closeMacroListPopover()
-    }
-
-    const editBtn = document.createElement('button')
-    editBtn.className = 'text-xs px-2 py-0.5 text-text-subtle hover:text-text-strong'
-    editBtn.textContent = '✎'
-    editBtn.title = `Edit ${m.title}`
-    editBtn.onclick = () => {
-      closeMacroListPopover()
-      const agentsMap = new Map(Object.entries($agents.get()).map(([id, a]) => [id, a as AgentInfo]))
-      const existingSteps = (body as { steps?: ReadonlyArray<{ agentId: string; agentName: string; stepPrompt?: string }> }).steps ?? []
-      lazyMacroEditorEdit(agentsMap, $myAgentId.get() ?? '', existingSteps, !!body.loop, m.title, (m.body as { description?: string }).description, (name, steps, loop, description) => {
-        send({ type: 'update_artifact', artifactId: m.id, title: name, body: { steps, loop, ...(description !== undefined ? { description } : {}) } })
-      })
-    }
-
-    row.appendChild(label)
-    row.appendChild(selectBtn)
-    row.appendChild(editBtn)
-    macroListPopoverEl.appendChild(row)
-  }
-
-  const rect = btnMacroList.getBoundingClientRect()
-  macroListPopoverEl.style.top = `${rect.bottom + 4}px`
-  macroListPopoverEl.style.right = `${window.innerWidth - rect.right}px`
-  document.body.appendChild(macroListPopoverEl)
-
-  setTimeout(() => document.addEventListener('click', onDocClickForListPopover, true), 0)
-}
-
-// --- Macro group: Next (start or advance) ---
-btnMacroNext.onclick = () => {
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const roomName = roomIdToName(roomId)
-  if (!roomName) return
-  // Auto-flush any unsent composer text (Send-then-Next UX).
-  const pending = chatInput.value.trim()
-  if (pending) {
-    send({ type: 'post_message', target: { rooms: [roomName] }, content: pending })
-    chatInput.value = ''
-  }
-  send({ type: 'room_next', roomName })
-}
-
-// --- Macro group: Create (opens editor, auto-selects on save) ---
-btnMacroCreate.onclick = () => {
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const roomName = roomIdToName(roomId)
-  if (!roomName) return
-  const agentsMap = new Map(Object.entries($agents.get()).map(([id, a]) => [id, a as AgentInfo]))
-  lazyMacroEditor(agentsMap, $myAgentId.get() ?? '', (name, steps, loop, description) => {
-    const requestId = crypto.randomUUID()
-    // Register a one-shot hook that fires when the server echoes artifact_created.
-    pendingCreateHooks.set(requestId, (artifactId, artifactType) => {
-      if (artifactType !== 'macro') return
-      send({ type: 'select_macro', roomName, macroArtifactId: artifactId })
-    })
-    send({
-      type: 'add_artifact',
-      artifactType: 'macro',
-      title: name,
-      body: { steps, loop },
-      scope: [roomName],
-      requestId,
-      ...(description !== undefined ? { description } : {}),
-    })
-  })
-}
+// Wire macro-panel handlers now that refreshRoomControls is in scope.
+initMacroPanel({ onRefreshRoomControls: refreshRoomControls })
 
 roomForm.onsubmit = (e) => {
   e.preventDefault()
@@ -1100,6 +947,9 @@ const connect = (name: string) => {
   }, (connected) => {
     $connected.set(connected)
   })
+  // Expose the active client to any module that imports send() from ws-send.ts
+  // (macro-panel.ts and any future panel). Mirrors the local `client` ref.
+  setWSClient(client)
 }
 
 const savedName = localStorage.getItem('ta_name')
