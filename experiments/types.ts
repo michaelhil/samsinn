@@ -40,6 +40,8 @@ export interface Variant {
   readonly agents: ReadonlyArray<AgentSpec>
 }
 
+export type IsolationMode = 'subprocess' | 'reset'
+
 export interface ExperimentSpec {
   readonly experiment: string
   readonly base: {
@@ -53,6 +55,14 @@ export interface ExperimentSpec {
   readonly wait: WaitConfig
   // Resolved against process.cwd() by the CLI before any filesystem work.
   readonly outputDir: string
+  // How runs are isolated from each other.
+  //   'subprocess' (default) — one samsinn subprocess per run. Bulletproof,
+  //     ~18s cold start cost per run.
+  //   'reset' — one subprocess for the whole batch; `reset_system` MCP tool
+  //     clears state between runs. Order-of-magnitude faster for large
+  //     batches, but provider-router state (cooldowns, warmed model caches)
+  //     persists across runs by design.
+  readonly isolation?: IsolationMode
 }
 
 // --- Outputs ---

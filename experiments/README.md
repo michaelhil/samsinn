@@ -109,11 +109,38 @@ Errors do NOT abort the batch — the next run starts fresh in a new subprocess.
 - `1` — all runs failed, OR spec loading/validation error
 - `2` — bad CLI usage
 
+## Isolation modes
+
+`spec.isolation` controls how runs are kept independent from each other.
+
+| Mode | Behavior | Per-run cost | Trade-offs |
+|---|---|---|---|
+| `'subprocess'` (default) | One samsinn subprocess per run | ~7.5s startup + real work | Bulletproof isolation. Every run gets a clean tool registry, skill store, provider state, and process memory. |
+| `'reset'` | One subprocess for the whole batch; `reset_system` MCP tool clears rooms/agents/artifacts between runs | First run pays startup, rest pay only ~500ms reset + real work | Order-of-magnitude faster. Preserves tool registry, skill store, warmed model caches, **and provider router cooldowns** across runs. Small memory growth in the router's per-agent Map (bounded, negligible in practice). |
+
+Measured on the included `zero-agent` example (4 trivial runs, no LLM calls):
+
+| Mode | 4-run wall time |
+|---|---|
+| `subprocess` | ~31s |
+| `reset` | ~8s |
+
+Speedup grows with batch size: a 50-run reset-mode batch completes in ~35s (~700ms per run average), whereas subprocess mode would take ~6 minutes.
+
+**Use `subprocess` when**: you want maximum isolation, or you suspect samsinn's in-memory state could affect results across runs (e.g. running with summary-scheduler enabled, or with tools that mutate process-wide state).
+
+**Use `reset` when**: you're running >20 runs and the overhead matters, and your experiments don't depend on cold provider-router state (rate-limit cooldowns from one run DO carry into the next — often desirable, but be aware).
+
+```ts
+const spec: ExperimentSpec = {
+  // ...
+  isolation: 'reset',  // opt in
+}
+```
+
 ## Cost considerations
 
-Each run spawns its own samsinn subprocess (~3s cold start per run). For a batch of 100 runs, that's ~5 minutes of startup overhead on top of LLM latency. Sequential execution is intentional — parallelism is limited by provider rate limits anyway, and persistent-process mode (keeping samsinn alive between runs via a future `reset_system` tool) is a planned Phase 3 optimization.
-
-LLM cost is determined by your spec: model × temperature × message count × repeats.
+LLM cost is determined by your spec: model × temperature × message count × repeats. Samsinn subprocess overhead is addressed by the isolation modes above.
 
 ## Interrupt handling
 
@@ -129,7 +156,9 @@ SIGINT (Ctrl-C) stops the batch after the in-flight run's result + summary have 
 
 ## Examples
 
-- **`examples/zero-agent.ts`** — no-LLM smoke spec. Runs in seconds without any API key. Used as the integration fixture.
+- **`examples/zero-agent.ts`** — no-LLM smoke spec, subprocess mode. Runs in seconds without any API key.
+- **`examples/zero-agent-reset.ts`** — same shape, `isolation: 'reset'`. Use to verify reset mode locally.
+- **`examples/zero-agent-subprocess.ts`** — explicit subprocess mode for side-by-side perf comparison.
 - **`examples/hello-world.ts`** — one real Anthropic agent, two temperature variants. Requires `ANTHROPIC_API_KEY` in the environment (or a key stored in `~/.samsinn/providers.json`).
 
 ## What this runner does NOT do

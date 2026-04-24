@@ -102,6 +102,10 @@ export const validateSpec = (spec: unknown): ExperimentSpec => {
     throw new Error('Invalid spec: `repeats` must be a positive integer when set')
   }
 
+  if (s.isolation !== undefined && s.isolation !== 'subprocess' && s.isolation !== 'reset') {
+    throw new Error(`Invalid spec: \`isolation\` must be 'subprocess' or 'reset' when set (got ${JSON.stringify(s.isolation)})`)
+  }
+
   return spec as ExperimentSpec
 }
 

@@ -103,6 +103,29 @@ describe('validateSpec — structural checks', () => {
     })
     expect(result.experiment).toBe('x')
   })
+
+  test('rejects invalid isolation value', () => {
+    expect(() => validateSpec({
+      experiment: 'x',
+      base: { room: { name: 'r' }, trigger: { content: 'hi' } },
+      variants: [{ name: 'a', agents: [] }],
+      wait: { quietMs: 1, timeoutMs: 1 },
+      outputDir: 'o',
+      isolation: 'parallel',
+    })).toThrow('isolation')
+  })
+
+  test('accepts isolation: reset', () => {
+    const result = validateSpec({
+      experiment: 'x',
+      base: { room: { name: 'r' }, trigger: { content: 'hi' } },
+      variants: [{ name: 'a', agents: [] }],
+      wait: { quietMs: 1, timeoutMs: 1 },
+      outputDir: 'o',
+      isolation: 'reset',
+    })
+    expect(result.isolation).toBe('reset')
+  })
 })
 
 describe('loadSpec — file import + digest', () => {

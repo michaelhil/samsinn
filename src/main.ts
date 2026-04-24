@@ -93,6 +93,14 @@ export interface System {
   readonly ollamaUrls: OllamaUrlRegistry
   readonly removeAgent: (id: string) => boolean
   readonly removeRoom: (roomId: string) => boolean
+  // Clear every room, agent, and artifact from the running instance. Used by
+  // the `reset_system` MCP tool in the experiment runner's persistent-process
+  // mode so a single subprocess can serve many independent runs. Leaves the
+  // tool registry, skill store, provider router, and snapshot wiring alone —
+  // only the per-conversation state is reset. In-flight AI generations get a
+  // bounded `whenIdle(5000)` + `cancelGeneration()` before the agent is
+  // removed so results from cancelled runs don't post into the next run.
+  readonly resetState: () => Promise<{ readonly rooms: number; readonly agents: number; readonly artifacts: number }>
   readonly addAgentToRoom: (agentId: string, roomId: string, invitedBy?: string) => Promise<void>
   readonly removeAgentFromRoom: (agentId: string, roomId: string, removedBy?: string) => void
   readonly spawnAIAgent: (config: AIAgentConfig, options?: SpawnOptions) => Promise<Agent>
@@ -336,6 +344,35 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     return { ok: true, queued }
   }
 
+  // Reset all per-conversation state. See interface doc for what's preserved.
+  // For each AI agent: bounded whenIdle(5000) + cancelGeneration so in-flight
+  // tool loops or streams don't later post into a freshly-reset room. Human
+  // agents have no generation loop so they're removed directly.
+  const resetState = async (): Promise<{ rooms: number; agents: number; artifacts: number }> => {
+    const agents = team.listAgents()
+    let agentCount = 0
+    for (const agent of agents) {
+      const ai = asAIAgent(agent)
+      if (ai) {
+        try {
+          await ai.whenIdle(5000)
+        } catch {
+          // whenIdle rejects on timeout — proceed with a forced cancel.
+        }
+        try { ai.cancelGeneration() } catch { /* best-effort */ }
+      }
+      if (removeAgent(agent.id)) agentCount++
+    }
+    const rooms = house.listAllRooms()
+    let roomCount = 0
+    for (const profile of rooms) {
+      if (systemRemoveRoom(profile.id)) roomCount++
+    }
+    const artifactCount = house.artifacts.list().length
+    house.artifacts.clear()
+    return { rooms: roomCount, agents: agentCount, artifacts: artifactCount }
+  }
+
   const removeAgent = (id: string): boolean => {
     const agent = team.getAgent(id)
     if (!agent) return false
@@ -471,6 +508,7 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     ollamaUrls,
     removeAgent,
     removeRoom: systemRemoveRoom,
+    resetState,
     addAgentToRoom: systemAddAgentToRoom,
     removeAgentFromRoom: systemRemoveAgentFromRoom,
     spawnAIAgent: boundSpawnAIAgent,

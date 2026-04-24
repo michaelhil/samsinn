@@ -151,6 +151,9 @@ export interface ArtifactStore {
   readonly list: (filter?: ArtifactFilter) => ReadonlyArray<Artifact>
   readonly getForScope: (roomId: string) => ReadonlyArray<Artifact>
   readonly restore: (artifacts: ReadonlyArray<Artifact>) => void
+  // Drop every artifact without firing per-artifact notifications. Used by
+  // System.resetState for experiment-runner persistent-process mode.
+  readonly clear: () => void
 }
 
 export type OnArtifactChanged = (action: 'added' | 'updated' | 'removed' | 'resolved', artifact: Artifact) => void

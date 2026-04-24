@@ -143,5 +143,9 @@ export const createArtifactStore = (
     for (const artifact of items) artifacts.set(artifact.id, artifact)
   }
 
-  return { add, update, remove, get, list, getForScope, restore }
+  const clear = (): void => {
+    artifacts.clear()
+  }
+
+  return { add, update, remove, get, list, getForScope, restore, clear }
 }
