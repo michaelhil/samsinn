@@ -2,7 +2,7 @@
 // Handles markdown rendering via marked+DOMPurify (globals) with graceful fallback.
 
 import type { UIMessage, AgentInfo } from './render-types.ts'
-import { renderMermaidBlocks } from './render-mermaid.ts'
+import { renderMermaidBlocks } from './mermaid/index.ts'
 
 // Render Markdown content safely. Falls back to textContent if libraries not loaded.
 // Post-processes mermaid code blocks into rendered diagrams.

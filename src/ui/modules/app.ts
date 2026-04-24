@@ -1056,7 +1056,7 @@ void (async () => {
   wireThemeToggle()
   onThemeChange(async () => {
     try {
-      const { reRenderAllMermaid } = await import('./render-mermaid.ts')
+      const { reRenderAllMermaid } = await import('./mermaid/index.ts')
       await reRenderAllMermaid()
     } catch { /* mermaid may not be loaded yet */ }
   })

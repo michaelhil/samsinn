@@ -254,7 +254,7 @@ export const renderDocumentArtifact = (
 
 // === Mermaid ===
 
-import { renderMermaidSource } from './render-mermaid.ts'
+import { renderMermaidSource } from './mermaid/index.ts'
 
 export const renderMermaidArtifact = (
   artifact: ArtifactInfo,

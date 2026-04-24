@@ -232,13 +232,14 @@ export interface SystemSection {
 
 export type SystemSectionKey =
   | 'house' | 'room' | 'persona' | 'responseFormat' | 'skills'
-  | 'ctx_intro'       // "You are in room X" — always emitted
+  | 'ctx_intro'           // "You are in room X" — always emitted
   | 'ctx_flow'
   | 'ctx_participants'
   | 'ctx_artifacts'
   | 'ctx_activity'
   | 'ctx_knownAgents'
-  | 'ctx_newHint'     // "[NEW] hint" — always emitted
+  | 'ctx_newHint'         // "[NEW] hint" — always emitted
+  | 'ctx_renderingHints'  // "diagrams render inline" etc. — always emitted
 
 export const buildSystemSections = (
   deps: BuildContextDeps,
@@ -359,7 +360,19 @@ export const buildSystemSections = (
   out.push({
     key: 'ctx_newHint',
     label: 'NEW_HINT',
-    text: 'Messages marked [NEW] have arrived since you last responded.\nTo include a diagram, wrap Mermaid source in a ```mermaid fenced code block — the UI renders it inline as an SVG. Rules: use `flowchart` (not `graph`); no trailing semicolons; every node is `ID[Label]` or `ID(Label)` or `ID{Label}` — never a bare quoted string; if a label contains `/`, `#`, `<`, or `>`, quote it inside the brackets like `P["Process / Store"]`, not as `"Process / Store"` on its own.',
+    text: 'Messages marked [NEW] have arrived since you last responded.',
+    enabled: true,
+    optional: false,
+  })
+
+  out.push({
+    key: 'ctx_renderingHints',
+    label: 'RENDERING HINTS',
+    text: [
+      'Wrap Mermaid diagrams in ```mermaid fences — they render inline as SVG in chat.',
+      'Use diagrams for processes, state machines, or systems with ≥3 interacting parts.',
+      'For diagrams that evolve across many turns, use `add_artifact type="mermaid"` instead of an inline fence.',
+    ].join('\n'),
     enabled: true,
     optional: false,
   })
@@ -384,7 +397,7 @@ export const buildSystemSections = (
 // up to the first variable block caches cleanly on Gemini (implicit) and
 // Anthropic (explicit cache_control).
 const CTX_STABLE_KEYS: ReadonlyArray<SystemSectionKey> = [
-  'ctx_intro', 'ctx_activity', 'ctx_newHint',
+  'ctx_intro', 'ctx_activity', 'ctx_newHint', 'ctx_renderingHints',
 ]
 const CTX_VARIABLE_KEYS: ReadonlyArray<SystemSectionKey> = [
   'ctx_knownAgents', 'ctx_participants', 'ctx_artifacts', 'ctx_flow',
