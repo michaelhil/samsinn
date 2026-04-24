@@ -20,6 +20,6 @@
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": false
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/ui/**/*.ts"]
+  "include": ["src/**/*.ts", "experiments/**/*.ts"],
+  "exclude": ["src/ui/**/*.ts", "experiments/out/**"]
 }

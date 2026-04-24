@@ -11,3 +11,4 @@ coverage/
 .claude/
 data/
 src/ui/dist.css
+experiments/out/

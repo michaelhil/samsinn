@@ -58,8 +58,9 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
       persona: z.string().describe('Persona defining who the agent is and how it should behave'),
       temperature: z.number().optional().describe('LLM temperature (0-1)'),
       seed: z.number().int().optional().describe('Deterministic seed forwarded to every LLM call this agent issues (best-effort per provider — Ollama and OpenAI-family honor it; Anthropic/Gemini silently discard).'),
+      tools: z.array(z.string()).optional().describe('Tool names available to this agent. When omitted, agent has access to every registered tool. Pass an empty array for no tools.'),
     },
-    async ({ name, model, persona, temperature, seed }) => {
+    async ({ name, model, persona, temperature, seed, tools }) => {
       try {
         const agent = await system.spawnAIAgent({
           name,
@@ -67,6 +68,7 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
           persona,
           ...(temperature !== undefined ? { temperature } : {}),
           ...(seed !== undefined ? { seed } : {}),
+          ...(tools !== undefined ? { tools } : {}),
         })
         return textResult({ id: agent.id, name: agent.name })
       } catch (err) {
