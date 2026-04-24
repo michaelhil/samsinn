@@ -1,0 +1,179 @@
+// ============================================================================
+// JSONL file sink — append-only event stream for observational logging.
+//
+// Writes newline-delimited JSON to `<dir>/<sessionId>.jsonl`. When the active
+// file passes `rotateAtBytes`, the next write opens `<sessionId>.1.jsonl`,
+// then `<sessionId>.2.jsonl`, etc. Rotation is purely size-based; no
+// time-based rotation (deployments handling that add their own post-process).
+//
+// Robustness:
+// - write() is synchronous (queue-only); flushing happens off the event loop
+// - queue cap = 10,000 events. On overflow, drop oldest with loud stderr
+//   warning; when the sink next successfully writes, it emits a synthetic
+//   `log.dropped` event so analysts see the gap in the stream.
+// - Sink errors (EACCES, ENOSPC, etc.) → stderr, sink keeps running. A single
+//   unrecoverable failure does not bring down samsinn.
+// - close() drains the queue before returning.
+// ============================================================================
+
+import { appendFile, mkdir, stat } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import type { LogEvent, LogSink, LogSinkStats } from './types.ts'
+
+export interface JsonlFileSinkOptions {
+  readonly dir: string
+  readonly sessionId: string
+  readonly rotateAtBytes?: number   // default 100 MB
+  readonly flushIntervalMs?: number // default 1000
+  readonly queueCap?: number        // default 10,000
+}
+
+const DEFAULT_ROTATE_BYTES = 100 * 1024 * 1024
+const DEFAULT_FLUSH_INTERVAL_MS = 1000
+const DEFAULT_QUEUE_CAP = 10_000
+
+export const createJsonlFileSink = (options: JsonlFileSinkOptions): LogSink => {
+  const rotateAtBytes = options.rotateAtBytes ?? DEFAULT_ROTATE_BYTES
+  const flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+  const queueCap = options.queueCap ?? DEFAULT_QUEUE_CAP
+
+  // Queue of serialized JSONL lines. Held in-memory between flushes.
+  let queue: string[] = []
+  let eventCount = 0
+  let droppedCount = 0
+  let pendingDropNotice = 0  // drops since last successful write — emitted as synthetic log.dropped
+
+  // Rotation state. currentFilePath tracks the active file; currentFileBytes
+  // is the locally-tracked byte count (we own the file; no external writers).
+  let rotationIndex = 0
+  let currentFileBytes = 0
+  let closed = false
+
+  const pathFor = (index: number): string =>
+    index === 0
+      ? join(options.dir, `${options.sessionId}.jsonl`)
+      : join(options.dir, `${options.sessionId}.${index}.jsonl`)
+
+  let currentFilePath = pathFor(0)
+
+  // On construction, seed currentFileBytes from any existing file so we
+  // don't over-append past rotation. Fire-and-forget; worst case we rotate
+  // one event late.
+  const seedBytes = async () => {
+    try {
+      const s = await stat(currentFilePath)
+      currentFileBytes = s.size
+    } catch { /* no pre-existing file — fine */ }
+  }
+  void seedBytes()
+
+  // Ensure dir exists before the first write. Cached to avoid per-flush mkdir.
+  let dirEnsured = false
+  const ensureDir = async (): Promise<void> => {
+    if (dirEnsured) return
+    await mkdir(dirname(currentFilePath), { recursive: true })
+    dirEnsured = true
+  }
+
+  const serialize = (event: LogEvent): string => {
+    // JSON.stringify can throw on circular refs — extremely unlikely for our
+    // event shapes, but defend anyway so a bad payload can't take down the flush loop.
+    try {
+      return JSON.stringify(event) + '\n'
+    } catch (err) {
+      return JSON.stringify({
+        ts: event.ts,
+        kind: 'log.serialize_failed',
+        session: event.session,
+        payload: { originalKind: event.kind, error: err instanceof Error ? err.message : String(err) },
+      }) + '\n'
+    }
+  }
+
+  const flushNow = async (): Promise<void> => {
+    if (queue.length === 0) return
+
+    // Snapshot the queue and prepend synthetic drop-notice if needed.
+    const pending: string[] = []
+    const emittingDropNotice = pendingDropNotice > 0
+    if (emittingDropNotice) {
+      const notice: LogEvent = {
+        ts: Date.now(),
+        kind: 'log.dropped',
+        session: options.sessionId,
+        payload: { count: pendingDropNotice, reason: 'queue overflow' },
+      }
+      pending.push(serialize(notice))
+      pendingDropNotice = 0
+    }
+    pending.push(...queue)
+    queue = []
+
+    const batch = pending.join('')
+    const batchBytes = Buffer.byteLength(batch, 'utf-8')
+
+    try {
+      await ensureDir()
+
+      // Rotate first if this batch would push past the threshold.
+      if (currentFileBytes > 0 && currentFileBytes + batchBytes > rotateAtBytes) {
+        rotationIndex++
+        currentFilePath = pathFor(rotationIndex)
+        currentFileBytes = 0
+      }
+
+      await appendFile(currentFilePath, batch, 'utf-8')
+      currentFileBytes += batchBytes
+      // Real events written = pending.length minus the synthetic notice (if any).
+      eventCount += pending.length - (emittingDropNotice ? 1 : 0)
+    } catch (err) {
+      // mkdir failure, disk full, permission denied, etc. Log once; drop this
+      // batch so we don't loop forever on a broken disk. Queue is already cleared.
+      droppedCount += pending.length
+      pendingDropNotice += pending.length
+      console.error(`[logging] sink write failed for ${currentFilePath}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  // Background flush loop. setInterval returns a Timer; unref() so it doesn't
+  // block process exit if close() hasn't been called.
+  const timer = setInterval(() => {
+    void flushNow().catch(err => {
+      console.error(`[logging] flush loop error: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }, flushIntervalMs)
+  timer.unref?.()
+
+  return {
+    write: (event: LogEvent): void => {
+      if (closed) return
+      if (queue.length >= queueCap) {
+        // Drop the oldest event, increment counters, emit stderr warning once
+        // per overflow batch (every 100th drop suffices — we still surface count).
+        queue.shift()
+        droppedCount++
+        pendingDropNotice++
+        if (droppedCount === 1 || droppedCount % 100 === 0) {
+          console.error(`[logging] queue overflow, dropping oldest (total dropped: ${droppedCount})`)
+        }
+      }
+      queue.push(serialize(event))
+    },
+    flush: async (): Promise<void> => {
+      await flushNow()
+    },
+    close: async (): Promise<void> => {
+      if (closed) return
+      closed = true
+      clearInterval(timer)
+      await flushNow()
+    },
+    stats: (): LogSinkStats => ({
+      eventCount,
+      droppedCount,
+      queuedCount: queue.length,
+      currentFile: currentFilePath,
+      currentFileBytes,
+    }),
+  }
+}

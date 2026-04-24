@@ -21,6 +21,7 @@ import { packsRoutes } from './routes/packs.ts'
 import { systemRoutes } from './routes/system.ts'
 import { bookmarkRoutes } from './routes/bookmarks.ts'
 import { toolRoutes } from './routes/tools.ts'
+import { loggingRoutes } from './routes/logging.ts'
 import type { RouteContext } from './routes/types.ts'
 
 // Route helpers live in ./routes/helpers.ts to keep http-routes.ts cycle-free.
@@ -37,6 +38,7 @@ const allRoutes = [
   ...providersRoutes,
   ...packsRoutes,
   ...systemRoutes,
+  ...loggingRoutes,
   ...bookmarkRoutes,
   // Artifacts before rooms (avoids /rooms/:name/artifacts being shadowed)
   ...artifactRoutes,

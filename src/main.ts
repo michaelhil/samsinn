@@ -64,6 +64,18 @@ import { join } from 'node:path'
 import { createOllamaUrlRegistry, type OllamaUrlRegistry } from './core/ollama-urls.ts'
 export type { OllamaUrlRegistry }
 
+import type { LogConfig, LogConfigState, LogEvent, LogSink } from './logging/types.ts'
+import { createJsonlFileSink } from './logging/jsonl-sink.ts'
+import { matchesKindFilter, validateLogConfig, defaultLogDir, defaultSessionId } from './logging/config.ts'
+import {
+  mkArtifactChanged, mkDeliveryModeChanged, mkEvalEvent, mkMacroEvent,
+  mkMembershipChanged, mkMessagePosted, mkModeAutoSwitched,
+  mkProviderAllFailed, mkProviderBound, mkProviderStreamFailed,
+  mkRoomCreated, mkRoomDeleted, mkSessionEnd, mkSessionStart,
+  mkSummaryConfigChanged, mkSummaryRunCompleted, mkSummaryRunFailed,
+  mkSummaryRunStarted, mkSummaryUpdated,
+} from './logging/event-mapping.ts'
+
 export interface System {
   readonly house: House
   readonly team: Team
@@ -133,6 +145,25 @@ export interface System {
   readonly setOnSummaryRunCompleted: (cb: (roomId: string, target: SummaryTarget, text: string) => void) => void
   readonly setOnSummaryRunFailed: (cb: (roomId: string, target: SummaryTarget, reason: string) => void) => void
   readonly setOnSummaryConfigChanged: (cb: OnSummaryConfigChanged) => void
+
+  // --- Observational logging (opt-in; off by default) ---
+  // Subscribe an observer to every event kind supported by src/logging.
+  // Returns an unsubscribe function. Used by the file-sink wiring in
+  // bootstrap and by the runtime-reconfigure path (system.logging).
+  readonly addEventObserver: (observer: LogEventObserver) => () => void
+  readonly logging: LoggingHandle
+}
+
+// --- Logging handle — runtime on/off + location/session/kind control ---
+
+export type LogEventObserver = (event: LogEvent) => void
+
+export interface LoggingHandle {
+  readonly get: () => LogConfigState
+  // Swap the active sink. Drains + closes the previous sink, optionally
+  // opens a new one (if enabled). Emits session.end on the old sink and
+  // session.start on the new one for bracketing. Rejects on invalid config.
+  readonly configure: (partial: Partial<LogConfig>) => Promise<void>
 }
 
 export interface CreateSystemOptions {
@@ -159,10 +190,44 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     team.getAgent(agentId)?.receive(message)
   }
 
-  const lateBinding = <T extends (...args: never[]) => void>(): { proxy: T; set: (cb: T) => void } => {
+  // `set` preserves the existing primary-consumer semantics (one typed
+  // subscriber — WS broadcast or MCP notifications). `add` is the multi-
+  // subscriber escape hatch added for observational logging (v1 second
+  // consumer). The proxy dispatches to the primary first, then observers;
+  // each observer is wrapped in try/catch so one failing observer doesn't
+  // stop the others. Observers iterate over a snapshot so unsubscribe
+  // during dispatch is safe.
+  const lateBinding = <T extends (...args: never[]) => void>(): {
+    proxy: T
+    set: (cb: T) => void
+    add: (cb: T) => () => void
+  } => {
     let real: T | undefined
-    const proxy = ((...args: Parameters<T>) => real?.(...args)) as T
-    return { proxy, set: (cb: T) => { real = cb } }
+    const observers: T[] = []
+    const proxy = ((...args: Parameters<T>) => {
+      if (real) {
+        try { real(...args) } catch (err) {
+          console.error(`[lateBinding] primary callback threw: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+      const snapshot = [...observers]
+      for (const cb of snapshot) {
+        try { cb(...args) } catch (err) {
+          console.error(`[lateBinding] observer threw: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    }) as T
+    return {
+      proxy,
+      set: (cb: T) => { real = cb },
+      add: (cb: T) => {
+        observers.push(cb)
+        return () => {
+          const i = observers.indexOf(cb)
+          if (i >= 0) observers.splice(i, 1)
+        }
+      },
+    }
   }
 
   const messagePosted = lateBinding<OnMessagePosted>()
@@ -498,6 +563,98 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     return agent
   }
 
+  // === Event observer wiring ===
+  // `addEventObserver` subscribes a single callback to every late-bound slot
+  // the logging system cares about. Each native-callback signature is
+  // translated into a unified LogEvent envelope via src/logging/event-mapping.
+  // Returns an aggregate unsubscribe.
+  const addEventObserver = (
+    observer: (event: LogEvent) => void,
+    sessionIdRef: { readonly current: string },
+  ): (() => void) => {
+    const sid = () => sessionIdRef.current
+    const safe = (makeEvent: () => LogEvent) => {
+      try { observer(makeEvent()) } catch { /* observer errors already caught in proxy */ }
+    }
+    const unsubs: Array<() => void> = [
+      messagePosted.add((roomId, message) => safe(() => mkMessagePosted(sid(), roomId, message))),
+      deliveryModeChanged.add((roomId, mode) => safe(() => mkDeliveryModeChanged(sid(), roomId, mode))),
+      modeAutoSwitched.add((roomId, toMode, reason) => safe(() => mkModeAutoSwitched(sid(), roomId, toMode, reason))),
+      macroEvent.add((roomId, event, detail) => safe(() => mkMacroEvent(sid(), roomId, event, detail))),
+      artifactChanged.add((action, artifact) => safe(() => mkArtifactChanged(sid(), action, artifact))),
+      roomCreated.add((profile) => safe(() => mkRoomCreated(sid(), profile))),
+      roomDeleted.add((roomId, roomName) => safe(() => mkRoomDeleted(sid(), roomId, roomName))),
+      membershipChanged.add((roomId, roomName, agentId, agentName, action) =>
+        safe(() => mkMembershipChanged(sid(), roomId, roomName, agentId, agentName, action))),
+      evalEvent.add((agentName, event) => safe(() => mkEvalEvent(sid(), agentName, event))),
+      providerBound.add((agentId, model, oldProvider, newProvider) =>
+        safe(() => mkProviderBound(sid(), agentId, model, oldProvider, newProvider))),
+      providerAllFailed.add((agentId, model, attempts) =>
+        safe(() => mkProviderAllFailed(sid(), agentId, model, attempts))),
+      providerStreamFailed.add((agentId, model, provider, reason) =>
+        safe(() => mkProviderStreamFailed(sid(), agentId, model, provider, reason))),
+      summaryConfigChanged.add((roomId, config) => safe(() => mkSummaryConfigChanged(sid(), roomId, config))),
+      summaryUpdated.add((roomId, target) => safe(() => mkSummaryUpdated(sid(), roomId, target))),
+      summaryRunStarted.add((roomId, target) => safe(() => mkSummaryRunStarted(sid(), roomId, target))),
+      summaryRunCompleted.add((roomId, target, text) => safe(() => mkSummaryRunCompleted(sid(), roomId, target, text))),
+      summaryRunFailed.add((roomId, target, reason) => safe(() => mkSummaryRunFailed(sid(), roomId, target, reason))),
+    ]
+    return () => { for (const u of unsubs) u() }
+  }
+
+  // === Logging handle — runtime on/off + relocate + resession ===
+  // One active sink + one active kind filter at any time. `configure` is
+  // the single mutator; it drains the old sink, reopens as needed, and
+  // refreshes the filter atomically. Env-var boot seeds initial state.
+  const loggingState: { config: LogConfig; sink: LogSink | null; unsub: (() => void) | null; sessionRef: { current: string } } = {
+    config: { enabled: false, dir: defaultLogDir(), sessionId: defaultSessionId(), kinds: ['*'] },
+    sink: null,
+    unsub: null,
+    sessionRef: { current: '' },
+  }
+
+  const logging: LoggingHandle = {
+    get: (): LogConfigState => ({
+      ...loggingState.config,
+      currentFile: loggingState.sink?.stats().currentFile ?? null,
+      stats: loggingState.sink?.stats() ?? { eventCount: 0, droppedCount: 0, queuedCount: 0, currentFile: null, currentFileBytes: 0 },
+    }),
+    configure: async (partial: Partial<LogConfig>): Promise<void> => {
+      validateLogConfig(partial)
+      const next: LogConfig = {
+        enabled: partial.enabled ?? loggingState.config.enabled,
+        dir: partial.dir ?? loggingState.config.dir,
+        sessionId: partial.sessionId ?? loggingState.config.sessionId,
+        kinds: partial.kinds ?? loggingState.config.kinds,
+      }
+
+      // Tear down current sink (if any). session.end bracket before flush.
+      if (loggingState.sink) {
+        try { loggingState.sink.write(mkSessionEnd(loggingState.config.sessionId, 'reconfigure')) } catch { /* best-effort */ }
+        try { await loggingState.sink.close() } catch { /* sink already errored */ }
+        loggingState.sink = null
+      }
+      if (loggingState.unsub) {
+        loggingState.unsub()
+        loggingState.unsub = null
+      }
+
+      loggingState.config = next
+      loggingState.sessionRef.current = next.sessionId
+
+      if (!next.enabled) return
+
+      // Open new sink. Failure bubbles up; caller (REST/MCP) returns 400.
+      const sink = createJsonlFileSink({ dir: next.dir, sessionId: next.sessionId })
+      const filtered = (event: LogEvent) => {
+        if (matchesKindFilter(event.kind, next.kinds)) sink.write(event)
+      }
+      loggingState.unsub = addEventObserver(filtered, loggingState.sessionRef)
+      sink.write(mkSessionStart(next.sessionId, { dir: next.dir, kinds: next.kinds }))
+      loggingState.sink = sink
+    },
+  }
+
   return {
     house, team, routeMessage,
     llm, ollama, providerConfig, providerKeys, gateways,
@@ -544,6 +701,8 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     setOnSummaryRunCompleted: summaryRunCompleted.set,
     setOnSummaryRunFailed: summaryRunFailed.set,
     setOnSummaryConfigChanged: summaryConfigChanged.set,
+    addEventObserver: (observer) => addEventObserver(observer, loggingState.sessionRef),
+    logging,
   }
 }
 

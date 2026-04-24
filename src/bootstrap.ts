@@ -20,6 +20,7 @@ import { asAIAgent } from './agents/shared.ts'
 import { parseProviderConfig, summariseProviderConfig } from './llm/providers-config.ts'
 import { buildProvidersFromConfig, warmProviderModels } from './llm/providers-setup.ts'
 import { loadProviderStore, mergeWithEnv } from './llm/providers-store.ts'
+import { parseLogConfigFromEnv } from './logging/config.ts'
 import { homedir } from 'node:os'
 import { join as joinPath } from 'node:path'
 
@@ -52,6 +53,22 @@ export const bootstrap = async (): Promise<void> => {
   console.log(`Samsinn v${pkg.version}${headless ? ' (headless)' : ''}`)
   if (ephemeral) console.log('[bootstrap] ephemeral mode — snapshot disabled')
   console.log(summariseProviderConfig(providerConfig))
+
+  // Observational logging — env vars seed boot config. When enabled=false
+  // (default), the sink isn't opened but dir/sessionId/kinds are still
+  // stored so a later PUT /api/logging {enabled:true} respects the
+  // deployment's SAMSINN_LOG_DIR etc. Runtime reconfigure via
+  // PUT /api/logging or configure_logging MCP tool.
+  const bootLogConfig = parseLogConfigFromEnv()
+  try {
+    await system.logging.configure(bootLogConfig)
+    if (bootLogConfig.enabled) {
+      const state = system.logging.get()
+      console.log(`[logging] enabled — session=${state.sessionId} dir=${state.dir}`)
+    }
+  } catch (err) {
+    console.error(`[logging] failed to apply boot config: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   // Load filesystem tools and skills before snapshot restore so restored agents get them
   await loadExternalTools(system.toolRegistry)
@@ -111,6 +128,12 @@ export const bootstrap = async (): Promise<void> => {
       } catch (err) {
         console.error('Failed to save snapshot on shutdown:', err)
       }
+    }
+    // Flush + close the logging sink (emits session.end). Never throws.
+    try {
+      await system.logging.configure({ enabled: false })
+    } catch (err) {
+      console.error('Failed to close log sink:', err)
     }
     await mcpResult.disconnect()
     process.exit(0)

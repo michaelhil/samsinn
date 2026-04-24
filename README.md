@@ -463,6 +463,22 @@ The runner itself — spec-file loader, variant orchestrator, result aggregator 
 
 ---
 
+## Observational logging
+
+For research on **live** sessions (control-room studies, usage audits, retrospective analysis of operator ↔ agent interactions), samsinn can write an append-only JSONL event stream capturing everything significant: messages with full telemetry and tool-call traces, room lifecycle, agent evaluation events, provider routing, artifact changes, summaries.
+
+Opt in at boot via `SAMSINN_LOG_ENABLED=1`, or at runtime via `PUT /api/logging` or the `configure_logging` MCP tool — no restart needed. Change session id, directory, or kind filter live.
+
+```bash
+curl -X PUT http://localhost:3000/api/logging \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":true,"sessionId":"shift-morning-1"}'
+```
+
+See [`docs/logging.md`](docs/logging.md) for full schema, jq/pandas/DuckDB analysis examples, privacy guidance, and deployment notes.
+
+---
+
 ## REST API
 
 Base URL: `http://localhost:3000`
