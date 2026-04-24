@@ -270,6 +270,15 @@
         <div id="packs-list" class="overflow-y-auto max-h-48 hidden"></div>
       </div>
 
+      <!-- Logging section (collapsed by default; shows recording state at a glance) -->
+      <div class="sidebar-content border-b">
+        <div id="logging-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted">
+          <span id="logging-toggle" class="text-xs font-medium text-text-subtle uppercase whitespace-nowrap">▸ Logging</span>
+          <span id="logging-state-dot" class="text-xs" title="Logging state">◌</span>
+        </div>
+        <div id="logging-panel" class="hidden px-3 py-2 text-xs space-y-2"></div>
+      </div>
+
       <!-- Sidebar footer — app name + version + repo link. Pushed to bottom by mt-auto. -->
       <div class="sidebar-content mt-auto p-2 flex items-center gap-1 text-xs whitespace-nowrap" style="border-top: 1px solid var(--border); color: var(--text-subtle);">
         <span class="font-semibold" style="color: var(--text);">samsinn</span>
