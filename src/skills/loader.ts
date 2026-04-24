@@ -28,6 +28,11 @@ export interface Skill {
   readonly body: string
   readonly scope: ReadonlyArray<string>
   readonly tools: ReadonlyArray<string>
+  // Anthropic-Skills `allowed-tools:` frontmatter field, preserved verbatim.
+  // Metadata-only in this pass: the field is NOT auto-injected into any
+  // agent's tool set (that remains driven by AIAgentConfig.tools). Surfaced
+  // for the skill detail endpoint and for future runtime consumers.
+  readonly allowedToolNames: ReadonlyArray<string>
   readonly dirPath: string
   readonly pack?: string                // owning pack namespace (pack-scoped skills only)
   readonly displayName?: string         // unprefixed frontmatter name (pack-scoped only)
@@ -73,21 +78,56 @@ export const createSkillStore = (): SkillStore => {
 }
 
 // --- Frontmatter parsing ---
-// Simple parser — no YAML library. Handles string and string[] values.
+// Simple parser — no YAML library. Handles scalar, inline array, and YAML
+// block-list values for array fields.
 
 interface Frontmatter {
   name?: string
   description?: string
   scope?: string[]
+  allowedTools?: string[]   // Anthropic-Skills `allowed-tools:` frontmatter
 }
 
-const parseArrayValue = (value: string): string[] => {
-  // Handle [item1, item2] syntax
-  const trimmed = value.trim()
+// Parse a frontmatter field whose value is an array of strings. Handles:
+//   1. Inline array:     field: [a, b, c]
+//   2. Inline scalar:    field: single       (wrapped into [single] — matches
+//                                              the prior `scope: my-room` behavior)
+//   3. YAML block list:  field:
+//                          - a
+//                          - b
+//                        (any indent; `- ` prefix required). Non-matching line
+//                        ends the block.
+// Returns `nextIdx`: the first line NOT consumed by this field. Callers must
+// advance their loop counter to `nextIdx` rather than `startIdx + 1`.
+const parseYAMLArrayField = (
+  lines: ReadonlyArray<string>,
+  startIdx: number,
+  valueAfterColon: string,
+  endIdx: number,
+): { value: string[]; nextIdx: number } => {
+  const trimmed = valueAfterColon.trim()
+
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    return trimmed.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean)
+    const items = trimmed.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean)
+    return { value: items, nextIdx: startIdx + 1 }
   }
-  return [trimmed]
+
+  if (trimmed.length > 0) {
+    return { value: [trimmed], nextIdx: startIdx + 1 }
+  }
+
+  // Empty value → consume subsequent YAML block-list lines, bounded by endIdx
+  // so we cannot walk past the closing `---`.
+  const items: string[] = []
+  let i = startIdx + 1
+  while (i < endIdx) {
+    const line = lines[i] ?? ''
+    const blockMatch = line.match(/^\s*-\s+(.+)$/)
+    if (!blockMatch) break
+    items.push(blockMatch[1]!.trim())
+    i++
+  }
+  return { value: items, nextIdx: i }
 }
 
 export const parseFrontmatter = (content: string): { frontmatter: Frontmatter; body: string } => {
@@ -98,15 +138,31 @@ export const parseFrontmatter = (content: string): { frontmatter: Frontmatter; b
   if (endIdx === -1) return { frontmatter: {}, body: content }
 
   const frontmatter: Frontmatter = {}
-  for (let i = 1; i < endIdx; i++) {
+  let i = 1
+  while (i < endIdx) {
     const line = lines[i] ?? ''
     const colonIdx = line.indexOf(':')
-    if (colonIdx === -1) continue
+    if (colonIdx === -1) { i++; continue }
     const key = line.slice(0, colonIdx).trim()
-    const value = line.slice(colonIdx + 1).trim()
-    if (key === 'name') frontmatter.name = value
-    else if (key === 'description') frontmatter.description = value
-    else if (key === 'scope') frontmatter.scope = parseArrayValue(value)
+    const rawValue = line.slice(colonIdx + 1)
+
+    if (key === 'name') {
+      frontmatter.name = rawValue.trim()
+      i++
+    } else if (key === 'description') {
+      frontmatter.description = rawValue.trim()
+      i++
+    } else if (key === 'scope') {
+      const { value, nextIdx } = parseYAMLArrayField(lines, i, rawValue, endIdx)
+      frontmatter.scope = value
+      i = nextIdx
+    } else if (key === 'allowed-tools') {
+      const { value, nextIdx } = parseYAMLArrayField(lines, i, rawValue, endIdx)
+      frontmatter.allowedTools = value
+      i = nextIdx
+    } else {
+      i++
+    }
   }
 
   const body = lines.slice(endIdx + 1).join('\n').trim()
@@ -215,12 +271,27 @@ export const loadSkills = async (
       body,
       scope: frontmatter.scope ?? [],
       tools: bundledTools,
+      allowedToolNames: frontmatter.allowedTools ?? [],
       dirPath,
       ...(options.pack ? { pack: options.pack, displayName: rawName } : {}),
     }
 
     store.register(skill)
     loaded.push(skill.name)
+  }
+
+  // Anthropic-Skills `allowed-tools` diagnostic pass: warn once per skill
+  // listing every unresolved name. One line per skill, not per missing tool,
+  // so a skill referencing five unknown tools does not produce five lines.
+  // Resolution is against the global registry in this pass; pack-namespaced
+  // resolution is a future concern (see README).
+  for (const skillName of loaded) {
+    const skill = store.get(skillName)
+    if (!skill || skill.allowedToolNames.length === 0) continue
+    const missing = skill.allowedToolNames.filter(n => !toolRegistry.has(n))
+    if (missing.length > 0) {
+      console.warn(`[skills] ${skillName}: allowed-tools references unknown tools: ${missing.join(', ')}`)
+    }
   }
 
   if (loaded.length > 0 || skipped.length > 0 || errors.length > 0) {

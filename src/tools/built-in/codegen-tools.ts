@@ -78,6 +78,7 @@ export const createWriteSkillTool = (
       name, description, body,
       scope: scope ?? [],
       tools: [],
+      allowedToolNames: [],
       dirPath,
     })
 

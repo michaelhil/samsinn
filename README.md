@@ -150,6 +150,7 @@ Each skill is a directory under `~/.samsinn/skills/` containing a `SKILL.md` fil
 name: data-analyst
 description: Use when asked to analyze data or metrics
 scope: [research-room]
+allowed-tools: [web_search, read_file]
 ---
 
 When analyzing data, follow these steps:
@@ -159,6 +160,8 @@ When analyzing data, follow these steps:
 ```
 
 Skills are loaded at startup and injected into agent context as a dedicated `=== SKILLS ===` section. Scope controls which rooms see which skills — empty scope means global.
+
+**`allowed-tools` frontmatter** (Anthropic-Skills compatibility) — parsed and preserved on the loaded skill as `Skill.allowedToolNames`, surfaced in the skill detail endpoint. **Metadata-only in the current pass**: Samsinn does NOT auto-inject these tools into an agent's tool set (agent tools remain driven by `AIAgentConfig.tools`). Unknown names emit one dedup'd startup warning per skill. Inline array (`[a, b]`), block list (`- a\n- b`), and single-scalar forms are all accepted. Pack-namespaced resolution is not yet implemented — names resolve against the global registry.
 
 **Runtime skill creation** — agents can create new skills (`write_skill`) and bundle tools with them (`write_tool`) at runtime. Generated skills persist as files and survive restarts.
 

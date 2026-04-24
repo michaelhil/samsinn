@@ -55,7 +55,7 @@ export const houseRoutes: RouteEntry[] = [
       const scope = Array.isArray(body.scope) ? body.scope as string[] : []
       const scopeLine = scope.length > 0 ? `\nscope: [${scope.join(', ')}]` : ''
       await writeFile(join(dirPath, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}${scopeLine}\n---\n\n${skillBody}\n`, 'utf-8')
-      system.skillStore.register({ name, description, body: skillBody, scope, tools: [], dirPath })
+      system.skillStore.register({ name, description, body: skillBody, scope, tools: [], allowedToolNames: [], dirPath })
       return json({ created: true, name }, 201)
     },
   },
