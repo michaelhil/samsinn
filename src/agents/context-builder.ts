@@ -241,6 +241,14 @@ export type SystemSectionKey =
   | 'ctx_newHint'         // "[NEW] hint" — always emitted
   | 'ctx_renderingHints'  // "diagrams render inline" etc. — always emitted
 
+// Convention: each SystemSection is single-purpose. When adding a new
+// always-on "how to use the system" hint (rendering, tool reminders,
+// prompt-writing tips, etc.), add a new `ctx_*` key to the
+// SystemSectionKey union and emit a new out.push(...) here — do NOT
+// append text to an existing section. Existing sections drift into
+// junk drawers when we keep extending them. See the pre-751f73e
+// ctx_newHint (which mixed [NEW] semantics with mermaid guidance)
+// for the regression that motivated this rule.
 export const buildSystemSections = (
   deps: BuildContextDeps,
   triggerRoomId: string,
