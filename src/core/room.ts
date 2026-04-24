@@ -102,17 +102,14 @@ export const createRoom = (
   // --- Post helpers ---
 
   const createRoomMessage = (params: PostParams): Message => ({
+    // Caller-supplied fields flow through untouched — every optional field
+    // on Message (tokens, provider, stepPrompt, etc.) is preserved without
+    // enumeration here.
+    ...params,
+    // Server-stamped fields override.
     id: crypto.randomUUID(),
     roomId: profile.id,
-    senderId: params.senderId,
-    senderName: params.senderName,
-    content: params.content,
     timestamp: Date.now(),
-    type: params.type,
-    correlationId: params.correlationId,
-    inReplyTo: params.inReplyTo,
-    generationMs: params.generationMs,
-    metadata: params.metadata,
   })
 
   const dispatchToAddressed = (message: Message, targets: ReturnType<typeof parseAddressedAgents>): boolean => {
@@ -256,7 +253,7 @@ export const createRoom = (
       macroRunState.advanceStep(result.nextStepIndex)
       const nextStep = macroRun.macro.steps[result.nextStepIndex]!
       const enriched = nextStep.stepPrompt
-        ? { ...lastChatMsg, metadata: { ...lastChatMsg.metadata, stepPrompt: nextStep.stepPrompt } }
+        ? { ...lastChatMsg, stepPrompt: nextStep.stepPrompt }
         : lastChatMsg
       deliverToOne(result.nextAgentId, enriched)
       macroRunState.notifyMacroEvent('step', {
@@ -342,13 +339,10 @@ export const createRoom = (
 
     const startStep = macro.steps[startIndex]!
     const macroContext = buildMacroStepContext(macro, startIndex)
-    const enriched = {
+    const enriched: Message = {
       ...lastMsg,
-      metadata: {
-        ...lastMsg.metadata,
-        ...(startStep.stepPrompt ? { stepPrompt: startStep.stepPrompt } : {}),
-        macroContext,
-      },
+      ...(startStep.stepPrompt ? { stepPrompt: startStep.stepPrompt } : {}),
+      macroContext,
     }
     deliverToOne(startStep.agentId, enriched)
     macroRunState.notifyMacroEvent('started', { macroId: macro.id, agentName: startStep.agentName })
@@ -376,13 +370,10 @@ export const createRoom = (
     macroRunState.advanceStep(result.nextStepIndex)
     const nextStep = macroRun.macro.steps[result.nextStepIndex]!
     const macroContext = buildMacroStepContext(macroRun.macro, result.nextStepIndex)
-    const enriched = {
+    const enriched: Message = {
       ...lastChatMsg,
-      metadata: {
-        ...lastChatMsg.metadata,
-        ...(nextStep.stepPrompt ? { stepPrompt: nextStep.stepPrompt } : {}),
-        macroContext,
-      },
+      ...(nextStep.stepPrompt ? { stepPrompt: nextStep.stepPrompt } : {}),
+      macroContext,
     }
     deliverToOne(result.nextAgentId, enriched)
     macroRunState.notifyMacroEvent('step', {

@@ -7,23 +7,20 @@ import type { Message, AgentProfile, RoomProfile as ServerRoomProfile } from '..
 import type { Artifact } from '../../../core/types/artifact.ts'
 import type { AgentEntry } from '../stores.ts'
 
-export const toUIMessage = (m: Message): UIMessage => {
-  const meta = (m.metadata ?? {}) as Record<string, unknown>
-  return {
-    id: m.id,
-    senderId: m.senderId,
-    content: m.content,
-    timestamp: m.timestamp,
-    type: m.type,
-    roomId: m.roomId,
-    generationMs: m.generationMs,
-    ...(typeof meta.promptTokens === 'number' ? { promptTokens: meta.promptTokens } : {}),
-    ...(typeof meta.completionTokens === 'number' ? { completionTokens: meta.completionTokens } : {}),
-    ...(typeof meta.contextMax === 'number' ? { contextMax: meta.contextMax } : {}),
-    ...(typeof meta.provider === 'string' ? { provider: meta.provider } : {}),
-    ...(typeof meta.model === 'string' ? { model: meta.model } : {}),
-  }
-}
+export const toUIMessage = (m: Message): UIMessage => ({
+  id: m.id,
+  senderId: m.senderId,
+  content: m.content,
+  timestamp: m.timestamp,
+  type: m.type,
+  roomId: m.roomId,
+  generationMs: m.generationMs,
+  ...(m.promptTokens !== undefined ? { promptTokens: m.promptTokens } : {}),
+  ...(m.completionTokens !== undefined ? { completionTokens: m.completionTokens } : {}),
+  ...(m.contextMax !== undefined ? { contextMax: m.contextMax } : {}),
+  ...(m.provider !== undefined ? { provider: m.provider } : {}),
+  ...(m.model !== undefined ? { model: m.model } : {}),
+})
 
 export const toUIRoomProfile = (r: ServerRoomProfile): RoomProfile => ({
   id: r.id,

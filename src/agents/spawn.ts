@@ -143,17 +143,17 @@ export const spawnAIAgent = async (
 
   const onDecision = (decision: Decision): void => {
     const target: MessageTarget = { rooms: [decision.triggerRoomId] }
-    // Metrics — tokens, contextMax, provider — attached as message metadata
-    // so the UI can render usage/limit alongside generationMs. Undefined
-    // fields are omitted to keep the snapshot compact.
+    // Metrics — tokens, contextMax, provider — flow as typed optional fields
+    // on the posted message. Undefined fields are omitted to keep snapshots
+    // compact and to satisfy the exactOptionalPropertyTypes tsconfig.
     const m = decision.metrics ?? {}
-    const metricsMeta: Record<string, unknown> = {}
-    if (m.promptTokens !== undefined) metricsMeta.promptTokens = m.promptTokens
-    if (m.completionTokens !== undefined) metricsMeta.completionTokens = m.completionTokens
-    if (m.contextMax !== undefined && m.contextMax > 0) metricsMeta.contextMax = m.contextMax
-    if (m.provider) metricsMeta.provider = m.provider
-    if (m.model) metricsMeta.model = m.model
-    const metadata = Object.keys(metricsMeta).length > 0 ? metricsMeta : undefined
+    const telemetry = {
+      ...(m.promptTokens !== undefined ? { promptTokens: m.promptTokens } : {}),
+      ...(m.completionTokens !== undefined ? { completionTokens: m.completionTokens } : {}),
+      ...(m.contextMax !== undefined && m.contextMax > 0 ? { contextMax: m.contextMax } : {}),
+      ...(m.provider ? { provider: m.provider } : {}),
+      ...(m.model ? { model: m.model } : {}),
+    }
 
     if (decision.response.action === 'respond') {
       routeMessage(target, {
@@ -163,7 +163,7 @@ export const spawnAIAgent = async (
         type: 'chat',
         generationMs: decision.generationMs,
         inReplyTo: decision.inReplyTo,
-        ...(metadata ? { metadata } : {}),
+        ...telemetry,
       })
     } else if (decision.response.action === 'pass') {
       // Post pass as a visible message so humans can see agent decisions
@@ -175,7 +175,7 @@ export const spawnAIAgent = async (
         type: 'pass',
         generationMs: decision.generationMs,
         inReplyTo: decision.inReplyTo,
-        ...(metadata ? { metadata } : {}),
+        ...telemetry,
       })
     }
   }

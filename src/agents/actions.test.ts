@@ -35,7 +35,7 @@ describe('addAgentToRoom', () => {
     const joinMsg = room.getRecent(5).find(m => m.type === 'join' && m.senderId === agent.id)
     expect(joinMsg).toBeDefined()
     expect(joinMsg!.content).toBe('[Alice] has joined')
-    expect(joinMsg!.metadata?.agentName).toBe('Alice')
+    expect(joinMsg!.agentName).toBe('Alice')
     // human inbox gets recent history on join
     expect(inbox.length).toBeGreaterThanOrEqual(0)
   })

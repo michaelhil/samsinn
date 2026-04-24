@@ -1,10 +1,13 @@
 // Messaging core types — Message, profiles, delivery, and per-agent history.
-// Leaf module (no imports from other type domains).
+// Leaf module aside from MacroStepContext (imported for typed embedding
+// in macro-delivered messages).
 //
 // ID Architecture: UUIDs internal, names for LLM interaction.
 // - All entities get auto-generated UUIDs (never caller-specified)
 // - Names are unique per type, case-insensitive, immutable after creation
 // - LLMs see and use names; the system resolves names to UUIDs at boundaries
+
+import type { MacroStepContext } from './macro.ts'
 
 // === Message — the fundamental unit of communication ===
 
@@ -21,7 +24,22 @@ export interface Message {
   readonly correlationId?: string     // shared across multi-target deliveries
   readonly inReplyTo?: ReadonlyArray<string>  // IDs of messages this response is causally derived from
   readonly generationMs?: number
-  readonly metadata?: Record<string, unknown>
+
+  // --- Chat / eval telemetry (set by spawn.onDecision on chat/pass messages) ---
+  readonly promptTokens?: number
+  readonly completionTokens?: number
+  readonly contextMax?: number        // bound provider's context window for this call
+  readonly provider?: string          // bound provider name (e.g. 'gemini', 'ollama')
+  readonly model?: string             // model id reported by the provider
+
+  // --- Macro delivery enrichment (stamped by room.ts + delivery-modes.ts) ---
+  readonly stepPrompt?: string        // per-step instruction injected into LLM context
+  readonly macroContext?: MacroStepContext
+
+  // --- Join-message agent profile (stamped by actions.ts via makeJoinMetadata) ---
+  readonly agentName?: string         // joining agent's name
+  readonly agentKind?: 'ai' | 'human'
+  readonly agentTags?: ReadonlyArray<string>
 }
 
 // === Profiles — what agents know about rooms and other agents ===
@@ -72,8 +90,9 @@ export interface MessageTarget {
 
 // === Room Post Parameters — caller provides content, room stamps id/roomId/timestamp ===
 // NOTE: PostParams derives from Message via Omit. Fields added to Message automatically
-// appear here as optional (e.g. correlationId, generationMs, metadata). This is intentional —
-// callers that need those fields set them; others leave them undefined.
+// appear here as optional (e.g. correlationId, generationMs, promptTokens, stepPrompt,
+// agentName). This is intentional — callers that need those fields set them; others
+// leave them undefined.
 
 export type PostParams = Omit<Message, 'id' | 'roomId' | 'timestamp'>
 

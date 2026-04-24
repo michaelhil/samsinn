@@ -5,34 +5,31 @@
 import type { Agent, AIAgent } from '../core/types/agent.ts'
 import type { AgentProfile, Message } from '../core/types/messaging.ts'
 
-// Extract agent profile from a join message's metadata.
+// Extract agent profile from a join message's typed fields.
 // Called by both AI and human agents in receive() and join().
 export const extractAgentProfile = (
   message: Message,
   ownId: string,
   profiles: Map<string, AgentProfile>,
 ): void => {
-  if (message.type !== 'join' || !message.metadata) return
+  if (message.type !== 'join') return
   if (message.senderId === ownId) return
 
-  const meta = message.metadata
-  const name = meta.agentName
-  const kind = meta.agentKind
+  const { agentName, agentKind, agentTags } = message
+  if (!agentName || !agentKind) return
 
-  if (typeof name === 'string' && (kind === 'ai' || kind === 'human')) {
-    const tags = Array.isArray(meta.agentTags) ? (meta.agentTags as ReadonlyArray<string>) : undefined
-    profiles.set(message.senderId, {
-      id: message.senderId,
-      name,
-      kind,
-      ...(tags ? { tags } : {}),
-    })
-  }
+  profiles.set(message.senderId, {
+    id: message.senderId,
+    name: agentName,
+    kind: agentKind,
+    ...(agentTags && agentTags.length > 0 ? { tags: agentTags } : {}),
+  })
 }
 
-// Build join message metadata from an agent's public fields.
-// Used by spawn.ts and actions.ts when posting join messages.
-export const makeJoinMetadata = (agent: Agent) => {
+// Build join-message fields from an agent's public profile. Used by
+// spawn.ts and actions.ts when posting join messages; the returned object
+// is spread onto the PostParams.
+export const makeJoinFields = (agent: Agent): Pick<Message, 'agentName' | 'agentKind' | 'agentTags'> => {
   const tags = agent.metadata?.tags as ReadonlyArray<string> | undefined
   return {
     agentName: agent.name,

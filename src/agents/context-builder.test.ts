@@ -184,7 +184,7 @@ describe('context-builder macro stepPrompt toggle', () => {
     const msg: Message = {
       id: 'm1', roomId: 'room-1', senderId: 'other', senderName: 'Other',
       content: 'hi', timestamp: Date.now(), type: 'chat',
-      metadata: { stepPrompt: 'do X' } as Record<string, unknown>,
+      stepPrompt: 'do X',
     }
     const result = buildContext(mkDeps({
       history: mkHistory('room-1', 'General', undefined, [msg]),
@@ -198,7 +198,7 @@ describe('context-builder macro stepPrompt toggle', () => {
     const msg: Message = {
       id: 'm1', roomId: 'room-1', senderId: 'other', senderName: 'Other',
       content: 'hi', timestamp: Date.now(), type: 'chat',
-      metadata: { stepPrompt: 'do X' } as Record<string, unknown>,
+      stepPrompt: 'do X',
     }
     const result = buildContext(mkDeps({
       history: mkHistory('room-1', 'General', undefined, [msg]),

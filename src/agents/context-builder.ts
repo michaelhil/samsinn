@@ -47,7 +47,7 @@ export const formatMessage = (
   includeMacroStepPrompt: boolean = true,
 ): { role: 'user' | 'assistant'; content: string } | null => {
   if (msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.type === 'pass' || msg.type === 'mute') return null
-  const stepPrompt = (msg.metadata as Record<string, unknown> | undefined)?.stepPrompt as string | undefined
+  const stepPrompt = msg.stepPrompt
   if (msg.senderId === agentId) {
     const staleRef = compressedIds && msg.inReplyTo?.some(id => compressedIds.has(id))
     const suffix = staleRef ? '\n[↩ context compressed]' : ''
@@ -300,14 +300,9 @@ export const buildSystemSections = (
   })
 
   const freshForRoom = deps.history.incoming.filter(m => m.roomId === triggerRoomId)
-  const latestWithMacro = [...freshForRoom].reverse().find(
-    m => (m.metadata as Record<string, unknown> | undefined)?.macroContext,
-  )
-  const macroText = latestWithMacro
-    ? buildMacroSection(
-        (latestWithMacro.metadata as Record<string, unknown>).macroContext as MacroStepContext,
-        ((latestWithMacro.metadata as Record<string, unknown>).macroContext as MacroStepContext).stepIndex,
-      )
+  const latestWithMacro = [...freshForRoom].reverse().find(m => m.macroContext)
+  const macroText = latestWithMacro?.macroContext
+    ? buildMacroSection(latestWithMacro.macroContext, latestWithMacro.macroContext.stepIndex)
     : ''
   out.push({
     key: 'ctx_flow',

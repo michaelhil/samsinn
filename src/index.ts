@@ -37,7 +37,7 @@ export type { EvalResult } from './agents/evaluation.ts'
 // Agent wiring — @internal helpers exposed for testing and custom runtimes
 export { spawnAIAgent, spawnHumanAgent } from './agents/spawn.ts'
 export { addAgentToRoom, removeAgentFromRoom } from './agents/actions.ts'
-export { extractAgentProfile, makeJoinMetadata } from './agents/shared.ts'
+export { extractAgentProfile, makeJoinFields } from './agents/shared.ts'
 export { validateName, ensureUniqueName } from './core/names.ts'
 export { createToolRegistry } from './core/tool-registry.ts'
 

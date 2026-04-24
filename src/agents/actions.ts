@@ -8,7 +8,7 @@
 
 import type { House } from '../core/types/room.ts'
 import type { RouteMessage, Team } from '../core/types/agent.ts'
-import { makeJoinMetadata } from './shared.ts'
+import { makeJoinFields } from './shared.ts'
 
 export const addAgentToRoom = async (
   targetId: string,
@@ -47,7 +47,7 @@ export const addAgentToRoom = async (
 
   routeMessage(
     { rooms: [roomId] },
-    { senderId: targetId, senderName: targetName, content, type: 'join', metadata: makeJoinMetadata(target) },
+    { senderId: targetId, senderName: targetName, content, type: 'join', ...makeJoinFields(target) },
   )
 }
 

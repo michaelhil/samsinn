@@ -6,7 +6,7 @@ import type { Artifact } from '../../../core/types/artifact.ts'
 // These mappers are the only translation layer between the WS wire format
 // (server types) and the UI's view types. If they silently drop or mistype
 // a field, the DOM receives bad data — usually manifesting as a blank or
-// broken row. Tests pin the shape + metadata forwarding.
+// broken row. Tests pin the shape + telemetry forwarding.
 
 describe('toUIMessage', () => {
   const base: Message = {
@@ -14,7 +14,7 @@ describe('toUIMessage', () => {
     senderId: 'agent-1',
     content: 'hello',
     timestamp: 1234,
-    type: 'text',
+    type: 'chat',
     roomId: 'room-1',
     generationMs: 500,
   }
@@ -25,15 +25,17 @@ describe('toUIMessage', () => {
     expect(ui.senderId).toBe('agent-1')
     expect(ui.content).toBe('hello')
     expect(ui.timestamp).toBe(1234)
-    expect(ui.type).toBe('text')
+    expect(ui.type).toBe('chat')
     expect(ui.roomId).toBe('room-1')
     expect(ui.generationMs).toBe(500)
   })
 
-  test('forwards number metadata fields when present', () => {
+  test('forwards telemetry number fields when present', () => {
     const ui = toUIMessage({
       ...base,
-      metadata: { promptTokens: 100, completionTokens: 50, contextMax: 8000 },
+      promptTokens: 100,
+      completionTokens: 50,
+      contextMax: 8000,
     })
     expect(ui.promptTokens).toBe(100)
     expect(ui.completionTokens).toBe(50)
@@ -43,32 +45,18 @@ describe('toUIMessage', () => {
   test('forwards provider + model strings when present', () => {
     const ui = toUIMessage({
       ...base,
-      metadata: { provider: 'ollama', model: 'llama3.2' },
+      provider: 'ollama',
+      model: 'llama3.2',
     })
     expect(ui.provider).toBe('ollama')
     expect(ui.model).toBe('llama3.2')
   })
 
-  test('drops metadata fields of the wrong type (does not crash)', () => {
-    const ui = toUIMessage({
-      ...base,
-      metadata: { promptTokens: 'not a number', model: 42 } as unknown as Record<string, unknown>,
-    })
-    expect(ui.promptTokens).toBeUndefined()
-    expect(ui.model).toBeUndefined()
-  })
-
-  test('omits metadata keys entirely when metadata is absent', () => {
+  test('omits telemetry keys entirely when absent', () => {
     const ui = toUIMessage(base)
     expect('promptTokens' in ui).toBe(false)
     expect('model' in ui).toBe(false)
     expect('provider' in ui).toBe(false)
-  })
-
-  test('handles metadata = undefined without exploding', () => {
-    const ui = toUIMessage({ ...base, metadata: undefined as unknown as Record<string, unknown> })
-    expect(ui.id).toBe('m1')
-    expect('promptTokens' in ui).toBe(false)
   })
 })
 

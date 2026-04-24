@@ -621,8 +621,8 @@ describe('Integration — spawnAIAgent full wiring', () => {
     const joinMsg = intro.getRecent(10).find(m => m.senderId === agent.id && m.type === 'join')
     expect(joinMsg).toBeDefined()
     expect(joinMsg!.content).toContain('[Joiner]')
-    expect(joinMsg!.metadata?.agentName).toBe('Joiner')
-    expect(joinMsg!.metadata?.agentKind).toBe('ai')
+    expect(joinMsg!.agentName).toBe('Joiner')
+    expect(joinMsg!.agentKind).toBe('ai')
   })
 
   test('spawnAIAgent with tools — tool calls are executed', async () => {
@@ -703,8 +703,8 @@ describe('Integration — spawnAIAgent full wiring', () => {
     expect(joinMsg).toBeDefined()
     expect(joinMsg!.content).toContain('[Bot]')
     expect(joinMsg!.content).toContain('added by [Alice]')
-    expect(joinMsg!.metadata?.agentName).toBe('Bot')
-    expect(joinMsg!.metadata?.agentKind).toBe('ai')
+    expect(joinMsg!.agentName).toBe('Bot')
+    expect(joinMsg!.agentKind).toBe('ai')
   })
 })
 
@@ -843,7 +843,7 @@ describe('Integration — AI Agent with real Ollama', () => {
     const joinMsg = intro.getRecent(10).find(m => m.senderId === agent.id && m.type === 'join')
     expect(joinMsg).toBeDefined()
     expect(joinMsg!.content).toContain('[Analyst]')
-    expect(joinMsg!.metadata?.agentName).toBe('Analyst')
+    expect(joinMsg!.agentName).toBe('Analyst')
   }, 60_000)
 
   test('human and AI agent converse via room', async () => {

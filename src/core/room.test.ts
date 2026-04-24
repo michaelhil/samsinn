@@ -141,15 +141,21 @@ describe('Room — self-contained component', () => {
     expect(message.generationMs).toBe(2400)
   })
 
-  test('preserves metadata when provided', () => {
+  test('preserves typed optional fields on post (tokens, provider, model)', () => {
     const room = createRoom(makeProfile())
     const message = room.post({
       senderId: 'alice',
-      content: 'With meta',
+      content: 'With telemetry',
       type: 'chat',
-      metadata: { source: 'test', priority: 1 },
+      promptTokens: 120,
+      completionTokens: 45,
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
     })
-    expect(message.metadata).toEqual({ source: 'test', priority: 1 })
+    expect(message.promptTokens).toBe(120)
+    expect(message.completionTokens).toBe(45)
+    expect(message.provider).toBe('gemini')
+    expect(message.model).toBe('gemini-2.5-flash')
   })
 
   test('message IDs are unique (UUID-based)', () => {
@@ -576,10 +582,10 @@ describe('Room — Macro mode', () => {
     expect(delivered[0]!.agentId).toBe('a')
   })
 
-  test('step prompt is passed via message metadata', () => {
-    const deliveredMeta: Array<Record<string, unknown> | undefined> = []
+  test('step prompt is passed as a typed field on the delivered message', () => {
+    const deliveredStepPrompts: Array<string | undefined> = []
     const room = createRoom(makeProfile(), {
-      deliver: (_id, msg) => { deliveredMeta.push(msg.metadata) },
+      deliver: (_id, msg) => { deliveredStepPrompts.push(msg.stepPrompt) },
     })
 
     room.addMember('a')
@@ -587,7 +593,7 @@ describe('Room — Macro mode', () => {
 
     room.post({ senderId: 'a', senderName: 'Alice', content: 'hi', type: 'chat' })
     room.post({ senderId: 'b', senderName: 'Bob', content: 'hi', type: 'chat' })
-    deliveredMeta.length = 0
+    deliveredStepPrompts.length = 0
 
     room.runMacro(makeFlow({
       name: 'Prompted',
@@ -598,13 +604,13 @@ describe('Room — Macro mode', () => {
     }))
 
     // First delivery to Alice should have stepPrompt
-    expect(deliveredMeta[0]?.stepPrompt).toBe('Focus on risks')
+    expect(deliveredStepPrompts[0]).toBe('Focus on risks')
 
-    deliveredMeta.length = 0
+    deliveredStepPrompts.length = 0
     room.post({ senderId: 'a', senderName: 'Alice', content: 'done', type: 'chat' })
 
     // Delivery to Bob should have Bob's stepPrompt
-    expect(deliveredMeta[0]?.stepPrompt).toBe('Summarize findings')
+    expect(deliveredStepPrompts[0]).toBe('Summarize findings')
   })
 
   test('stopMacro stops execution, switches to broadcast, pauses', () => {

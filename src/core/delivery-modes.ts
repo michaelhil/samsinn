@@ -79,11 +79,8 @@ export const deliverMacroStep = (
     const macroContext = buildMacroStepContext(run.macro, result.nextStepIndex)
     const enriched = {
       ...message,
-      metadata: {
-        ...message.metadata,
-        ...(nextStep.stepPrompt ? { stepPrompt: nextStep.stepPrompt } : {}),
-        macroContext,
-      },
+      ...(nextStep.stepPrompt ? { stepPrompt: nextStep.stepPrompt } : {}),
+      macroContext,
     }
     deliver(result.nextAgentId, enriched)
   }
