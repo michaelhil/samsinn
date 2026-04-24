@@ -40,6 +40,21 @@ export interface Message {
   readonly agentName?: string         // joining agent's name
   readonly agentKind?: 'ai' | 'human'
   readonly agentTags?: ReadonlyArray<string>
+
+  // --- Tool-call trace (stamped by spawn.onDecision for 'respond' actions that
+  //     invoked tools during evaluation). One entry per tool call the agent made
+  //     while producing this reply. Omitted when the agent didn't call any
+  //     tools. `resultPreview` is truncated; the agent saw a larger preview in
+  //     its own context. Primary consumer: the experiment runner's export_room
+  //     tool — enables analyses like "which variants used web_search? how often?".
+  readonly toolTrace?: ReadonlyArray<ToolTraceEntry>
+}
+
+export interface ToolTraceEntry {
+  readonly tool: string
+  readonly arguments: Record<string, unknown>
+  readonly success: boolean
+  readonly resultPreview: string   // <=200 chars (truncated result or error message)
 }
 
 // === Profiles — what agents know about rooms and other agents ===

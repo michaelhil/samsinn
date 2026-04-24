@@ -42,7 +42,7 @@ describe('writeRunResult + writeSummary', () => {
         startedAt: 1_000,
         finishedAt: 2_000,
         totalElapsedMs: 1_000,
-        variantStats: { baseline: { succeeded: 1, failed: 0, timedOut: 0 } },
+        variantStats: { baseline: { succeeded: 1, failed: 0, timedOut: 0, capped: 0 } },
         runCount: 1,
         status: 'done',
       }
@@ -68,7 +68,7 @@ describe('writeRunResult + writeSummary', () => {
         startedAt: 1_000,
         finishedAt: null,
         totalElapsedMs: 500,
-        variantStats: { a: { succeeded: 0, failed: 0, timedOut: 0 } },
+        variantStats: { a: { succeeded: 0, failed: 0, timedOut: 0, capped: 0 } },
         runCount: 0,
         status: 'running',
       }

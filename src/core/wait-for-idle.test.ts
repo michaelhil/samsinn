@@ -76,6 +76,40 @@ describe('waitForRoomIdle', () => {
     expect(elapsed).toBeGreaterThanOrEqual(150)
   })
 
+  test('maxMessages cap fires before quietMs elapses', async () => {
+    const room = makeRoom('capped')
+    // Pre-populate to exceed the cap
+    for (let i = 0; i < 5; i++) {
+      room.post({ senderId: 'u', senderName: 'U', content: `m${i}`, type: 'chat' })
+    }
+
+    const result = await waitForRoomIdle(room, {
+      quietMs: 10_000,     // would otherwise force a long wait
+      timeoutMs: 30_000,
+      pollMs: 10,
+      maxMessages: 3,
+      inRoomAIAgents: () => [],
+    })
+
+    expect(result.idle).toBe(false)
+    expect(result.capped).toBe(true)
+    expect(result.messageCount).toBeGreaterThanOrEqual(3)
+  })
+
+  test('maxMessages not hit → normal idle path still works', async () => {
+    const room = makeRoom('under-cap')
+    room.post({ senderId: 'u', senderName: 'U', content: 'single', type: 'chat' })
+    const result = await waitForRoomIdle(room, {
+      quietMs: 50,
+      timeoutMs: 2_000,
+      pollMs: 10,
+      maxMessages: 100,
+      inRoomAIAgents: () => [makeIdleAgent()],
+    })
+    expect(result.idle).toBe(true)
+    expect(result.capped).toBe(false)
+  })
+
   test('timeout fires with idle:false when quietMs never satisfied', async () => {
     const room = makeRoom('delta')
     // Seed with a message so quietMs polling has a reference timestamp.

@@ -22,10 +22,16 @@ export interface WaitForIdleOptions {
   readonly inRoomAIAgents: () => ReadonlyArray<AIAgent>
   // Poll interval in ms. Default 500; overridable so tests can run faster.
   readonly pollMs?: number
+  // Hard cap on room message count. When reached the call returns
+  // immediately with `capped: true`. Prevents runaway agent-to-agent loops
+  // burning tokens. Counts EVERY message in the room (seed + trigger +
+  // responses) — see experiments/README for the counting semantic.
+  readonly maxMessages?: number
 }
 
 export interface WaitForIdleResult {
   readonly idle: boolean
+  readonly capped: boolean
   readonly messageCount: number
   readonly lastMessageAt: number | null
   readonly elapsedMs: number
@@ -50,6 +56,19 @@ export const waitForRoomIdle = async (
     const elapsedMs = Date.now() - start
     const lastTs = lastMessageTs()
     const quietFor = lastTs === undefined ? Infinity : Date.now() - lastTs
+    const count = messageCount()
+
+    // Cap check fires first — if we've already hit the cap we don't wait out
+    // the quiet period; batch runner wants the fast termination.
+    if (options.maxMessages !== undefined && count >= options.maxMessages) {
+      return {
+        idle: false,
+        capped: true,
+        messageCount: count,
+        lastMessageAt: lastTs ?? null,
+        elapsedMs,
+      }
+    }
 
     if (quietFor >= options.quietMs) {
       // Message-timestamp quiescence reached; now confirm no agent is mid-generation.
@@ -60,6 +79,7 @@ export const waitForRoomIdle = async (
       if (quietForAfter >= options.quietMs) {
         return {
           idle: true,
+          capped: false,
           messageCount: messageCount(),
           lastMessageAt: lastTsAfter ?? null,
           elapsedMs: Date.now() - start,
@@ -70,7 +90,8 @@ export const waitForRoomIdle = async (
     if (elapsedMs >= options.timeoutMs) {
       return {
         idle: false,
-        messageCount: messageCount(),
+        capped: false,
+        messageCount: count,
         lastMessageAt: lastTs ?? null,
         elapsedMs,
       }

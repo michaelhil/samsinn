@@ -49,9 +49,31 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
     },
   )
 
+  // Per-section prompt toggles. UI label → key mapping (for spec authors):
+  //   "Agent persona"   → persona
+  //   "Room prompt"     → room
+  //   "System prompt"   → house   (the global housePrompt, NOT the LLM role:'system')
+  //   "Response format" → responseFormat
+  //   "Skills"          → skills
+  const includePromptsShape = z.object({
+    persona: z.boolean().optional(),
+    room: z.boolean().optional(),
+    house: z.boolean().optional(),
+    responseFormat: z.boolean().optional(),
+    skills: z.boolean().optional(),
+  }).optional()
+
+  const includeContextShape = z.object({
+    participants: z.boolean().optional(),
+    macro: z.boolean().optional(),
+    artifacts: z.boolean().optional(),
+    activity: z.boolean().optional(),
+    knownAgents: z.boolean().optional(),
+  }).optional()
+
   mcpServer.tool(
     'create_agent',
-    'Create a new AI agent (not added to any room by default)',
+    'Create a new AI agent (not added to any room by default). Every optional field maps 1:1 to AIAgentConfig — see src/core/types/agent.ts. `includePrompts` uses keys (persona/room/house/responseFormat/skills); UI labels map as: "System prompt" = house, "Agent persona" = persona, "Room prompt" = room, "Skills" = skills, "Response format" = responseFormat.',
     {
       name: z.string().describe('Agent name'),
       model: z.string().describe('Model ID. Cloud models are provider-prefixed: "anthropic:claude-haiku-4-5", "gemini:gemini-2.5-flash", "groq:llama-3.3-70b-versatile", etc. Ollama models are bare: "llama3.2" or "qwen2.5:14b". Call GET /api/models for the live list.'),
@@ -59,16 +81,39 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
       temperature: z.number().optional().describe('LLM temperature (0-1)'),
       seed: z.number().int().optional().describe('Deterministic seed forwarded to every LLM call this agent issues (best-effort per provider — Ollama and OpenAI-family honor it; Anthropic/Gemini silently discard).'),
       tools: z.array(z.string()).optional().describe('Tool names available to this agent. When omitted, agent has access to every registered tool. Pass an empty array for no tools.'),
+      historyLimit: z.number().int().optional().describe('Max number of old messages retained per room in the agent\'s context window.'),
+      maxToolIterations: z.number().int().optional().describe('Max tool-loop iterations before the agent is forced to answer or pass.'),
+      maxToolResultChars: z.number().int().optional().describe('Per-tool-call result truncation limit fed back to the LLM.'),
+      tags: z.array(z.string()).optional().describe('Capability/role tags enabling [[tag:X]] addressing.'),
+      thinking: z.boolean().optional().describe('Enable model chain-of-thought (qwen3 thinking mode, etc.).'),
+      includePrompts: includePromptsShape.describe('Per-section prompt inclusion gates. All default to true. See tool description for UI-label mapping.'),
+      includeContext: includeContextShape.describe('CONTEXT sub-section toggles (participants/macro/artifacts/activity/knownAgents). All default to true.'),
+      includeMacroStepPrompt: z.boolean().optional().describe('Include [Step instruction: …] suffix on macro messages (default: true).'),
+      includeTools: z.boolean().optional().describe('Master switch — send tool definitions to LLM at all (default: true).'),
+      promptsEnabled: z.boolean().optional().describe('Master switch for all includePrompts sections (false = every section off, default: true).'),
+      contextEnabled: z.boolean().optional().describe('Master switch for all includeContext sub-sections (default: true).'),
     },
-    async ({ name, model, persona, temperature, seed, tools }) => {
+    async (args) => {
       try {
+        const { name, model, persona } = args
         const agent = await system.spawnAIAgent({
           name,
           model,
           persona,
-          ...(temperature !== undefined ? { temperature } : {}),
-          ...(seed !== undefined ? { seed } : {}),
-          ...(tools !== undefined ? { tools } : {}),
+          ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
+          ...(args.seed !== undefined ? { seed: args.seed } : {}),
+          ...(args.tools !== undefined ? { tools: args.tools } : {}),
+          ...(args.historyLimit !== undefined ? { historyLimit: args.historyLimit } : {}),
+          ...(args.maxToolIterations !== undefined ? { maxToolIterations: args.maxToolIterations } : {}),
+          ...(args.maxToolResultChars !== undefined ? { maxToolResultChars: args.maxToolResultChars } : {}),
+          ...(args.tags !== undefined ? { tags: args.tags } : {}),
+          ...(args.thinking !== undefined ? { thinking: args.thinking } : {}),
+          ...(args.includePrompts !== undefined ? { includePrompts: args.includePrompts } : {}),
+          ...(args.includeContext !== undefined ? { includeContext: args.includeContext } : {}),
+          ...(args.includeMacroStepPrompt !== undefined ? { includeMacroStepPrompt: args.includeMacroStepPrompt } : {}),
+          ...(args.includeTools !== undefined ? { includeTools: args.includeTools } : {}),
+          ...(args.promptsEnabled !== undefined ? { promptsEnabled: args.promptsEnabled } : {}),
+          ...(args.contextEnabled !== undefined ? { contextEnabled: args.contextEnabled } : {}),
         })
         return textResult({ id: agent.id, name: agent.name })
       } catch (err) {

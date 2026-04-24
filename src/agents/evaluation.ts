@@ -10,6 +10,7 @@ import type { AgentResponse, AIAgentConfig } from '../core/types/agent.ts'
 import type { ChatRequest, LLMCallOptions, LLMProvider } from '../core/types/llm.ts'
 import type { EvalEvent } from '../core/types/agent-eval.ts'
 import type { NativeToolCall, ToolCall, ToolDefinition, ToolExecutor, ToolResult } from '../core/types/tool.ts'
+import type { ToolTraceEntry } from '../core/types/messaging.ts'
 import type { ContextResult, FlushInfo } from './context-builder.ts'
 import { isOllamaError, isPermanent } from '../llm/errors.ts'
 
@@ -21,6 +22,9 @@ export interface Decision {
   readonly triggerRoomId: string
   readonly inReplyTo?: ReadonlyArray<string>
   readonly metrics?: LLMCallMetrics
+  // Every tool call this agent made during the turn. Attached only when the
+  // agent invoked tools. Forwarded by spawn.onDecision onto the posted Message.
+  readonly toolTrace?: ReadonlyArray<ToolTraceEntry>
 }
 
 export type OnDecision = (decision: Decision) => void
@@ -168,10 +172,26 @@ export const evaluate = async (
   const maxToolResultChars = config.maxToolResultChars ?? MAX_TOOL_RESULT_CHARS
   const { toolDefinitions, inReplyTo, onEvent, signal } = options ?? {}
 
+  // Accumulates one entry per tool call across every loop iteration. Attached
+  // to the final Decision — lets downstream consumers (export_room, UI)
+  // reconstruct what the agent actually did before answering.
+  const toolTrace: Array<ToolTraceEntry> = []
+
+  // Cap preview at 200 chars regardless of the agent's maxToolResultChars —
+  // trace is a debugging/analysis aid, not context fed to the LLM.
+  const PREVIEW_MAX = 200
+  const previewFor = (result: ToolResult): string => {
+    const raw = result.success
+      ? JSON.stringify(result.data ?? null)
+      : (result.error ?? '')
+    return raw.length > PREVIEW_MAX ? `${raw.slice(0, PREVIEW_MAX)}…` : raw
+  }
+
   const makeResult = (decision: Decision): EvalResult => ({
     decision: {
       ...(inReplyTo && inReplyTo.length > 0 ? { ...decision, inReplyTo } : decision),
       metrics: lastMetrics,
+      ...(toolTrace.length > 0 ? { toolTrace: [...toolTrace] } : {}),
     },
     flushInfo: contextResult.flushInfo,
   })
@@ -208,7 +228,16 @@ export const evaluate = async (
         for (const call of calls) onEvent?.({ kind: 'tool_start', tool: call.tool })
         const results = await toolExecutor(calls, triggerRoomId)
         for (let i = 0; i < results.length; i++) {
-          onEvent?.({ kind: 'tool_result', tool: calls[i]?.tool ?? 'unknown', success: results[i]?.success ?? false, preview: results[i]?.success ? undefined : results[i]?.error })
+          const call = calls[i]
+          const result = results[i]
+          if (!call || !result) continue
+          onEvent?.({ kind: 'tool_result', tool: call.tool, success: result.success, preview: result.success ? undefined : result.error })
+          toolTrace.push({
+            tool: call.tool,
+            arguments: call.arguments,
+            success: result.success,
+            resultPreview: previewFor(result),
+          })
         }
         context.push({ role: 'assistant' as const, content: streamResult.content })
         context.push({ role: 'user' as const, content: formatToolResults(calls, results, maxToolResultChars) })

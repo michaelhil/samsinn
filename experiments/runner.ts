@@ -39,14 +39,34 @@ const createAgentArgs = (agent: AgentSpec): Record<string, unknown> => {
   if (agent.temperature !== undefined) args.temperature = agent.temperature
   if (agent.seed !== undefined) args.seed = agent.seed
   if (agent.tools !== undefined) args.tools = agent.tools
+  if (agent.historyLimit !== undefined) args.historyLimit = agent.historyLimit
+  if (agent.maxToolIterations !== undefined) args.maxToolIterations = agent.maxToolIterations
+  if (agent.maxToolResultChars !== undefined) args.maxToolResultChars = agent.maxToolResultChars
+  if (agent.tags !== undefined) args.tags = agent.tags
+  if (agent.thinking !== undefined) args.thinking = agent.thinking
+  if (agent.includePrompts !== undefined) args.includePrompts = agent.includePrompts
+  if (agent.includeContext !== undefined) args.includeContext = agent.includeContext
+  if (agent.includeMacroStepPrompt !== undefined) args.includeMacroStepPrompt = agent.includeMacroStepPrompt
+  if (agent.includeTools !== undefined) args.includeTools = agent.includeTools
+  if (agent.promptsEnabled !== undefined) args.promptsEnabled = agent.promptsEnabled
+  if (agent.contextEnabled !== undefined) args.contextEnabled = agent.contextEnabled
   return args
 }
 
 interface WaitForIdleResponse {
   readonly idle: boolean
+  readonly capped: boolean
   readonly messageCount: number
   readonly lastMessageAt: number | null
   readonly elapsedMs: number
+}
+
+// Map (idle, capped) to our RunStatus. Cap wins over timeout since it's the
+// more specific signal; idle true always wins.
+const statusFor = (r: WaitForIdleResponse): 'ok' | 'timeout' | 'capped' => {
+  if (r.idle) return 'ok'
+  if (r.capped) return 'capped'
+  return 'timeout'
 }
 
 export const runOne = async (
@@ -84,7 +104,30 @@ export const runOne = async (
       })
     }
 
-    // 3. Trigger message — only if there's content to post
+    // 3. Seed messages (if any) — posted while paused so agents don't
+    //    evaluate them one-by-one. When unpaused + trigger fires, agents see
+    //    full history as context. Must run AFTER agents are added so they
+    //    capture these messages in their history view.
+    const seedMessages = spec.base.baseMessages ?? []
+    if (seedMessages.length > 0) {
+      await callJsonTool(client, 'pause_room', {
+        roomName: spec.base.room.name,
+        paused: true,
+      })
+      for (const seed of seedMessages) {
+        await callJsonTool(client, 'post_message', {
+          roomNames: [spec.base.room.name],
+          content: seed.content,
+          ...(seed.senderName !== undefined ? { senderName: seed.senderName } : {}),
+        })
+      }
+      await callJsonTool(client, 'pause_room', {
+        roomName: spec.base.room.name,
+        paused: false,
+      })
+    }
+
+    // 4. Trigger message — only if there's content to post
     if (spec.base.trigger.content.length > 0) {
       await callJsonTool(client, 'post_message', {
         roomNames: [spec.base.room.name],
@@ -93,23 +136,26 @@ export const runOne = async (
       })
     }
 
-    // 4. Wait for conversation to settle
+    // 5. Wait for conversation to settle (or hit maxMessages cap)
     const idleResult = await callJsonTool<WaitForIdleResponse>(client, 'wait_for_idle', {
       roomName: spec.base.room.name,
       quietMs: spec.wait.quietMs,
       timeoutMs: spec.wait.timeoutMs,
+      ...(spec.wait.maxMessages !== undefined ? { maxMessages: spec.wait.maxMessages } : {}),
     })
 
-    // 5. Export regardless of idle/timeout so partial conversations are captured
+    // 6. Export regardless of idle/timeout/capped so partial conversations are captured
     const exported = await callJsonTool<RunResult['export']>(client, 'export_room', {
       roomName: spec.base.room.name,
     })
 
     const finishedAt = Date.now()
+    const status = statusFor(idleResult)
     return {
       ...base,
-      status: idleResult.idle ? 'ok' : 'timeout',
-      ...(idleResult.idle ? {} : { timedOut: true }),
+      status,
+      ...(status === 'timeout' ? { timedOut: true } : {}),
+      ...(status === 'capped' ? { capped: true } : {}),
       finishedAt,
       elapsedMs: finishedAt - startedAt,
       ...(exported ? { export: exported } : {}),

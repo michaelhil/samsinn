@@ -219,18 +219,20 @@ export const registerMessageTools = (mcpServer: McpServer, system: System): void
 
   mcpServer.tool(
     'wait_for_idle',
-    'Wait for a room to become idle. Returns {idle, messageCount, lastMessageAt, elapsedMs}. Idle = no new message for quietMs AND all in-room AI agents resolved whenIdle. Polls every 500ms.',
+    'Wait for a room to become idle. Returns {idle, capped, messageCount, lastMessageAt, elapsedMs}. Idle = no new message for quietMs AND all in-room AI agents resolved whenIdle. Capped = room hit maxMessages before quiescence (if set). Polls every 500ms.',
     {
       roomName: z.string().describe('Room name'),
       quietMs: z.number().int().default(5000).describe('Quiet period before idle fires (ms)'),
       timeoutMs: z.number().int().default(120000).describe('Max wait before returning idle:false (ms)'),
+      maxMessages: z.number().int().optional().describe('Hard cap on room message count. When reached, returns with capped:true immediately — useful for preventing runaway agent loops.'),
     },
-    async ({ roomName, quietMs, timeoutMs }) => {
+    async ({ roomName, quietMs, timeoutMs, maxMessages }) => {
       try {
         const room = resolveRoom(system, roomName)
         const result = await waitForRoomIdle(room, {
           quietMs,
           timeoutMs,
+          ...(maxMessages !== undefined ? { maxMessages } : {}),
           inRoomAIAgents: () => room.getParticipantIds()
             .map(id => system.team.getAgent(id))
             .flatMap(a => { const ai = a ? asAIAgent(a) : null; return ai ? [ai] : [] }),

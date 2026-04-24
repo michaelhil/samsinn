@@ -34,12 +34,13 @@ export interface RunBatchOptions {
   readonly onSubprocessStarted?: () => void
 }
 
-const emptyStats = (): VariantStats => ({ succeeded: 0, failed: 0, timedOut: 0 })
+const emptyStats = (): VariantStats => ({ succeeded: 0, failed: 0, timedOut: 0, capped: 0 })
 
 const tallyInto = (stats: VariantStats, result: RunResult): VariantStats => ({
   succeeded: stats.succeeded + (result.status === 'ok' ? 1 : 0),
   failed: stats.failed + (result.status === 'error' ? 1 : 0),
   timedOut: stats.timedOut + (result.status === 'timeout' ? 1 : 0),
+  capped: stats.capped + (result.status === 'capped' ? 1 : 0),
 })
 
 const startupErrorResult = (

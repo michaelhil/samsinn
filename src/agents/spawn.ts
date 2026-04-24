@@ -175,6 +175,7 @@ export const spawnAIAgent = async (
         generationMs: decision.generationMs,
         inReplyTo: decision.inReplyTo,
         ...telemetry,
+        ...(decision.toolTrace && decision.toolTrace.length > 0 ? { toolTrace: decision.toolTrace } : {}),
       })
     } else if (decision.response.action === 'pass') {
       // Post pass as a visible message so humans can see agent decisions

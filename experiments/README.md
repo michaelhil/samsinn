@@ -39,7 +39,38 @@ export default spec
 
 **Variant names** must match `/^[a-zA-Z0-9_-]+$/` (they land in output filenames). Duplicates are rejected.
 
-**AgentSpec fields**: `name`, `model`, `persona`, and the variation knobs `temperature?`, `seed?`, `tools?`. These are the fields the extended `create_agent` MCP tool accepts.
+### AgentSpec fields
+
+Every field below maps 1:1 to the samsinn `AIAgentConfig`. Required: `name`, `model`, `persona`. Everything else is optional; omitting preserves samsinn's default.
+
+| Field | Type | Research use |
+|---|---|---|
+| `temperature` | `number` | Sampling randomness. |
+| `seed` | `number` | Deterministic seed (best-effort per provider). |
+| `tools` | `string[]` | Restrict the agent's tool set. Omit = all registered tools. Empty array = no tools. |
+| `historyLimit` | `number` | How many old messages stay in context. |
+| `maxToolIterations` | `number` | Tool-loop depth cap. |
+| `maxToolResultChars` | `number` | Per-tool-call result truncation fed back to the LLM. |
+| `tags` | `string[]` | Capability/role tags — enables `[[tag:X]]` addressing. |
+| `thinking` | `boolean` | Enable CoT (qwen3 thinking mode, etc.). |
+| `includePrompts` | object | Per-section gates. **Keys don't match UI labels — see table below.** |
+| `includeContext` | object | CONTEXT sub-section toggles (`participants`, `macro`, `artifacts`, `activity`, `knownAgents`). |
+| `includeMacroStepPrompt` | `boolean` | Include `[Step instruction: …]` on macro messages. |
+| `includeTools` | `boolean` | Master: send tool definitions to LLM at all. |
+| `promptsEnabled` | `boolean` | Master: every `includePrompts` section off when `false`. |
+| `contextEnabled` | `boolean` | Master: every `includeContext` sub-section off when `false`. |
+
+**`includePrompts` key ↔ UI label mapping** (confusing — always consult this table):
+
+| UI label | Key |
+|---|---|
+| Agent persona | `persona` |
+| Room prompt | `room` |
+| System prompt | `house` (NOT `system`) |
+| Response format | `responseFormat` |
+| Skills | `skills` |
+
+So to run an ablation that disables the skills section: `includePrompts: { skills: false }`.
 
 **Paths** (`outputDir`, the spec path passed to the CLI) are resolved against `process.cwd()`, not the spec file's location.
 
@@ -59,7 +90,7 @@ export default spec
   "experiment": "persona-steering",
   "variant": "cold",
   "runIndex": 0,
-  "status": "ok",                  // "ok" | "timeout" | "error"
+  "status": "ok",                  // "ok" | "timeout" | "error" | "capped"
   "startedAt": 1777035282929,
   "finishedAt": 1777035283437,
   "elapsedMs": 508,
@@ -67,12 +98,32 @@ export default spec
     "roomId": "...",
     "roomName": "trial",
     "messageCount": 14,
-    "messages": [ /* every message + telemetry */ ]
+    "messages": [ /* every message + telemetry + toolTrace */ ]
   },
   "error": "...",                  // only on status: error
-  "timedOut": true                 // only on status: timeout
+  "timedOut": true,                // only on status: timeout
+  "capped": true                   // only on status: capped
 }
 ```
+
+### Tool-call traces
+
+Messages posted by agents that invoked tools carry a `toolTrace` array — one entry per call made during that turn. Omitted when the agent didn't call any tools.
+
+```json
+{
+  "senderName": "solver",
+  "content": "The weather in Paris is 14°C and cloudy.",
+  "type": "chat",
+  "promptTokens": 82, "completionTokens": 14, "provider": "anthropic",
+  "toolTrace": [
+    { "tool": "get_weather", "arguments": { "city": "Paris" },
+      "success": true, "resultPreview": "{\"temp\":14,\"cond\":\"cloudy\"}" }
+  ]
+}
+```
+
+`resultPreview` is always ≤200 chars (truncated with `…`). Errors surface in `resultPreview` too, with `success: false`. Enables analyses like: *"which variants used web_search? how often did they hit errors? does tool use correlate with answer quality?"*
 
 ### Summary shape
 ```json
@@ -98,10 +149,52 @@ export default spec
 ## Interpreting `status`
 
 - **`ok`** — conversation reached quiescence: `wait_for_idle` returned `idle: true` AND all in-room AI agents resolved `whenIdle()`.
-- **`timeout`** — `wait_for_idle` hit `timeoutMs` without reaching quiescence. The export is still captured; the conversation just ran long. Consider raising `wait.timeoutMs` if this fires often on long-reasoning models.
-- **`error`** — something threw: subprocess startup failure, MCP tool error, spawn-related, JSON parse of MCP response, etc. `error` field carries the message.
+- **`timeout`** — `wait_for_idle` hit `timeoutMs` without quiescence or cap. Export still captured. Raise `wait.timeoutMs` if this fires often on long-reasoning models.
+- **`capped`** — `wait.maxMessages` reached. Intentional — your cap fired because a conversation ran long (agents in a loop, debate, etc.). Not a failure; the data is still good.
+- **`error`** — something threw: subprocess startup failure, MCP tool error, spawn-related, JSON parse of MCP response. `error` field carries the message.
 
-Errors do NOT abort the batch — the next run starts fresh in a new subprocess. Exit code is 0 iff ≥1 run succeeded.
+Errors do NOT abort the batch — the next run starts fresh. Exit code is 0 iff ≥1 run succeeded.
+
+## Multi-agent primitives
+
+### Base agents
+
+`base.agents: AgentSpec[]` (optional) adds agents common to every variant, in addition to each variant's `agents`. Useful for a fixed "moderator" or "adversary" present across all variants while the variant-specific agents change.
+
+### Seed messages (`base.baseMessages`)
+
+Optional seed messages posted before the trigger. The runner:
+1. Creates the room + agents
+2. **Pauses** the room (agents don't evaluate)
+3. Posts each seed message
+4. Unpauses the room
+5. Posts the trigger
+6. Calls `wait_for_idle`
+
+Agents see every seed message in their history when they first evaluate (triggered by the trigger). Use this to pre-seed few-shot context, carry-in prior turns, or set scene.
+
+```ts
+base: {
+  room: { name: 'trial' },
+  trigger: { content: 'Now what?', senderName: 'researcher' },
+  baseMessages: [
+    { content: 'Earlier: the suspect was seen near the bank at 9pm.', senderName: 'context' },
+    { content: 'Earlier: a witness described a blue coat.', senderName: 'context' },
+  ],
+}
+```
+
+### Max-messages cap (`wait.maxMessages`)
+
+Hard cap on room message count. When hit, `wait_for_idle` returns immediately with `capped: true` and the run's status becomes `'capped'` (not an error).
+
+**The cap counts every message in the room**: seed messages + trigger + agent responses. If `baseMessages.length === 3` + 1 trigger + `maxMessages: 6` → agents get at most 2 responses before cap.
+
+Essential for agent-vs-agent debates where agents might otherwise loop indefinitely.
+
+### Delivery mode (deferred)
+
+`deliveryMode` is not yet a spec field. The underlying `set_delivery_mode` MCP tool currently only sets broadcast (which is the default anyway). Manual mode exposure is a follow-up. For now every experiment runs in broadcast mode — every agent in the room sees every message.
 
 ## Exit codes
 
@@ -160,6 +253,8 @@ SIGINT (Ctrl-C) stops the batch after the in-flight run's result + summary have 
 - **`examples/zero-agent-reset.ts`** — same shape, `isolation: 'reset'`. Use to verify reset mode locally.
 - **`examples/zero-agent-subprocess.ts`** — explicit subprocess mode for side-by-side perf comparison.
 - **`examples/hello-world.ts`** — one real Anthropic agent, two temperature variants. Requires `ANTHROPIC_API_KEY` in the environment (or a key stored in `~/.samsinn/providers.json`).
+- **`examples/two-agent-debate.ts`** — optimist vs. pessimist debate, demonstrates `baseMessages`-free multi-agent setup and `maxMessages` cap. Requires Anthropic key.
+- **`examples/ablation.ts`** — one agent across four variants differing only in `includePrompts` / `promptsEnabled`. Reset mode. Requires Anthropic key.
 
 ## What this runner does NOT do
 
