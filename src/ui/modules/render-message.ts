@@ -26,14 +26,13 @@ export interface RenderMessageOptions {
   readonly msg: UIMessage
   readonly myAgentId: string
   readonly agents: Record<string, AgentInfo> | Map<string, AgentInfo>
-  readonly onPin?: (msgId: string, senderName: string, content: string) => void
   readonly onDelete?: (msgId: string) => void
   readonly onViewContext?: (msgId: string) => void
   readonly onBookmark?: (content: string) => void
 }
 
 export const renderMessage = (opts: RenderMessageOptions): void => {
-  const { container, msg, myAgentId, agents, onPin, onDelete, onViewContext, onBookmark } = opts
+  const { container, msg, myAgentId, agents, onDelete, onViewContext, onBookmark } = opts
   const getAgent = (id: string): AgentInfo | undefined =>
     agents instanceof Map ? agents.get(id) : agents[id]
 
@@ -120,7 +119,7 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
       header.appendChild(ctxEl)
     }
 
-    if (onPin || onDelete || onViewContext || onBookmark) {
+    if (onDelete || onViewContext || onBookmark) {
       const spacer = document.createElement('span')
       spacer.className = 'ml-auto'
       header.appendChild(spacer)
@@ -143,15 +142,6 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
         bmBtn.appendChild(icon('bookmark', { size: 12, fill: 'var(--danger)', style: 'transform: rotate(45deg);' }))
         bmBtn.onclick = (e) => { e.stopPropagation(); onBookmark(msg.content) }
         header.appendChild(bmBtn)
-      }
-
-      if (onPin) {
-        const pinBtn = document.createElement('button')
-        pinBtn.className = 'text-border-strong hover:text-warning text-xs opacity-0 group-hover:opacity-100'
-        pinBtn.textContent = '📌'
-        pinBtn.title = 'Pin message'
-        pinBtn.onclick = (e) => { e.stopPropagation(); onPin(msg.id, sender?.name ?? msg.senderName ?? msg.senderId, msg.content) }
-        header.appendChild(pinBtn)
       }
 
       if (onDelete) {

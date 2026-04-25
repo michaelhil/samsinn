@@ -162,9 +162,7 @@ export const roomRoutes: RouteEntry[] = [
       const body = await parseBody(req)
       const rawMode = body.mode as string
       if (!SETTABLE_DELIVERY_MODES.includes(rawMode as SettableDeliveryMode)) {
-        return rawMode === 'macro'
-          ? errorResponse('Macro mode is entered via start_flow, not set_delivery_mode', 400)
-          : errorResponse(`Invalid mode "${rawMode}". Valid: ${SETTABLE_DELIVERY_MODES.join(', ')}`, 400)
+        return errorResponse(`Invalid mode "${rawMode}". Valid: ${SETTABLE_DELIVERY_MODES.join(', ')}`, 400)
       }
       room.setDeliveryMode(rawMode as SettableDeliveryMode)
       return json({ mode: room.deliveryMode })
@@ -199,56 +197,6 @@ export const roomRoutes: RouteEntry[] = [
       room.setMuted(agent.id, body.muted)
       broadcast({ type: 'mute_changed', roomName: room.profile.name, agentName: agent.name, muted: body.muted })
       return json({ muted: room.isMuted(agent.id) })
-    },
-  },
-  {
-    method: 'POST',
-    pattern: /^\/api\/rooms\/([^/]+)\/macros\/start$/,
-    handler: async (req, match, { system }) => {
-      const name = decodeURIComponent(match[1]!)
-      const room = system.house.getRoom(name)
-      if (!room) return errorResponse(`Room "${name}" not found`, 404)
-      const body = await parseBody(req)
-      if (typeof body.macroArtifactId !== 'string') return errorResponse('macroArtifactId is required')
-
-      const artifact = system.house.artifacts.get(body.macroArtifactId)
-      if (!artifact || artifact.type !== 'macro') {
-        return errorResponse(`Macro artifact "${body.macroArtifactId}" not found`, 404)
-      }
-      const macroBody = artifact.body as unknown as import('../../core/types/artifact.ts').MacroArtifactBody
-      const steps = (macroBody.steps ?? []).map(s => ({
-        agentId: s.agentId || (system.team.getAgent(s.agentName)?.id ?? ''),
-        agentName: s.agentName,
-        ...(s.stepPrompt ? { stepPrompt: s.stepPrompt } : {}),
-      }))
-
-      if (body.content && body.senderId) {
-        room.setPaused(true)
-        room.post({
-          senderId: body.senderId as string,
-          senderName: body.senderName as string | undefined,
-          content: body.content as string,
-          type: 'chat',
-        })
-      }
-      room.runMacro({
-        id: artifact.id,
-        name: artifact.title,
-        steps,
-        loop: macroBody.loop ?? false,
-      })
-      return json({ started: true, mode: room.deliveryMode })
-    },
-  },
-  {
-    method: 'POST',
-    pattern: /^\/api\/rooms\/([^/]+)\/macros\/cancel$/,
-    handler: (_req, match, { system }) => {
-      const name = decodeURIComponent(match[1]!)
-      const room = system.house.getRoom(name)
-      if (!room) return errorResponse(`Room "${name}" not found`, 404)
-      room.stopMacro()
-      return json({ cancelled: true, mode: room.deliveryMode })
     },
   },
   {

@@ -2,15 +2,14 @@
 // Bookmarks Panel — system-wide message bookmarks dialog.
 //
 // Opens on demand, fetches /api/bookmarks, renders a scrollable list.
-// Row click → sends the bookmark text into the currently selected room (via
-// the same `post_message` WS command the message input uses). Pen toggles
-// in-line edit (textarea that auto-grows, saves on blur/Enter, Escape cancels,
-// edits preserve list position). Red × deletes. Newest entries are on top.
+// Row click → inserts the bookmark text into the chat composer for the user
+// to edit before sending. Pen toggles in-line edit (textarea that auto-grows,
+// saves on blur/Enter, Escape cancels, edits preserve list position). Red ×
+// deletes. Newest entries are on top.
 // ============================================================================
 
 import { createModal } from './detail-modal.ts'
 import { showToast } from './toast.ts'
-import type { WSOutbound } from '../../core/types/ws-protocol.ts'
 
 interface Bookmark {
   readonly id: string
@@ -18,8 +17,7 @@ interface Bookmark {
 }
 
 export interface BookmarksPanelDeps {
-  readonly send: (msg: WSOutbound) => void
-  readonly getSelectedRoomName: () => string | undefined
+  readonly setComposerText: (text: string) => void
 }
 
 const fetchBookmarks = async (): Promise<Bookmark[]> => {
@@ -51,7 +49,7 @@ const autoGrow = (ta: HTMLTextAreaElement): void => {
 
 const buildRow = (
   bm: Bookmark,
-  onSend: (content: string) => void,
+  onInsert: (content: string) => void,
   onDelete: (id: string) => void,
   onEdited: (id: string, content: string) => void,
 ): HTMLDivElement => {
@@ -84,7 +82,7 @@ const buildRow = (
 
   row.onclick = (e) => {
     if (e.target === editBtn || e.target === delBtn) return
-    onSend(currentContent)
+    onInsert(currentContent)
   }
 
   delBtn.onclick = (e) => {
@@ -163,12 +161,7 @@ export const openBookmarksPanel = async (deps: BookmarksPanelDeps): Promise<void
       list.appendChild(buildRow(
         bm,
         (content) => {
-          const roomName = deps.getSelectedRoomName()
-          if (!roomName) {
-            showToast(document.body, 'Select a room first')
-            return
-          }
-          deps.send({ type: 'post_message', target: { rooms: [roomName] }, content })
+          deps.setComposerText(content)
           modal.close()
         },
         async (id) => {

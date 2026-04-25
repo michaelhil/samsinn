@@ -152,39 +152,6 @@ export const renderPollArtifact = (
   return wrap
 }
 
-// === Macro ===
-
-export const renderMacroArtifact = (
-  artifact: ArtifactInfo,
-  onAction: (action: ArtifactAction) => void,
-): HTMLElement => {
-  const body = artifact.body as { steps?: Array<{ agentName: string }>; loop?: boolean }
-  const wrap = document.createElement('div')
-  wrap.className = 'group'
-  const row = document.createElement('div')
-  row.className = 'flex items-center gap-1 text-xs'
-  const titleEl = document.createElement('span')
-  titleEl.className = 'font-medium text-macro-accent flex-1'
-  titleEl.textContent = artifact.title
-  const steps = (body.steps ?? []).map(s => s.agentName).join(' → ')
-  const stepsEl = document.createElement('span')
-  stepsEl.className = 'text-text-muted truncate max-w-[120px]'
-  stepsEl.title = steps
-  stepsEl.textContent = steps
-  const loopEl = body.loop ? document.createElement('span') : null
-  if (loopEl) { loopEl.className = 'text-macro-accent-soft flex-shrink-0'; loopEl.textContent = '↻' }
-  const removeBtn = document.createElement('button')
-  removeBtn.className = 'text-xs text-danger hover:text-danger opacity-0 group-hover:opacity-100 flex-shrink-0'
-  removeBtn.textContent = '✕'
-  removeBtn.onclick = () => onAction({ kind: 'remove', artifactId: artifact.id })
-  row.appendChild(titleEl)
-  row.appendChild(stepsEl)
-  if (loopEl) row.appendChild(loopEl)
-  row.appendChild(removeBtn)
-  wrap.appendChild(row)
-  return wrap
-}
-
 // === Document ===
 
 const MAX_VISIBLE_BLOCKS = 20

@@ -153,7 +153,7 @@ export const $messageWarnings = map<Record<string, string[]>>({})
 export const $currentDeliveryMode = atom<string>('broadcast')
 export const $roomPaused = atom(false)
 
-// === Turn / macro info (ephemeral, set by WS events) ===
+// === Turn info (ephemeral, set by WS events) ===
 
 export interface TurnInfo {
   readonly roomName: string
@@ -161,26 +161,6 @@ export interface TurnInfo {
   readonly waitingForHuman?: boolean
 }
 export const $turnInfo = atom<TurnInfo | null>(null)
-
-export interface MacroStatus {
-  readonly roomName: string
-  readonly event: string
-  readonly detail?: Record<string, unknown>
-}
-export const $macroStatus = atom<MacroStatus | null>(null)
-
-// Sticky per-room macro selection (artifact id). Hydrated from roomStates snapshot
-// and updated by macro_selection_changed events.
-export const $selectedMacroIdByRoom = map<Record<string, string | null>>({})
-
-// === Pinned messages ===
-
-export interface PinnedMessage {
-  readonly senderId: string
-  readonly content: string
-  readonly senderName?: string
-}
-export const $pinnedMessages = map<Record<string, PinnedMessage>>({})
 
 // === Ollama dashboard ===
 

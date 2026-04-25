@@ -9,7 +9,7 @@ import type { ToolRegistry } from '../../core/types/tool.ts'
 import type { RouteEntry } from './types.ts'
 
 const PROMPT_SECTIONS: ReadonlyArray<PromptSection> = ['persona', 'room', 'house', 'responseFormat', 'skills']
-const CONTEXT_SECTIONS: ReadonlyArray<ContextSection> = ['participants', 'macro', 'artifacts', 'activity', 'knownAgents']
+const CONTEXT_SECTIONS: ReadonlyArray<ContextSection> = ['participants', 'artifacts', 'activity', 'knownAgents']
 
 // Compute approximate token cost of each registered tool's definition.
 // Uses the standard 4-chars-per-token heuristic across JSON-serialised defs.
@@ -83,7 +83,6 @@ export const agentRoutes: RouteEntry[] = [
         detail.tools = aiAgent.getTools()
         detail.includePrompts = aiAgent.getIncludePrompts()
         detail.includeContext = aiAgent.getIncludeContext()
-        detail.includeMacroStepPrompt = aiAgent.getIncludeMacroStepPrompt()
         detail.includeTools = aiAgent.getIncludeTools()
         detail.promptsEnabled = aiAgent.getPromptsEnabled()
         detail.contextEnabled = aiAgent.getContextEnabled()
@@ -159,7 +158,6 @@ export const agentRoutes: RouteEntry[] = [
         if (inc) aiAgent.updateIncludePrompts(inc)
         const incCtx = sanitizeIncludeContext(body.includeContext)
         if (incCtx) aiAgent.updateIncludeContext(incCtx)
-        if (typeof body.includeMacroStepPrompt === 'boolean') aiAgent.updateIncludeMacroStepPrompt(body.includeMacroStepPrompt)
         if (typeof body.includeTools === 'boolean') aiAgent.updateIncludeTools(body.includeTools)
         if (typeof body.promptsEnabled === 'boolean') aiAgent.updatePromptsEnabled(body.promptsEnabled)
         if (typeof body.contextEnabled === 'boolean') aiAgent.updateContextEnabled(body.contextEnabled)

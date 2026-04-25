@@ -1,5 +1,5 @@
 // ============================================================================
-// Workspace — modal hosting the room's artifacts (task lists, polls, macros,
+// Workspace — modal hosting the room's artifacts (task lists, polls,
 // documents, mermaid diagrams). Replaces the previous bottom-anchored
 // resizable pane with a master/detail modal opened from a toolbar button.
 //

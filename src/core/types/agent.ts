@@ -53,7 +53,7 @@ export type IncludePrompts = Partial<Record<PromptSection, boolean>>
 // preserves current behavior. Unlike `PromptSection`, these are fixed-purpose
 // informational (not author-written text), so the magnifier shows the text
 // that would be injected at request time.
-export type ContextSection = 'participants' | 'macro' | 'artifacts' | 'activity' | 'knownAgents'
+export type ContextSection = 'participants' | 'artifacts' | 'activity' | 'knownAgents'
 export type IncludeContext = Partial<Record<ContextSection, boolean>>
 
 export interface AIAgent extends Agent {
@@ -77,8 +77,6 @@ export interface AIAgent extends Agent {
   readonly updateIncludePrompts: (partial: IncludePrompts) => void
   readonly getIncludeContext: () => Required<IncludeContext>
   readonly updateIncludeContext: (partial: IncludeContext) => void
-  readonly getIncludeMacroStepPrompt: () => boolean
-  readonly updateIncludeMacroStepPrompt: (enabled: boolean) => void
   readonly getIncludeTools: () => boolean
   readonly updateIncludeTools: (enabled: boolean) => void
   readonly getPromptsEnabled: () => boolean
@@ -182,8 +180,7 @@ export interface AIAgentConfig {
   readonly thinking?: boolean                    // enable model CoT (qwen3 thinking mode)
   // Context & Prompts toggles — all default true; undefined preserves current behavior
   readonly includePrompts?: IncludePrompts      // per-section prompt inclusion (persona/room/house/responseFormat/skills)
-  readonly includeContext?: IncludeContext      // CONTEXT sub-sections (participants/macro/artifacts/activity/knownAgents)
-  readonly includeMacroStepPrompt?: boolean      // include [Step instruction: ...] suffix on macro messages (default: true)
+  readonly includeContext?: IncludeContext      // CONTEXT sub-sections (participants/artifacts/activity/knownAgents)
   readonly includeTools?: boolean               // master: send tool definitions to LLM (default: true)
   readonly promptsEnabled?: boolean             // master for all per-section prompt toggles (default: true)
   readonly contextEnabled?: boolean             // master for all context sub-section toggles (default: true)

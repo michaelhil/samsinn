@@ -4,7 +4,6 @@ import type { RoomProfile, ArtifactInfo, ArtifactAction } from './render-types.t
 import {
   renderTaskListArtifact,
   renderPollArtifact,
-  renderMacroArtifact,
   renderDocumentArtifact,
   renderMermaidArtifact,
   renderGenericArtifact,
@@ -82,7 +81,6 @@ export const renderArtifacts = (
     let inner: HTMLElement
     if (artifact.type === 'task_list') inner = renderTaskListArtifact(artifact, onAction)
     else if (artifact.type === 'poll') inner = renderPollArtifact(artifact, myAgentId, onAction)
-    else if (artifact.type === 'macro') inner = renderMacroArtifact(artifact, onAction)
     else if (artifact.type === 'document') inner = renderDocumentArtifact(artifact, onAction)
     else if (artifact.type === 'mermaid') inner = renderMermaidArtifact(artifact, onAction)
     else inner = renderGenericArtifact(artifact, onAction)

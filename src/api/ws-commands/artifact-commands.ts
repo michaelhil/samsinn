@@ -1,6 +1,5 @@
 import type { WSInbound } from '../../core/types/ws-protocol.ts'
-import { resolveMacroArtifact, isMacroError } from '../../core/macro-artifact.ts'
-import { requireRoom, sendError, type CommandContext } from './types.ts'
+import { sendError, type CommandContext } from './types.ts'
 
 export const handleArtifactCommand = (msg: WSInbound, ctx: CommandContext): boolean => {
   const { ws, session, system } = ctx
@@ -78,38 +77,6 @@ export const handleArtifactCommand = (msg: WSInbound, ctx: CommandContext): bool
         { body: { castVote: msg.optionId } },
         { callerId: session.agent.id, callerName: session.agent.name },
       )
-      return true
-    }
-
-    case 'run_macro': {
-      const room = requireRoom(ws, system, msg.roomName)
-      if (!room) return true
-
-      const artifact = system.house.artifacts.get(msg.macroArtifactId)
-      if (!artifact) {
-        sendError(ws, `Macro artifact "${msg.macroArtifactId}" not found`)
-        return true
-      }
-      const macro = resolveMacroArtifact(artifact, system.team, room.profile.roomPrompt)
-      if (isMacroError(macro)) {
-        sendError(ws, macro.error)
-        return true
-      }
-
-      room.post({
-        senderId: session.agent.id,
-        senderName: session.agent.name,
-        content: msg.content,
-        type: 'chat',
-      })
-      room.runMacro(macro)
-      return true
-    }
-
-    case 'stop_macro': {
-      const room = requireRoom(ws, system, msg.roomName)
-      if (!room) return true
-      room.stopMacro()
       return true
     }
 

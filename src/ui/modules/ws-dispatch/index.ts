@@ -20,8 +20,6 @@ import {
   $currentDeliveryMode,
   $roomPaused,
   $turnInfo,
-  $macroStatus,
-  $selectedMacroIdByRoom,
   $artifacts,
   $thinkingPreviews,
   $thinkingTools,
@@ -38,7 +36,6 @@ import {
 } from '../stores.ts'
 import type { WSOutbound } from '../../../core/types/ws-protocol.ts'
 import { showToast } from '../toast.ts'
-import { roomNameToId } from '../identity-lookups.ts'
 import {
   handleSummaryRunStarted,
   handleSummaryRunDelta,
@@ -49,9 +46,9 @@ import { toUIMessage, toUIRoomProfile, toAgentEntry, toUIArtifact } from './mapp
 import { shouldEmitBound } from './dedup.ts'
 
 // --- Pending create hooks ---
-// Callers (e.g. the Macro create flow) register a hook keyed by requestId
-// before sending add_artifact. When the matching artifact_created arrives,
-// the hook fires and is removed. Single-fire; lives only in memory.
+// Callers register a hook keyed by requestId before sending add_artifact.
+// When the matching artifact_created arrives, the hook fires and is
+// removed. Single-fire; lives only in memory.
 export type PendingCreateHook = (artifactId: string, artifactType: string) => void
 export const pendingCreateHooks = new Map<string, PendingCreateHook>()
 
@@ -84,20 +81,17 @@ const handlers: Handlers = {
     for (const a of msg.agents) agentMap[a.id] = toAgentEntry(a)
     $agents.set(agentMap)
 
-    // Room states: paused, members, muted, selectedMacroId
+    // Room states: paused, members, muted
     const paused = new Set<string>()
     const membersMap: Record<string, string[]> = {}
-    const selectionMap: Record<string, string | null> = {}
     if (msg.roomStates) {
       for (const [roomId, rs] of Object.entries(msg.roomStates)) {
         if (rs.paused) paused.add(roomId)
         if (rs.members) membersMap[roomId] = [...rs.members]
-        selectionMap[roomId] = rs.selectedMacroId ?? null
       }
     }
     $pausedRooms.set(paused)
     $roomMembers.set(membersMap)
-    $selectedMacroIdByRoom.set(selectionMap)
 
     // Clear transient state
     $unreadCounts.set({})
@@ -110,7 +104,6 @@ const handlers: Handlers = {
     $messageWarnings.set({})
     $mutedAgents.set(new Set())
     $turnInfo.set(null)
-    $macroStatus.set(null)
 
     // Auto-select first room if none selected
     if (!$selectedRoomId.get() && msg.rooms.length > 0) {
@@ -336,30 +329,10 @@ const handlers: Handlers = {
     $mutedAgents.set(muted)
   },
 
-  // --- Turn / macro ---
+  // --- Turn ---
 
   turn_changed(msg) {
     $turnInfo.set({ roomName: msg.roomName, agentName: msg.agentName, waitingForHuman: msg.waitingForHuman })
-  },
-
-  macro_event(msg) {
-    $macroStatus.set({ roomName: msg.roomName, event: msg.event, detail: msg.detail })
-    // Macro lifecycle no longer mutates mode or pause — those are purely user-controlled now.
-  },
-
-  macro_selection_changed(msg) {
-    const roomId = roomNameToId(msg.roomName)
-    if (!roomId) return
-    const current = $selectedMacroIdByRoom.get()
-    $selectedMacroIdByRoom.set({ ...current, [roomId]: msg.macroArtifactId })
-    // Toast: look up title from current artifact list; fall back to id.
-    if (msg.macroArtifactId === null) {
-      showToast(document.body, 'Macro selection cleared (macro deleted)', { position: 'fixed', durationMs: 4000 })
-    } else {
-      const artifact = Object.values($artifacts.get()).find(a => a.id === msg.macroArtifactId)
-      const name = artifact?.title ?? 'macro'
-      showToast(document.body, `Selected: ${name}`, { position: 'fixed', durationMs: 2500 })
-    }
   },
 
   artifact_created(msg) {

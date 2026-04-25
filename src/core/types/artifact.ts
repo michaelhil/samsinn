@@ -1,8 +1,7 @@
 // Artifact system — system-level collaborative objects (task lists, polls,
-// macro blueprints, documents). Artifacts live in House and are scoped to
-// rooms via `scope`. The type system mirrors the Tool plugin pattern.
+// documents). Artifacts live in House and are scoped to rooms via `scope`.
+// The type system mirrors the Tool plugin pattern.
 
-import type { MacroStep } from './macro.ts'
 import type { ToolContext } from './tool.ts'
 
 // === Embedded task item within a task_list artifact ===
@@ -41,12 +40,6 @@ export interface PollBody {
   readonly allowMultiple: boolean
 }
 
-export interface MacroArtifactBody {
-  readonly steps: ReadonlyArray<MacroStep>
-  readonly loop: boolean
-  readonly description?: string
-}
-
 // === Document artifact body types ===
 
 export type BlockType = 'heading1' | 'heading2' | 'heading3' | 'paragraph' | 'code' | 'quote' | 'list'
@@ -68,13 +61,13 @@ export interface MermaidBody {
 // Union of all built-in artifact body shapes. Plugin-defined artifact types
 // fall outside this union; callers with a dynamic type name should narrow by
 // inspecting `artifact.type` and casting the body, or pattern-match here.
-export type ArtifactBody = TaskListBody | PollBody | MacroArtifactBody | DocumentBody | MermaidBody
+export type ArtifactBody = TaskListBody | PollBody | DocumentBody | MermaidBody
 
 // === Artifact instance ===
 
 export interface Artifact {
   readonly id: string
-  readonly type: string                         // artifact type name: 'task_list', 'poll', 'macro'
+  readonly type: string                         // artifact type name: 'task_list', 'poll', 'document', 'mermaid', or plugin-defined
   readonly title: string                        // human-readable label
   readonly description?: string                 // optional longer description
   readonly body: Record<string, unknown>        // type-specific payload

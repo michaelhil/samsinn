@@ -8,8 +8,8 @@
 import type { Agent, AIAgent, AIAgentConfig, RouteMessage, Team } from './core/types/agent.ts'
 import type { DeliverFn, ResolveAgentName, ResolveTagFn } from './core/types/messaging.ts'
 import type {
-  House, HouseCallbacks, OnBookmarksChanged, OnDeliveryModeChanged, OnMacroEvent,
-  OnMacroSelectionChanged, OnMembershipChanged, OnMessagePosted, OnModeAutoSwitched,
+  House, HouseCallbacks, OnBookmarksChanged, OnDeliveryModeChanged,
+  OnMembershipChanged, OnMessagePosted, OnModeAutoSwitched,
   OnRoomCreated, OnRoomDeleted, OnSummaryConfigChanged, OnSummaryUpdated,
   OnTurnChanged,
 } from './core/types/room.ts'
@@ -53,7 +53,6 @@ import {
 } from './tools/built-in/index.ts'
 import { createTaskListArtifactType } from './core/artifact-types/task-list.ts'
 import { pollArtifactType } from './core/artifact-types/poll.ts'
-import { createMacroArtifactType } from './core/artifact-types/macro.ts'
 import { documentArtifactType } from './core/artifact-types/document.ts'
 import { mermaidArtifactType } from './core/artifact-types/mermaid.ts'
 // Native-only tool calling — no capability probing needed
@@ -67,7 +66,7 @@ import type { LogConfig, LogConfigState, LogEvent, LogSink } from './logging/typ
 import { createJsonlFileSink } from './logging/jsonl-sink.ts'
 import { matchesKindFilter, validateLogConfig, defaultLogDir, defaultSessionId } from './logging/config.ts'
 import {
-  mkArtifactChanged, mkDeliveryModeChanged, mkEvalEvent, mkMacroEvent,
+  mkArtifactChanged, mkDeliveryModeChanged, mkEvalEvent,
   mkMembershipChanged, mkMessagePosted, mkModeAutoSwitched,
   mkProviderAllFailed, mkProviderBound, mkProviderStreamFailed,
   mkRoomCreated, mkRoomDeleted, mkSessionEnd, mkSessionStart,
@@ -121,9 +120,7 @@ export interface System {
   readonly setOnMessagePosted: (callback: OnMessagePosted) => void
   readonly setOnTurnChanged: (callback: OnTurnChanged) => void
   readonly setOnDeliveryModeChanged: (callback: OnDeliveryModeChanged) => void
-  readonly setOnMacroEvent: (callback: OnMacroEvent) => void
   readonly setOnModeAutoSwitched: (callback: OnModeAutoSwitched) => void
-  readonly setOnMacroSelectionChanged: (callback: OnMacroSelectionChanged) => void
   readonly setOnArtifactChanged: (callback: OnArtifactChanged) => void
   readonly setOnRoomCreated: (callback: OnRoomCreated) => void
   readonly setOnRoomDeleted: (callback: OnRoomDeleted) => void
@@ -234,14 +231,12 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   const messagePosted = lateBinding<OnMessagePosted>()
   const turnChanged = lateBinding<OnTurnChanged>()
   const deliveryModeChanged = lateBinding<OnDeliveryModeChanged>()
-  const macroEvent = lateBinding<OnMacroEvent>()
   const artifactChanged = lateBinding<OnArtifactChanged>()
   const roomCreated = lateBinding<OnRoomCreated>()
   const roomDeleted = lateBinding<OnRoomDeleted>()
   const membershipChanged = lateBinding<OnMembershipChanged>()
   const bookmarksChanged = lateBinding<OnBookmarksChanged>()
   const modeAutoSwitched = lateBinding<OnModeAutoSwitched>()
-  const macroSelectionChanged = lateBinding<OnMacroSelectionChanged>()
   const evalEvent = lateBinding<OnEvalEvent>()
   const providerBound = lateBinding<OnProviderBound>()
   const providerAllFailed = lateBinding<OnProviderAllFailed>()
@@ -275,7 +270,6 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     },
     onTurnChanged: turnChanged.proxy,
     onDeliveryModeChanged: deliveryModeChanged.proxy,
-    onMacroEvent: macroEvent.proxy,
     onArtifactChanged: artifactChanged.proxy,
     onRoomCreated: roomCreated.proxy,
     onRoomDeleted: (roomId, roomName) => {
@@ -285,7 +279,6 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     onBookmarksChanged: bookmarksChanged.proxy,
     onManualModeEntered: (roomId: string) => { cancelGenerationsInRoom(roomId) },
     onModeAutoSwitched: modeAutoSwitched.proxy,
-    onMacroSelectionChanged: macroSelectionChanged.proxy,
     onSummaryConfigChanged: (roomId, config) => {
       summaryConfigChanged.proxy(roomId, config)
       schedulerRef?.onConfigChanged(roomId)
@@ -318,7 +311,6 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   // Register built-in artifact types — task_list needs store reference for checkAutoResolve
   house.artifactTypes.register(createTaskListArtifactType(house.artifacts))
   house.artifactTypes.register(pollArtifactType)
-  house.artifactTypes.register(createMacroArtifactType(team))
   house.artifactTypes.register(documentArtifactType)
   house.artifactTypes.register(mermaidArtifactType)
 
@@ -606,7 +598,6 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
       messagePosted.add((roomId, message) => safe(() => mkMessagePosted(sid(), roomId, message))),
       deliveryModeChanged.add((roomId, mode) => safe(() => mkDeliveryModeChanged(sid(), roomId, mode))),
       modeAutoSwitched.add((roomId, toMode, reason) => safe(() => mkModeAutoSwitched(sid(), roomId, toMode, reason))),
-      macroEvent.add((roomId, event, detail) => safe(() => mkMacroEvent(sid(), roomId, event, detail))),
       artifactChanged.add((action, artifact) => safe(() => mkArtifactChanged(sid(), action, artifact))),
       roomCreated.add((profile) => safe(() => mkRoomCreated(sid(), profile))),
       roomDeleted.add((roomId, roomName) => safe(() => mkRoomDeleted(sid(), roomId, roomName))),
@@ -715,9 +706,7 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     setOnMessagePosted: messagePosted.set,
     setOnTurnChanged: turnChanged.set,
     setOnDeliveryModeChanged: deliveryModeChanged.set,
-    setOnMacroEvent: macroEvent.set,
     setOnModeAutoSwitched: modeAutoSwitched.set,
-    setOnMacroSelectionChanged: macroSelectionChanged.set,
     setOnArtifactChanged: artifactChanged.set,
     setOnRoomCreated: roomCreated.set,
     setOnRoomDeleted: roomDeleted.set,

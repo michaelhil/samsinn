@@ -125,7 +125,7 @@ export const createPauseRoomTool = (house: House): Tool => ({
 export const createSetDeliveryModeTool = (house: House): Tool => ({
   name: 'set_delivery_mode',
   description: 'Sets the delivery mode of a room to broadcast.',
-  usage: 'Use to switch a room back to broadcast mode after a macro completes, or to ensure all members receive every message.',
+  usage: 'Use to switch a room to broadcast mode so all members receive every message.',
   returns: '{ roomName, mode }.',
   parameters: {
     type: 'object',

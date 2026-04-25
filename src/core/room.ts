@@ -8,37 +8,32 @@
 //   1. Store message
 //   2. Compute eligible = members - userMuted
 //   3. Check paused flag (paused rooms store but don't deliver)
-//   4. If a macro is running, apply macro-step overlay
-//   5. Otherwise apply mode filter (broadcast / manual)
+//   4. Apply mode filter (broadcast / manual)
 //
 // User muting and mode filtering are independent concerns applied in sequence.
 // System code NEVER modifies the muted set — only explicit setMuted() calls do.
 //
 // [[AgentName]] addressing overrides in all modes (except manual for user messages,
-// where AI peers wake only on explicit activation or macro step).
+// where AI peers wake only on explicit activation).
 // Pause flag stops all delivery (join/leave and addressing still work).
 //
-// Macro blueprints are Artifacts (system-level). Room owns the in-flight run:
-// callers resolve the artifact, construct a Macro object, and pass it to runMacro().
-// A running macro does NOT change the room's delivery mode — it overlays step
-// delivery on top of the current mode.
+// Scripts (see core/script-engine.ts) drive their own turn loop and post via
+// room.post() like any other sender; they don't extend this module.
 // ============================================================================
 
 import type {
   DeliverFn, DeliveryMode, Message, PostParams,
   ResolveAgentName, ResolveTagFn, RoomProfile,
 } from './types/messaging.ts'
-import type { Macro } from './types/macro.ts'
 import type {
-  OnDeliveryModeChanged, OnMacroEvent, OnMessagePosted, OnSummaryConfigChanged,
+  OnDeliveryModeChanged, OnMessagePosted, OnSummaryConfigChanged,
   OnSummaryUpdated, OnTurnChanged, Room, RoomRestoreParams, RoomState,
 } from './types/room.ts'
 import type { SummaryConfig } from './types/summary.ts'
 import { DEFAULT_SUMMARY_CONFIG } from './types/summary.ts'
 import { SYSTEM_SENDER_ID } from './types/constants.ts'
 import { parseAddressedAgents } from './addressing.ts'
-import { advanceMacroStep, buildMacroStepContext, deliverBroadcast, deliverMacroStep } from './delivery-modes.ts'
-import { createMacroRunState } from './macro-runs.ts'
+import { deliverBroadcast } from './delivery-modes.ts'
 
 export interface RoomCallbacks {
   readonly deliver?: DeliverFn
@@ -48,7 +43,6 @@ export interface RoomCallbacks {
   readonly onMessagePosted?: OnMessagePosted
   readonly onTurnChanged?: OnTurnChanged
   readonly onDeliveryModeChanged?: OnDeliveryModeChanged
-  readonly onMacroEvent?: OnMacroEvent
   readonly onManualModeEntered?: (roomId: string) => void
   readonly onModeAutoSwitched?: (roomId: string, toMode: DeliveryMode, reason: 'second-ai-joined') => void
   readonly onSummaryConfigChanged?: OnSummaryConfigChanged
@@ -73,11 +67,8 @@ export const createRoom = (
   // --- State ---
   let mode: DeliveryMode = 'broadcast'
   let paused = false
-  let selectedMacroId: string | undefined
   let summaryConfig: SummaryConfig = DEFAULT_SUMMARY_CONFIG
   let latestSummary: string | undefined
-
-  const macroRunState = createMacroRunState(profile.id, callbacks?.onMacroEvent)
 
   // --- Eligible set: members minus user-muted ---
 
@@ -92,11 +83,6 @@ export const createRoom = (
 
   const notifyModeChanged = (): void => {
     callbacks?.onDeliveryModeChanged?.(profile.id, mode)
-  }
-
-  const endMacro = (macroId: string, event: 'completed' | 'cancelled'): void => {
-    macroRunState.clearRun()
-    macroRunState.notifyMacroEvent(event, { macroId })
   }
 
   // --- Post helpers ---
@@ -166,38 +152,6 @@ export const createRoom = (
 
     if (paused) return message
 
-    // Macro overlay: when a run is active, step-agent responses advance the macro.
-    // Non-step-agent messages still fall through to the room's base mode so humans
-    // and sender continue to see their own traffic.
-    const macroRun = macroRunState.getRun()
-    if (macroRun) {
-      const currentStep = macroRun.macro.steps[macroRun.stepIndex]
-      const isStepAgentResponse = currentStep && params.senderId === currentStep.agentId
-      if (isStepAgentResponse) {
-        // In Broadcast, auto-advance on valid step-agent response.
-        // In Manual, the step agent's response lands (delivered below as a normal
-        // manual-mode message), but we do NOT advance — the user clicks Next.
-        if (mode === 'broadcast') {
-          const result = deliverMacroStep(message, macroRun, eligible, params.senderId, deliver)
-          if (result.advanced) {
-            if (result.completed) {
-              endMacro(macroRun.macro.id, 'completed')
-            } else {
-              macroRunState.advanceStep(result.nextStepIndex)
-              macroRunState.notifyMacroEvent('step', {
-                macroId: macroRun.macro.id,
-                stepIndex: result.nextStepIndex,
-                agentName: result.nextAgentName ?? '',
-              })
-            }
-          }
-          return message
-        }
-        // Manual + macro: fall through to manual-mode delivery (humans + sender).
-        // The next step waits for user-triggered advanceMacroStep().
-      }
-    }
-
     switch (mode) {
       case 'broadcast':
         deliverBroadcast(message, eligible, deliver)
@@ -206,7 +160,7 @@ export const createRoom = (
       case 'manual': {
         // Deliver only to humans and to the sender (if AI) so senders still
         // track their own reply in history. AI peers are skipped entirely —
-        // they catch up at explicit activation time (or on a macro step).
+        // they catch up at explicit activation time.
         for (const id of eligible) {
           const kind = resolveKind?.(id)
           if (kind === 'human' || id === params.senderId) {
@@ -239,31 +193,6 @@ export const createRoom = (
 
   // --- Muting ---
 
-  const handleMacroOnMute = (agentId: string, lastChatMsg: Message | undefined): void => {
-    const macroRun = macroRunState.getRun()
-    if (!macroRun) return
-    const currentStep = macroRun.macro.steps[macroRun.stepIndex]
-    if (!currentStep || currentStep.agentId !== agentId) return
-
-    const eligible = computeEligible()
-    const result = advanceMacroStep(macroRun, eligible)
-    if (result.completed) {
-      endMacro(macroRun.macro.id, 'completed')
-    } else if (result.nextAgentId && lastChatMsg) {
-      macroRunState.advanceStep(result.nextStepIndex)
-      const nextStep = macroRun.macro.steps[result.nextStepIndex]!
-      const enriched = nextStep.stepPrompt
-        ? { ...lastChatMsg, stepPrompt: nextStep.stepPrompt }
-        : lastChatMsg
-      deliverToOne(result.nextAgentId, enriched)
-      macroRunState.notifyMacroEvent('step', {
-        macroId: macroRun.macro.id,
-        stepIndex: result.nextStepIndex,
-        agentName: result.nextAgentName ?? '',
-      })
-    }
-  }
-
   const setMuted = (agentId: string, isMuted: boolean): void => {
     const wasMuted = muted.has(agentId)
     if (isMuted === wasMuted) return
@@ -283,8 +212,6 @@ export const createRoom = (
     }
     const displayName = agentName ?? agentId
 
-    const lastChatMsg = messages[messages.length - 1]
-
     const muteMessage: Message = {
       id: crypto.randomUUID(),
       roomId: profile.id,
@@ -294,94 +221,6 @@ export const createRoom = (
       type: 'mute',
     }
     messages.push(muteMessage)
-
-    if (isMuted) handleMacroOnMute(agentId, lastChatMsg)
-  }
-
-  // --- Macro lifecycle ---
-  // Blueprint is an Artifact. Caller resolves artifact → constructs Macro → passes here.
-
-  const stopMacro = (): void => {
-    const macroRun = macroRunState.getRun()
-    if (!macroRun) return
-    endMacro(macroRun.macro.id, 'cancelled')
-  }
-
-  const runMacro = (macro: Macro): void => {
-    if (!macro || macro.steps.length === 0) return
-
-    const existingRun = macroRunState.getRun()
-    if (existingRun) {
-      macroRunState.notifyMacroEvent('cancelled', { macroId: existingRun.macro.id })
-    }
-
-    const lastMsg = messages[messages.length - 1]
-    if (!lastMsg || !deliver) return
-
-    macroRunState.setRun({
-      macro,
-      triggerMessageId: lastMsg.id,
-      stepIndex: 0,
-    })
-
-    const eligible = computeEligible()
-
-    const syntheticRun = { ...macroRunState.getRun()!, stepIndex: -1 }
-    const firstResult = advanceMacroStep(syntheticRun, eligible)
-
-    if (firstResult.completed) {
-      endMacro(macro.id, 'completed')
-      return
-    }
-
-    const startIndex = firstResult.nextStepIndex
-    macroRunState.advanceStep(startIndex)
-
-    const startStep = macro.steps[startIndex]!
-    const macroContext = buildMacroStepContext(macro, startIndex)
-    const enriched: Message = {
-      ...lastMsg,
-      ...(startStep.stepPrompt ? { stepPrompt: startStep.stepPrompt } : {}),
-      macroContext,
-    }
-    deliverToOne(startStep.agentId, enriched)
-    macroRunState.notifyMacroEvent('started', { macroId: macro.id, agentName: startStep.agentName })
-  }
-
-  // User-triggered step advance (Manual mode or explicit UI request).
-  // Delivers the most recent chat message to the next step agent.
-  const stepMacroForward = (): boolean => {
-    const macroRun = macroRunState.getRun()
-    if (!macroRun || !deliver) return false
-
-    const eligible = computeEligible()
-    const result = advanceMacroStep(macroRun, eligible)
-
-    if (result.completed) {
-      endMacro(macroRun.macro.id, 'completed')
-      return true
-    }
-
-    if (!result.nextAgentId) return false
-
-    const lastChatMsg = [...messages].reverse().find(m => m.type === 'chat' || m.type === 'pass') ?? messages[messages.length - 1]
-    if (!lastChatMsg) return false
-
-    macroRunState.advanceStep(result.nextStepIndex)
-    const nextStep = macroRun.macro.steps[result.nextStepIndex]!
-    const macroContext = buildMacroStepContext(macroRun.macro, result.nextStepIndex)
-    const enriched: Message = {
-      ...lastChatMsg,
-      ...(nextStep.stepPrompt ? { stepPrompt: nextStep.stepPrompt } : {}),
-      macroContext,
-    }
-    deliverToOne(result.nextAgentId, enriched)
-    macroRunState.notifyMacroEvent('step', {
-      macroId: macroRun.macro.id,
-      stepIndex: result.nextStepIndex,
-      agentName: result.nextAgentName ?? '',
-    })
-    return true
   }
 
   // --- Room interface ---
@@ -424,30 +263,18 @@ export const createRoom = (
     get paused() { return paused },
     setPaused: (p: boolean): void => { paused = p },
 
-    getRoomState: (): RoomState => {
-      const run = macroRunState.getRun()
-      return {
-        mode,
-        paused,
-        muted: [...muted],
-        members: [...members],
-        ...(run ? { activeMacroRun: { macroId: run.macro.id, stepIndex: run.stepIndex } } : {}),
-        ...(selectedMacroId ? { selectedMacroId } : {}),
-        summaryConfig,
-        ...(latestSummary ? { latestSummary } : {}),
-      }
-    },
+    getRoomState: (): RoomState => ({
+      mode,
+      paused,
+      muted: [...muted],
+      members: [...members],
+      summaryConfig,
+      ...(latestSummary ? { latestSummary } : {}),
+    }),
 
     setMuted,
     isMuted: (agentId: string): boolean => muted.has(agentId),
     getMutedIds: (): ReadonlySet<string> => new Set(muted),
-
-    runMacro,
-    stopMacro,
-    get activeMacroRun() { return macroRunState.getRun() },
-    advanceMacroStep: stepMacroForward,
-    get selectedMacroId() { return selectedMacroId },
-    setSelectedMacroId: (id: string | undefined): void => { selectedMacroId = id },
 
     injectMessages: (msgs: ReadonlyArray<Message>): void => {
       for (const msg of msgs) messages.push(msg)
@@ -502,7 +329,6 @@ export const createRoom = (
       if (state.compressedIds) {
         for (const id of state.compressedIds) compressedIds.add(id)
       }
-      selectedMacroId = state.selectedMacroId
       if (state.summaryConfig) summaryConfig = state.summaryConfig
       if (state.latestSummary !== undefined) latestSummary = state.latestSummary
     },

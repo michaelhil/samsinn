@@ -65,7 +65,6 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
 
   const includeContextShape = z.object({
     participants: z.boolean().optional(),
-    macro: z.boolean().optional(),
     artifacts: z.boolean().optional(),
     activity: z.boolean().optional(),
     knownAgents: z.boolean().optional(),
@@ -87,8 +86,7 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
       tags: z.array(z.string()).optional().describe('Capability/role tags enabling [[tag:X]] addressing.'),
       thinking: z.boolean().optional().describe('Enable model chain-of-thought (qwen3 thinking mode, etc.).'),
       includePrompts: includePromptsShape.describe('Per-section prompt inclusion gates. All default to true. See tool description for UI-label mapping.'),
-      includeContext: includeContextShape.describe('CONTEXT sub-section toggles (participants/macro/artifacts/activity/knownAgents). All default to true.'),
-      includeMacroStepPrompt: z.boolean().optional().describe('Include [Step instruction: …] suffix on macro messages (default: true).'),
+      includeContext: includeContextShape.describe('CONTEXT sub-section toggles (participants/artifacts/activity/knownAgents). All default to true.'),
       includeTools: z.boolean().optional().describe('Master switch — send tool definitions to LLM at all (default: true).'),
       promptsEnabled: z.boolean().optional().describe('Master switch for all includePrompts sections (false = every section off, default: true).'),
       contextEnabled: z.boolean().optional().describe('Master switch for all includeContext sub-sections (default: true).'),
@@ -110,7 +108,6 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
           ...(args.thinking !== undefined ? { thinking: args.thinking } : {}),
           ...(args.includePrompts !== undefined ? { includePrompts: args.includePrompts } : {}),
           ...(args.includeContext !== undefined ? { includeContext: args.includeContext } : {}),
-          ...(args.includeMacroStepPrompt !== undefined ? { includeMacroStepPrompt: args.includeMacroStepPrompt } : {}),
           ...(args.includeTools !== undefined ? { includeTools: args.includeTools } : {}),
           ...(args.promptsEnabled !== undefined ? { promptsEnabled: args.promptsEnabled } : {}),
           ...(args.contextEnabled !== undefined ? { contextEnabled: args.contextEnabled } : {}),
@@ -184,7 +181,7 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
 
   mcpServer.tool(
     'update_agent_context',
-    'Update per-agent Context panel toggles and limits (includePrompts, includeContext, includeMacroStepPrompt, includeTools, maxToolResultChars, maxToolIterations).',
+    'Update per-agent Context panel toggles and limits (includePrompts, includeContext, includeTools, maxToolResultChars, maxToolIterations).',
     {
       name: z.string().describe('Agent name'),
       includePrompts: z.object({
@@ -196,17 +193,15 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
       }).optional().describe('Prompt-section toggles. Partial — only provided keys change.'),
       includeContext: z.object({
         participants: z.boolean().optional(),
-        macro: z.boolean().optional(),
         artifacts: z.boolean().optional(),
         activity: z.boolean().optional(),
         knownAgents: z.boolean().optional(),
       }).optional().describe('CONTEXT sub-section toggles. Partial.'),
-      includeMacroStepPrompt: z.boolean().optional().describe('Include [Step instruction: ...] suffix on macro messages (default: true).'),
       includeTools: z.boolean().optional().describe('Master tools on/off (false = send zero tool definitions).'),
       maxToolResultChars: z.number().nullable().optional().describe('Cap on each tool-result payload injected back into the loop.'),
       maxToolIterations: z.number().optional().describe('Max tool-call rounds per turn.'),
     },
-    async ({ name, includePrompts, includeContext, includeMacroStepPrompt, includeTools, maxToolResultChars, maxToolIterations }) => {
+    async ({ name, includePrompts, includeContext, includeTools, maxToolResultChars, maxToolIterations }) => {
       try {
         const agent = resolveAgent(system, name)
         const ai = agent as AIAgent
@@ -215,7 +210,6 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
         }
         if (includePrompts) ai.updateIncludePrompts(includePrompts)
         if (includeContext) ai.updateIncludeContext(includeContext)
-        if (typeof includeMacroStepPrompt === 'boolean') ai.updateIncludeMacroStepPrompt(includeMacroStepPrompt)
         if (typeof includeTools === 'boolean') ai.updateIncludeTools(includeTools)
         if (maxToolResultChars === null) ai.updateMaxToolResultChars(undefined)
         else if (typeof maxToolResultChars === 'number') ai.updateMaxToolResultChars(maxToolResultChars)
@@ -225,7 +219,6 @@ export const registerAgentTools = (mcpServer: McpServer, system: System): void =
           name: agent.name,
           includePrompts: ai.getIncludePrompts(),
           includeContext: ai.getIncludeContext(),
-          includeMacroStepPrompt: ai.getIncludeMacroStepPrompt(),
           includeTools: ai.getIncludeTools(),
           maxToolResultChars: ai.getMaxToolResultChars() ?? null,
           maxToolIterations: ai.getMaxToolIterations() ?? null,

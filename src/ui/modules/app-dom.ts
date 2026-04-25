@@ -14,7 +14,6 @@ export const domRefs = {
   noRoomState: $('#no-room-state') as HTMLElement,
   agentArea: $('#agent-area') as HTMLElement,
   chatArea: $('#chat-area') as HTMLElement,
-  pinnedMessagesDiv: $('#pinned-messages') as HTMLElement,
   messagesDiv: $('#messages') as HTMLElement,
   chatForm: $('#chat-form') as HTMLFormElement,
   chatInput: $('#chat-input') as HTMLInputElement,
@@ -24,16 +23,6 @@ export const domRefs = {
   btnModeToggle: $('#btn-mode-toggle') as HTMLButtonElement,
   // Workspace toolbar button (opens workspace modal)
   btnWorkspace: $('#btn-workspace') as HTMLButtonElement,
-  // Macro UI — toggle group (🎬 picker + list + next + create)
-  macroGroup: $('#macro-group') as HTMLElement,
-  btnMacroPicker: $('#btn-macro-picker') as HTMLButtonElement,
-  btnMacroList: $('#btn-macro-list') as HTMLButtonElement,
-  btnMacroNext: $('#btn-macro-next') as HTMLButtonElement,
-  btnMacroCreate: $('#btn-macro-create') as HTMLButtonElement,
-  macroChip: $('#macro-chip') as HTMLElement,
-  macroChipName: $('#macro-chip-name') as HTMLElement,
-  macroChipStep: $('#macro-chip-step') as HTMLElement,
-  btnMacroStop: $('#btn-macro-stop') as HTMLButtonElement,
   // Summary & compression group
   summaryGroup: $('#summary-group') as HTMLElement,
   btnSummaryToggle: $('#btn-summary-toggle') as HTMLButtonElement,

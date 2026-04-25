@@ -105,10 +105,10 @@ describe('toUIArtifact', () => {
   test('passes through every artifact field verbatim', () => {
     const server: Artifact = {
       id: 'art-1',
-      type: 'macro',
-      title: 'My Macro',
+      type: 'task_list',
+      title: 'My Tasks',
       description: 'testing',
-      body: { steps: [] },
+      body: { tasks: [] },
       scope: ['room-1'],
       createdBy: 'agent-1',
       createdAt: 100,
@@ -118,10 +118,10 @@ describe('toUIArtifact', () => {
     } as Artifact
     const ui = toUIArtifact(server)
     expect(ui.id).toBe('art-1')
-    expect(ui.type).toBe('macro')
-    expect(ui.title).toBe('My Macro')
+    expect(ui.type).toBe('task_list')
+    expect(ui.title).toBe('My Tasks')
     expect(ui.description).toBe('testing')
-    expect(ui.body).toEqual({ steps: [] })
+    expect(ui.body).toEqual({ tasks: [] })
     expect(ui.scope).toEqual(['room-1'])
     expect(ui.createdBy).toBe('agent-1')
     expect(ui.createdAt).toBe(100)

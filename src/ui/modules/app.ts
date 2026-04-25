@@ -7,7 +7,6 @@
 
 import { createWSClient, type WSClient } from './ws-client.ts'
 import { send, setWSClient } from './ws-send.ts'
-import { initMacroPanel, isMacroGroupExpanded } from './macro-panel.ts'
 import { initThinkingDisplay } from './thinking-display.ts'
 import { fetchRoomMessages, fetchRoomMembers, fetchRoomArtifacts } from './room-fetchers.ts'
 import { renderRooms, renderArtifacts } from './render-rooms.ts'
@@ -68,9 +67,6 @@ import {
   $currentDeliveryMode,
   $roomPaused,
   $turnInfo,
-  $macroStatus,
-  $selectedMacroIdByRoom,
-  $pinnedMessages,
   $ollamaHealth,
   $ollamaMetrics,
   $agentContexts,
@@ -89,11 +85,9 @@ import { createThinkingController } from './app-thinking.ts'
 
 const {
   roomList, roomHeader, roomNameEl, roomInfoBar, roomsToggle, roomsHeader,
-  agentList, roomMembers, noRoomState, agentArea, chatArea, pinnedMessagesDiv,
+  agentList, roomMembers, noRoomState, agentArea, chatArea,
   messagesDiv, chatForm, chatInput,
   roomStatusDot, btnModeToggle, btnWorkspace,
-  btnMacroPicker, btnMacroList, btnMacroNext, btnMacroCreate,
-  macroChip, macroChipName, macroChipStep, btnMacroStop,
   btnSummaryToggle, btnSummarySettings, btnSummaryInspect, btnSummaryRegenerate,
   roomModeInfo,
   nameModal, nameForm, roomModal, roomForm, agentModal, agentForm,
@@ -124,10 +118,6 @@ const firstChunkSeen = new Set<string>()
 const handleDeleteRoom = (roomId: string, roomName: string): void => {
   if (!confirm(`Delete room "${roomName}"? This cannot be undone.`)) return
   send({ type: 'delete_room', roomName })
-}
-
-const handlePin = (msgId: string, senderName: string, content: string): void => {
-  $pinnedMessages.setKey(msgId, { senderId: '', content, senderName })
 }
 
 const handleBookmark = async (content: string): Promise<void> => {
@@ -191,31 +181,18 @@ btnWorkspace.onclick = () => workspace.open()
 // === Data fetching (triggered by subscriptions) ===
 // Lives in room-fetchers.ts — imported above.
 
-// === Room header status rendering (pause dot, mode icons, macro group, chip) ===
+// === Room header status rendering (pause dot, mode icons, summary group) ===
 
-// Per-room UI expand state for the macro group lives in macro-panel.ts;
-// we read it via isMacroGroupExpanded() below.
 const refreshRoomControls = (): void => {
   const paused = $roomPaused.get()
   const mode = $currentDeliveryMode.get()
-  const macroStatus = $macroStatus.get()
-  const isMacroRunning = !!macroStatus &&
-    macroStatus.event !== 'completed' &&
-    macroStatus.event !== 'cancelled'
-
   const roomId = $selectedRoomId.get()
-  const selection = roomId ? $selectedMacroIdByRoom.get()[roomId] ?? null : null
-  const macros = roomId
-    ? $selectedRoomArtifacts.get().filter(a => !a.resolvedAt && a.type === 'macro')
-    : []
 
   // Pause dot
   roomStatusDot.setAttribute('aria-pressed', paused ? 'true' : 'false')
   roomStatusDot.title = paused ? 'Paused — click to resume' : 'Active — click to pause'
 
   // Mode toggle: swap the inner icon and labels based on current mode.
-  // aria-pressed reflects "is manual active" (the alternative to default
-  // broadcast) so screen readers can announce the toggled state.
   const isManual = mode === 'manual'
   btnModeToggle.setAttribute('aria-pressed', String(isManual))
   const altMode = isManual ? 'Broadcast' : 'Manual'
@@ -225,50 +202,12 @@ const refreshRoomControls = (): void => {
   btnModeToggle.setAttribute('aria-label', labelText)
   btnModeToggle.replaceChildren(icon(isManual ? 'hand' : 'megaphone', { size: 14 }))
 
-  // Macro group expand state (per-room) — state lives in macro-panel.ts
-  const expanded = roomId ? isMacroGroupExpanded(roomId) : false
-  btnMacroPicker.setAttribute('aria-pressed', expanded ? 'true' : 'false')
-  btnMacroList.classList.toggle('hidden', !expanded)
-  btnMacroNext.classList.toggle('hidden', !expanded)
-  btnMacroCreate.classList.toggle('hidden', !expanded)
-
   // Summary group expand state (per-room)
   const summaryExpanded = roomId ? isSummaryGroupExpanded(roomId) : false
   btnSummaryToggle.setAttribute('aria-pressed', summaryExpanded ? 'true' : 'false')
   btnSummarySettings.classList.toggle('hidden', !summaryExpanded)
   btnSummaryInspect.classList.toggle('hidden', !summaryExpanded)
   btnSummaryRegenerate.classList.toggle('hidden', !summaryExpanded)
-
-  // Disabled states inside the group
-  const noMacros = macros.length === 0
-  btnMacroList.disabled = noMacros
-  btnMacroNext.disabled = isMacroRunning ? false : (noMacros || !selection)
-
-  // Helpful tooltip hint
-  if (btnMacroNext.disabled) {
-    btnMacroNext.title = noMacros
-      ? 'No macros in this room — click ＋ to create one'
-      : 'Select a macro first (📋)'
-  } else {
-    btnMacroNext.title = isMacroRunning
-      ? 'Advance to the next step'
-      : 'Start the selected macro'
-  }
-
-  // Running-macro chip
-  if (isMacroRunning) {
-    macroChip.classList.remove('hidden')
-    const detail = (macroStatus!.detail ?? {}) as { macroId?: string; stepIndex?: number; agentName?: string }
-    const runningId = detail.macroId
-    const artifact = runningId
-      ? $selectedRoomArtifacts.get().find(a => a.id === runningId)
-      : undefined
-    macroChipName.textContent = artifact?.title ?? 'macro'
-    const stepIdx = typeof detail.stepIndex === 'number' ? detail.stepIndex : undefined
-    macroChipStep.textContent = stepIdx !== undefined ? `step ${stepIdx + 1}` : ''
-  } else {
-    macroChip.classList.add('hidden')
-  }
 }
 
 // === Ollama dashboard (extracted to ollama-dashboard.ts) ===
@@ -409,7 +348,7 @@ $selectedRoomId.listen((roomId, prevRoomId) => {
       for (const m of cached) renderMessage({
         container: messagesDiv, msg: m, myAgentId: $myAgentId.get() ?? '',
         agents: $agents.get() as unknown as Record<string, AgentInfo>,
-        onPin: handlePin, onDelete: handleDeleteMessage, onViewContext: handleViewContext, onBookmark: handleBookmark,
+        onDelete: handleDeleteMessage, onViewContext: handleViewContext, onBookmark: handleBookmark,
       })
     } else {
       fetchRoomMessages(roomId, room.name)
@@ -472,7 +411,7 @@ $roomMessages.listen((allMessages, _old, changedRoomId) => {
       renderMessage({
         container: messagesDiv, msg: m, myAgentId: $myAgentId.get() ?? '',
         agents: $agents.get() as unknown as Record<string, AgentInfo>,
-        onPin: handlePin, onDelete: handleDeleteMessage, onViewContext: handleViewContext, onBookmark: handleBookmark,
+        onDelete: handleDeleteMessage, onViewContext: handleViewContext, onBookmark: handleBookmark,
       })
     }
   }
@@ -515,9 +454,6 @@ $agents.listen((_agents, _old, _changedId) => {
 initThinkingDisplay({ messagesDiv, firstChunkSeen, showContextModal })
 
 // --- Artifacts → workspace badge ---
-// The modal subscribes to $selectedRoomArtifacts itself for live content;
-// here we only mirror the count to the toolbar badge and refresh room
-// controls (macro artifacts may have changed).
 $selectedRoomArtifacts.subscribe((artifacts) => {
   const roomId = $selectedRoomId.get()
   if (!roomId) return
@@ -526,59 +462,17 @@ $selectedRoomArtifacts.subscribe((artifacts) => {
   refreshRoomControls()
 })
 
-// --- Mode / turn / macro info (batched: mode + pause + artifacts all feed mode selector) ---
-// Note: $selectedRoomArtifacts subscription also calls refreshRoomControls for macro changes.
-// This batched subscription handles mode/pause state changes.
+// --- Mode / turn info (batched: mode + pause feed mode selector) ---
 const $modeView = batched(
   [$currentDeliveryMode, $roomPaused],
   (mode: string, paused: boolean) => ({ mode, paused }),
 )
 $modeView.listen(() => refreshRoomControls())
 
-// Re-render when the sticky selection changes (enables/disables Next).
-$selectedMacroIdByRoom.listen(() => refreshRoomControls())
-
 $turnInfo.listen((info) => {
   if (info?.agentName) {
     roomModeInfo.textContent = `Turn: ${info.agentName}${info.waitingForHuman ? ' (waiting for input)' : ''}`
     roomModeInfo.className = 'text-xs text-accent h-4 font-medium'
-  }
-})
-
-$macroStatus.listen((status) => {
-  refreshRoomControls()
-  if (!status) return
-  if (status.event === 'step') {
-    const detail = status.detail
-    roomModeInfo.textContent = `Macro step ${((detail?.stepIndex as number) ?? 0) + 1}: ${detail?.agentName ?? '...'}`
-    roomModeInfo.className = 'text-xs text-macro-accent h-4 font-medium'
-  }
-})
-
-// --- Pinned messages ---
-$pinnedMessages.subscribe((pinned) => {
-  const entries = Object.entries(pinned)
-  if (entries.length === 0) {
-    pinnedMessagesDiv.classList.add('hidden')
-    return
-  }
-  pinnedMessagesDiv.classList.remove('hidden')
-  pinnedMessagesDiv.innerHTML = ''
-  for (const [id, data] of entries) {
-    const row = document.createElement('div')
-    row.className = 'px-3 py-1 text-xs flex items-center gap-2 border-b border-warning-border'
-    const preview = data.content.length > 100 ? data.content.slice(0, 100) + '…' : data.content
-    row.innerHTML = `<span class="text-warning">📌</span> <span class="font-medium">${data.senderName ?? 'unknown'}:</span> <span class="text-text flex-1 truncate">${preview}</span>`
-    const unpin = document.createElement('button')
-    unpin.className = 'text-warning hover:text-warning text-xs'
-    unpin.textContent = '✕'
-    unpin.onclick = () => {
-      const current = { ...$pinnedMessages.get() }
-      delete current[id]
-      $pinnedMessages.set(current)
-    }
-    row.appendChild(unpin)
-    pinnedMessagesDiv.appendChild(row)
   }
 })
 
@@ -672,14 +566,9 @@ btnModeToggle.onclick = () => {
   setMode(next)
 }
 
-// --- Macro group (Stop, Picker, List, Next, Create) lives in macro-panel.ts.
-//     Wired once below via initMacroPanel. ---
-
 // --- Summary group (Toggle, Settings, Inspect, Regenerate) lives in summary-panel.ts.
 //     Wired once below via initSummaryPanel. ---
 
-// Wire macro + summary panel handlers now that refreshRoomControls is in scope.
-initMacroPanel({ onRefreshRoomControls: refreshRoomControls })
 initSummaryPanel({ onRefreshRoomControls: refreshRoomControls })
 void import('./reset-button.ts').then(m => m.initResetPanel())
 
@@ -755,10 +644,9 @@ const btnBookmarks = $('#btn-bookmarks') as HTMLButtonElement
 btnBookmarks.onclick = async () => {
   const { openBookmarksPanel } = await import('./bookmarks-panel.ts')
   await openBookmarksPanel({
-    send,
-    getSelectedRoomName: () => {
-      const rid = $selectedRoomId.get()
-      return rid ? roomIdToName(rid) ?? undefined : undefined
+    setComposerText: (text: string) => {
+      chatInput.value = text
+      chatInput.focus()
     },
   })
 }
@@ -821,8 +709,8 @@ const connect = (name: string) => {
   }, (connected) => {
     $connected.set(connected)
   })
-  // Expose the active client to any module that imports send() from ws-send.ts
-  // (macro-panel.ts and any future panel). Mirrors the local `client` ref.
+  // Expose the active client to any module that imports send() from ws-send.ts.
+  // Mirrors the local `client` ref.
   setWSClient(client)
 }
 

@@ -1,5 +1,4 @@
-// Context group — participants, macro, artifacts, activity, known-agents,
-// plus the "macro step instructions" toggle (moved here from Advanced).
+// Context group — participants, artifacts, activity, known-agents.
 
 import { openPreviewModal as openModal } from '../detail-modal.ts'
 import {
@@ -11,7 +10,6 @@ export const buildContextGroup = (deps: GroupDeps): HTMLElement => {
   const { preview, agentData, patchAgent, rerender } = deps
   const get = (k: string): PreviewSection | undefined => sectionByKey(preview, k)
   const includeContext = (agentData.includeContext as Record<string, boolean>) ?? {}
-  const includeMacroStepPrompt = (agentData.includeMacroStepPrompt as boolean) ?? true
   const contextEnabled = (agentData.contextEnabled as boolean) ?? true
 
   const totalTokens = CONTEXT_KEYS.reduce((s, c) => s + (get(c.section)?.tokens ?? 0), 0)
@@ -31,34 +29,6 @@ export const buildContextGroup = (deps: GroupDeps): HTMLElement => {
       'warning' in c ? c.warning : undefined,
     )
   })
-
-  // Macro-step instructions — moved here from Advanced.
-  const macroRow = document.createElement('div')
-  macroRow.className = 'flex items-center gap-1'
-  const macroLabel = document.createElement('label')
-  macroLabel.className = 'inline-flex items-center gap-1 cursor-pointer'
-  macroLabel.setAttribute('data-group-child-label', '')
-  const macroCb = document.createElement('input')
-  macroCb.type = 'checkbox'
-  macroCb.className = 'rounded'
-  macroCb.checked = includeMacroStepPrompt
-  macroCb.setAttribute('data-group-child', '')
-  const macroText = document.createElement('span')
-  macroText.textContent = 'Macro step instructions'
-  macroLabel.appendChild(macroCb)
-  macroLabel.appendChild(macroText)
-  macroRow.appendChild(macroLabel)
-  const macroWarn = document.createElement('span')
-  macroWarn.className = 'text-xs text-warning ml-1'
-  macroWarn.textContent = '⚠ off may break macro routing'
-  macroWarn.style.display = includeMacroStepPrompt ? 'none' : 'inline'
-  macroRow.appendChild(macroWarn)
-  macroCb.onchange = async () => {
-    macroWarn.style.display = macroCb.checked ? 'none' : 'inline'
-    ;(agentData as Record<string, unknown>).includeMacroStepPrompt = macroCb.checked
-    await patchAgent({ includeMacroStepPrompt: macroCb.checked })
-  }
-  rows.push(macroRow)
 
   return mkGroup({
     label: 'Context',

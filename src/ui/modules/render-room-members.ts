@@ -3,8 +3,8 @@
 //
 // Shows agents currently in the selected room as chips (emoji + name +
 // hover-revealed mute/remove). An "Add" button opens a picker listing
-// eligible agents plus a "Create new agent…" shortcut. The create-macro
-// auto-adds the new agent to the originating room via a short-lived
+// eligible agents plus a "Create new agent…" shortcut. The create
+// flow auto-adds the new agent to the originating room via a short-lived
 // pending map, with a toast on success.
 // ============================================================================
 
@@ -36,7 +36,7 @@ export const registerPendingCreateAdd = (agentName: string, roomName: string): v
 }
 
 /** Cleared when the agent-modal is dismissed without submitting — prevents
- *  a stale auto-add from bleeding into the next create macro. */
+ *  a stale auto-add from bleeding into the next create flow. */
 export const clearAutoAddRoom = (): void => { autoAddRoomOnNextCreate = null }
 
 // --- Module init ---

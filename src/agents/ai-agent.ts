@@ -111,12 +111,10 @@ export const createAIAgent = (
   }
   const includeContextState: Required<IncludeContext> = {
     participants: config.includeContext?.participants ?? true,
-    macro: config.includeContext?.macro ?? true,
     artifacts: config.includeContext?.artifacts ?? true,
     activity: config.includeContext?.activity ?? true,
     knownAgents: config.includeContext?.knownAgents ?? true,
   }
-  let includeMacroStepPrompt: boolean = config.includeMacroStepPrompt ?? true
   let includeTools: boolean = config.includeTools ?? true
   let promptsEnabled: boolean = config.promptsEnabled ?? true
   let contextEnabled: boolean = config.contextEnabled ?? true
@@ -173,7 +171,6 @@ export const createAIAgent = (
     getSkills,
     includePrompts: includePromptsState,
     includeContext: includeContextState,
-    includeMacroStepPrompt,
     promptsEnabled,
     contextEnabled,
     contextTokenBudget: resolveContextTokenBudget(),
@@ -417,8 +414,6 @@ export const createAIAgent = (
         if (typeof v === 'boolean') includeContextState[key] = v
       }
     },
-    getIncludeMacroStepPrompt: () => includeMacroStepPrompt,
-    updateIncludeMacroStepPrompt: (enabled: boolean) => { includeMacroStepPrompt = enabled },
     getIncludeTools: () => includeTools,
     updateIncludeTools: (enabled: boolean) => { includeTools = enabled },
     getPromptsEnabled: () => promptsEnabled,
@@ -467,7 +462,6 @@ export const createAIAgent = (
       tags: currentTags,
       includePrompts: { ...includePromptsState },
       includeContext: { ...includeContextState },
-      includeMacroStepPrompt,
       includeTools,
       promptsEnabled,
       contextEnabled,

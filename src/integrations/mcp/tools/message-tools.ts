@@ -2,7 +2,6 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { MessageTarget } from '../../../core/types/messaging.ts'
 import type { System } from '../../../main.ts'
-import { resolveMacroArtifact, isMacroError } from '../../../core/macro-artifact.ts'
 import { textResult, errorResult, resolveRoom } from './helpers.ts'
 import { asAIAgent } from '../../../agents/shared.ts'
 import { exportRoomConversation } from '../../../core/room-export.ts'
@@ -47,50 +46,6 @@ export const registerMessageTools = (mcpServer: McpServer, system: System): void
         return textResult(room.getRecent(limit))
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : 'Room not found')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'run_macro',
-    'Start a macro execution from a macro artifact. Optionally post a trigger message first.',
-    {
-      roomName: z.string().describe('Room name'),
-      macroArtifactId: z.string().describe('Macro artifact ID'),
-      content: z.string().optional().describe('Optional trigger message to post before starting'),
-      senderId: z.string().default('mcp-client').describe('Sender ID for the trigger message'),
-      senderName: z.string().optional().describe('Sender display name for the trigger message'),
-    },
-    async ({ roomName, macroArtifactId, content, senderId, senderName }) => {
-      try {
-        const room = resolveRoom(system, roomName)
-        const artifact = system.house.artifacts.get(macroArtifactId)
-        if (!artifact) return errorResult(`Macro artifact "${macroArtifactId}" not found`)
-        const macro = resolveMacroArtifact(artifact, system.team, room.profile.roomPrompt)
-        if (isMacroError(macro)) return errorResult(macro.error)
-        if (content) {
-          room.setPaused(true)
-          room.post({ senderId, senderName: senderName ?? senderId, content, type: 'chat' })
-        }
-        room.runMacro(macro)
-        return textResult({ started: true, mode: room.deliveryMode })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to start macro')
-      }
-    },
-  )
-
-  mcpServer.tool(
-    'stop_macro',
-    'Cancel the currently active macro in a room',
-    { roomName: z.string().describe('Room name') },
-    async ({ roomName }) => {
-      try {
-        const room = resolveRoom(system, roomName)
-        room.stopMacro()
-        return textResult({ cancelled: true, mode: room.deliveryMode })
-      } catch (err) {
-        return errorResult(err instanceof Error ? err.message : 'Failed to cancel macro')
       }
     },
   )
@@ -147,7 +102,7 @@ export const registerMessageTools = (mcpServer: McpServer, system: System): void
     'add_artifact',
     'Create a new artifact. Use list_artifact_types to see available types and their body schemas.',
     {
-      type: z.string().describe('Artifact type (e.g. task_list, poll, macro)'),
+      type: z.string().describe('Artifact type (e.g. task_list, poll, document)'),
       title: z.string().describe('Human-readable title'),
       description: z.string().optional().describe('Optional longer description'),
       body: z.record(z.string(), z.unknown()).describe('Type-specific body (see list_artifact_types for schema)'),

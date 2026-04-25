@@ -60,35 +60,8 @@ export const wireSystemEvents = (
     sched()
   })
 
-  system.setOnMacroEvent((roomId, event, detail) => {
-    const roomName = roomNameFor(roomId)
-    // TS can't narrow the generic event/detail pair at this call site.
-    switch (event) {
-      case 'started':
-        broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string; readonly agentName: string } | undefined })
-        break
-      case 'step':
-        broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string; readonly stepIndex: number; readonly agentName: string } | undefined })
-        break
-      case 'completed':
-      case 'cancelled':
-        broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string } | undefined })
-        break
-    }
-    sched()
-  })
-
   system.setOnArtifactChanged((action, artifact) => {
     broadcast({ type: 'artifact_changed', action, artifact })
-    sched()
-  })
-
-  system.setOnMacroSelectionChanged((roomId, macroArtifactId) => {
-    broadcast({
-      type: 'macro_selection_changed',
-      roomName: roomNameFor(roomId),
-      macroArtifactId,
-    })
     sched()
   })
 

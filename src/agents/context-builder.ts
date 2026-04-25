@@ -13,7 +13,6 @@
 import type { Artifact, ArtifactTypeDefinition } from '../core/types/artifact.ts'
 import type { AgentHistory, AgentProfile, Message } from '../core/types/messaging.ts'
 import type { ChatRequest } from '../core/types/llm.ts'
-import type { MacroStepContext } from '../core/types/macro.ts'
 import type { IncludeContext, IncludePrompts } from '../core/types/agent.ts'
 import { SYSTEM_SENDER_ID } from '../core/types/constants.ts'
 // Text tool protocol removed — all tools use native tool calling
@@ -44,18 +43,15 @@ export const formatMessage = (
   agentId: string,
   resolveName: (senderId: string) => string,
   compressedIds?: ReadonlySet<string>,
-  includeMacroStepPrompt: boolean = true,
 ): { role: 'user' | 'assistant'; content: string } | null => {
   if (msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.type === 'pass' || msg.type === 'mute') return null
-  const stepPrompt = msg.stepPrompt
   if (msg.senderId === agentId) {
     const staleRef = compressedIds && msg.inReplyTo?.some(id => compressedIds.has(id))
     const suffix = staleRef ? '\n[↩ context compressed]' : ''
     return { role: 'assistant' as const, content: `${msg.content}${suffix}` }
   }
   const name = msg.type === 'room_summary' ? 'Room Summary' : resolveName(msg.senderId)
-  const stepLine = stepPrompt && includeMacroStepPrompt ? `\n[Step instruction: ${stepPrompt}]` : ''
-  return { role: 'user' as const, content: `${prefix}[${name}]: ${msg.content}${stepLine}` }
+  return { role: 'user' as const, content: `${prefix}[${name}]: ${msg.content}` }
 }
 
 // === Flush incoming buffer after evaluation ===
@@ -132,7 +128,6 @@ export interface BuildContextDeps {
   readonly getRoomMembers?: (roomId: string) => ReadonlyArray<AgentProfile>
   readonly includePrompts?: IncludePrompts       // undefined = all on; missing keys = on
   readonly includeContext?: IncludeContext       // CONTEXT sub-section toggles
-  readonly includeMacroStepPrompt?: boolean       // suffix on macro messages; default true
   readonly promptsEnabled?: boolean              // group master for includePrompts; false forces all off
   readonly contextEnabled?: boolean              // group master for includeContext; false forces all off
   readonly contextTokenBudget?: number           // token budget for system+history (derived from model window)
@@ -148,7 +143,6 @@ const resolveIncludes = (inc: IncludePrompts | undefined): Required<IncludePromp
 
 const resolveIncludeContext = (inc: IncludeContext | undefined): Required<IncludeContext> => ({
   participants: inc?.participants ?? true,
-  macro: inc?.macro ?? true,
   artifacts: inc?.artifacts ?? true,
   activity: inc?.activity ?? true,
   knownAgents: inc?.knownAgents ?? true,
@@ -181,22 +175,6 @@ const buildArtifactsSection = (
   if (artifacts.length === 0) return ''
   const lines = artifacts.map(a => formatArtifact(a, getTypeDef))
   return `Room artifacts:\n${lines.join('\n\n')}`
-}
-
-const buildMacroSection = (fc: MacroStepContext, stepIndex: number): string => {
-  const stepNum = stepIndex + 1
-  const loopTag = fc.loop ? ' · loop on' : ''
-  const sequenceParts = fc.steps.map((s, i) =>
-    i === stepIndex ? `${s.agentName} (you)` : s.agentName,
-  )
-  if (fc.loop) sequenceParts.push('(repeats)')
-  const lines = [`Macro: "${fc.macroName}" · step ${stepNum} of ${fc.totalSteps}${loopTag}`]
-  if (fc.artifactDescription) lines.push(`Purpose: ${fc.artifactDescription}`)
-  if (fc.goalChain && fc.goalChain.length > 1) {
-    lines.push(`Goal context: ${fc.goalChain.join(' → ')}`)
-  }
-  lines.push(`Sequence: ${sequenceParts.join(' → ')}`)
-  return lines.join('\n')
 }
 
 const buildActivitySection = (
@@ -260,7 +238,7 @@ export const buildSystemSections = (
     : { persona: false, room: false, house: false, responseFormat: false, skills: false }
   const ctxIncludes = contextEnabled
     ? resolveIncludeContext(deps.includeContext)
-    : { participants: false, macro: false, artifacts: false, activity: false, knownAgents: false }
+    : { participants: false, artifacts: false, activity: false, knownAgents: false }
   const roomCtx = deps.history.rooms.get(triggerRoomId)
   const out: SystemSection[] = []
 
@@ -305,19 +283,6 @@ export const buildSystemSections = (
     text: roomCtx ? `You are in room "${roomCtx.profile.name}" [id: ${triggerRoomId}].` : '',
     enabled: !!roomCtx,
     optional: false,
-  })
-
-  const freshForRoom = deps.history.incoming.filter(m => m.roomId === triggerRoomId)
-  const latestWithMacro = [...freshForRoom].reverse().find(m => m.macroContext)
-  const macroText = latestWithMacro?.macroContext
-    ? buildMacroSection(latestWithMacro.macroContext, latestWithMacro.macroContext.stepIndex)
-    : ''
-  out.push({
-    key: 'ctx_flow',
-    label: 'Macro',
-    text: macroText,
-    enabled: ctxIncludes.macro && !!macroText,
-    optional: true,
   })
 
   const participants = getParticipantsForRoom(triggerRoomId, deps.history, deps.agentId, deps.getRoomMembers)
@@ -503,13 +468,13 @@ export const buildContext = (
   // Format all candidate messages
   const formattedOld: ChatRequest['messages'][number][] = []
   for (const msg of old) {
-    const formatted = formatMessage(msg, '', deps.agentId, deps.resolveName, roomCompressedIds, deps.includeMacroStepPrompt ?? true)
+    const formatted = formatMessage(msg, '', deps.agentId, deps.resolveName, roomCompressedIds)
     if (formatted) formattedOld.push(formatted)
   }
 
   const formattedFresh: Array<{ formatted: ChatRequest['messages'][number]; id: string }> = []
   for (const msg of fresh) {
-    const formatted = formatMessage(msg, '[NEW] ', deps.agentId, deps.resolveName, roomCompressedIds, deps.includeMacroStepPrompt ?? true)
+    const formatted = formatMessage(msg, '[NEW] ', deps.agentId, deps.resolveName, roomCompressedIds)
     if (formatted) formattedFresh.push({ formatted, id: msg.id })
   }
 

@@ -57,4 +57,3 @@ export { createMCPServer, wireEventNotifications, startMCPServerStdio } from './
 
 // Delivery modes
 export type { DeliveryMode } from './core/types/messaging.ts'
-export type { Macro, MacroStep, MacroRun } from './core/types/macro.ts'

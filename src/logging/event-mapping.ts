@@ -7,14 +7,13 @@
 // in `main.ts`) so we can test the translation without spinning up a System.
 //
 // Choice of which callbacks to log:
-//   INCLUDED — messagePosted, deliveryModeChanged, modeAutoSwitched, macroEvent,
+//   INCLUDED — messagePosted, deliveryModeChanged, modeAutoSwitched,
 //              artifactChanged, roomCreated, roomDeleted, membershipChanged,
 //              evalEvent, providerBound, providerAllFailed, providerStreamFailed,
 //              summaryConfigChanged, summaryUpdated, summaryRunStarted,
 //              summaryRunCompleted, summaryRunFailed
 //   EXCLUDED — turnChanged (fires too often; every eval tick), bookmarksChanged
-//              (UI concern), macroSelectionChanged (UI concern),
-//              summaryRunDelta (per-chunk token noise)
+//              (UI concern), summaryRunDelta (per-chunk token noise)
 //   Decisions revisable via SAMSINN_LOG_KINDS env var — filter is applied
 //   OUTSIDE this module, in the bootstrap wiring.
 // ============================================================================
@@ -22,7 +21,6 @@
 import type { Artifact } from '../core/types/artifact.ts'
 import type { DeliveryMode, Message, RoomProfile } from '../core/types/messaging.ts'
 import type { EvalEvent } from '../core/types/agent-eval.ts'
-import type { MacroEventName, MacroEventDetails } from '../core/types/macro.ts'
 import type { SummaryTarget } from '../core/types/room.ts'
 import type { SummaryConfig } from '../core/types/summary.ts'
 import type { ProviderAttempt } from '../core/types/llm.ts'
@@ -107,16 +105,6 @@ export const mkArtifactChanged = (
   session: sessionId,
   ...(artifact.scope.length > 0 ? { roomId: artifact.scope[0] } : {}),
   payload: { action, artifact },
-})
-
-export const mkMacroEvent = <E extends MacroEventName>(
-  sessionId: string, roomId: string, event: E, detail?: MacroEventDetails[E],
-): LogEvent => ({
-  ts: Date.now(),
-  kind: 'macro.event',
-  session: sessionId,
-  roomId,
-  payload: { event, detail },
 })
 
 export const mkEvalEvent = (sessionId: string, agentName: string, event: EvalEvent): LogEvent => ({

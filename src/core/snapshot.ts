@@ -7,12 +7,13 @@
 //
 // Auto-saver: debounced timer (5s default), flushes on SIGINT/SIGTERM.
 //
-// v11: current. Older versions are rejected at load — no migration ladder.
-//      v11 adds RoomSnapshot.summaryConfig + latestSummary. Also removes the
+// v12: current. Older versions are rejected at load — no migration ladder.
+//      v12 removes macros entirely (replaced by the script engine — see
+//      docs/scripts.md). Drops RoomSnapshot.selectedMacroId and any persisted
+//      macro artifacts. Old snapshots fail isValidSnapshot and are ignored.
+//      v11 added RoomSnapshot.summaryConfig + latestSummary. Also removed the
 //      cap-based message pruning path, so compressedIds are only populated by
 //      the summary-engine's replaceCompression() now.
-//      v10 added RoomSnapshot.selectedMacroId (sticky per-room macro selection).
-//      v9 had the flow→macro rename + delivery mode reduction to broadcast/manual.
 // ============================================================================
 
 import type { Agent, AIAgentConfig } from './types/agent.ts'
@@ -26,7 +27,7 @@ import { dirname } from 'node:path'
 
 // --- Version ---
 
-export const SNAPSHOT_VERSION = 11
+export const SNAPSHOT_VERSION = 12
 
 // --- Snapshot schema ---
 
@@ -38,7 +39,6 @@ export interface RoomSnapshot {
   readonly paused: boolean
   readonly muted: ReadonlyArray<string>
   readonly compressedIds?: ReadonlyArray<string>
-  readonly selectedMacroId?: string
   readonly summaryConfig?: SummaryConfig
   readonly latestSummary?: string
 }
@@ -50,7 +50,7 @@ export interface AgentSnapshot {
 }
 
 export interface SystemSnapshot {
-  readonly version: '11'
+  readonly version: '12'
   readonly timestamp: number
   readonly rooms: ReadonlyArray<RoomSnapshot>
   readonly agents: ReadonlyArray<AgentSnapshot>
@@ -103,7 +103,6 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
       paused: state.paused,
       muted: [...state.muted],
       compressedIds: room.getCompressedIds().size > 0 ? [...room.getCompressedIds()] : undefined,
-      ...(state.selectedMacroId ? { selectedMacroId: state.selectedMacroId } : {}),
       summaryConfig: room.summaryConfig,
       ...(state.latestSummary ? { latestSummary: state.latestSummary } : {}),
     })
@@ -126,7 +125,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
   const artifacts = system.house.artifacts.list({ includeResolved: true })
 
   return {
-    version: '11',
+    version: '12',
     timestamp: Date.now(),
     rooms,
     agents,
@@ -144,9 +143,8 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
 const isValidSnapshot = (raw: Record<string, unknown>): boolean =>
   raw.version === String(SNAPSHOT_VERSION)
 
-// No migration ladder — v9 is a clean break (flow → macro rename, delivery
-// modes reduced to broadcast/manual). Older snapshots are rejected by
-// isValidSnapshot and the server starts fresh.
+// No migration ladder — v12 is a clean break (macro removal). Older snapshots
+// are rejected by isValidSnapshot and the server starts fresh.
 
 // --- Save / Load ---
 
@@ -215,7 +213,6 @@ export const restoreFromSnapshot = async (
       mode: roomSnap.deliveryMode,
       paused: roomSnap.paused,
       compressedIds: roomSnap.compressedIds,
-      ...(roomSnap.selectedMacroId ? { selectedMacroId: roomSnap.selectedMacroId } : {}),
       ...(roomSnap.summaryConfig ? { summaryConfig: roomSnap.summaryConfig } : {}),
       ...(roomSnap.latestSummary ? { latestSummary: roomSnap.latestSummary } : {}),
     })

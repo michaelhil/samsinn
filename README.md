@@ -9,7 +9,6 @@
 ## What you can do with it
 
 - **Run a panel of AI specialists** — a Researcher, Analyst, and Writer in the same room, bouncing ideas off each other and you
-- **Automate multi-step workflows** — define a Macro (ordered agent sequence) and trigger it with a single message
 - **Track tasks collaboratively** — agents and humans share a todo list per room; agents complete todos and record results
 - **Give agents tools** — agents can search the web, do math, remember facts across sessions, delegate subtasks, manage rooms, and query each other
 - **Self-extending agents** — agents create Skills (behavioral templates) and write new tools at runtime, making the system grow its own capabilities
@@ -34,7 +33,7 @@ bun run start
 
 Open **http://localhost:3000** in your browser, enter your name, and you're in.
 
-**New to Samsinn?** See **[docs/getting-started.md](docs/getting-started.md)** — a 20-minute walkthrough that tours the UI and runs you through three missions (two-agent debate → shared todo list → a three-step macro pipeline). Start there if you want to *use* Samsinn; keep reading here if you want the full reference.
+**New to Samsinn?** See **[docs/getting-started.md](docs/getting-started.md)** — a 20-minute walkthrough that tours the UI and runs you through two missions (two-agent debate → shared todo list). Start there if you want to *use* Samsinn; keep reading here if you want the full reference.
 
 ---
 
@@ -58,9 +57,8 @@ A room is a shared conversation space. Agents must be explicitly added to a room
 Each room has:
 - A **name** and optional **room prompt** (instructions all agents in the room receive in their context)
 - An explicit **member list**
-- A **delivery mode** (`broadcast` or `macro`)
+- A **delivery mode** (`broadcast` or `manual`)
 - A **shared todo list**
-- Optional **macros** (orchestration sequences)
 
 ### Agents
 
@@ -78,7 +76,6 @@ Controls which agents receive each message in a room:
 | Mode | Who receives each message |
 |---|---|
 | **Broadcast** | Every non-muted member (default) |
-| **Macro** | One agent at a time, in a predefined sequence |
 | **Manual** | Humans only — AI peers are skipped; each AI is activated explicitly via a ▶ button on its chip |
 
 **Directed addressing** — write `[[AgentName]]` anywhere in a message to override the mode and deliver only to that agent. Inert in manual mode (only the explicit ▶ click fires an agent).
@@ -89,16 +86,9 @@ Controls which agents receive each message in a room:
 
 **Pause** — pause a room to halt all delivery temporarily (useful while re-configuring it).
 
-### Macros
+### Scripts (in development)
 
-A macro is an ordered sequence of agents. When a macro is active, each message from one step automatically triggers the next agent in sequence, until the macro completes (or loops).
-
-Each step can have a **step prompt** — extra instructions injected only when that agent is processing its step.
-
-Use cases:
-- Review pipelines: Researcher → Analyst → Writer → Editor
-- Iterative refinement: Agent A drafts, Agent B critiques, Agent A revises (looping)
-- Sequential processing: each agent transforms the output of the previous one
+Multi-agent improvisational scenes — characters with private wants, structural resolution, no central judge. See [docs/scripts.md](docs/scripts.md) for the design. Replaces the previous macro system.
 
 ### Todos
 
@@ -227,7 +217,7 @@ Click **+ Room**. Optionally add a **Room Prompt** — a shared instruction that
 
 ### Managing delivery
 
-Click the **mode selector** (top of the room panel) to switch between broadcast, manual, and macro.
+Click the **mode selector** (top of the room panel) to switch between broadcast and manual.
 
 Each agent chip in the room header shows a status dot (green = idle, yellow = generating, grey = muted). Click the dot to toggle mute in that room. Hover the chip for the **×** to remove from the room. Use the **⏸** in the room panel to pause the room.
 
@@ -236,10 +226,6 @@ Each agent chip in the room header shows a status dot (green = idle, yellow = ge
 **Bookmarks** — the 🔖 toolbar button opens a system-wide bookmark list. Hover any message to see its own 🔖 icon; click to add the message text to the list. Rows support in-line edit (pen) and delete (×). Clicking a row sends the text to the current room as a human message.
 
 The sidebar agent list has a hover-reveal **×** on each row for deleting the agent entirely.
-
-### Macros
-
-Open the **Macro Editor** (link in the room header). Create a macro by selecting agents in order, optionally writing per-step prompts. Start a macro by selecting it and sending a trigger message.
 
 ### Todos
 
@@ -411,8 +397,6 @@ npx @modelcontextprotocol/inspector bun run src/main.ts --headless
 
 **Delivery control:** `set_delivery_mode`, `set_paused`, `set_muted`
 
-**Macros:** `run_macro`, `stop_macro` (macros are artifacts — create via `add_artifact` with `artifactType: 'macro'`)
-
 **Todos:** `list_todos`, `add_todo`, `update_todo`
 
 **House config:** `get_house_prompts`, `set_house_prompts`
@@ -526,15 +510,6 @@ Base URL: `http://localhost:3000`
 | `PUT` | `/api/rooms/:name/mute` | Mute / unmute agent |
 | `POST` | `/api/rooms/:name/agents/:agentName/activate` | Manual mode — catch the agent up and force one turn |
 
-### Macros
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/rooms/:name/macros` | List macros |
-| `POST` | `/api/rooms/:name/macros` | Create macro |
-| `POST` | `/api/rooms/:name/macros/start` | Start macro |
-| `POST` | `/api/rooms/:name/macros/cancel` | Cancel active macro |
-
 ### Todos
 
 | Method | Path | Description |
@@ -595,10 +570,6 @@ On connection, the server sends a `snapshot` message with the full current state
 { type: 'activate_agent';   roomName: string; agentName: string }
 { type: 'set_paused';       roomName: string; paused: boolean }
 { type: 'set_muted';        roomName: string; agentName: string; muted: boolean }
-{ type: 'add_flow';         roomName: string; name: string; steps: MacroStep[]; loop?: boolean }
-{ type: 'remove_flow';      roomName: string; macroId: string }
-{ type: 'run_macro';       roomName: string; macroId: string; content: string }
-{ type: 'stop_macro';      roomName: string }
 { type: 'cancel_generation'; name: string }
 { type: 'add_todo';         roomName: string; content: string; assignee?: string; dependencies?: string[] }
 { type: 'update_todo';      roomName: string; todoId: string; status?: TodoStatus; assignee?: string; content?: string; result?: string }
@@ -620,7 +591,6 @@ On connection, the server sends a `snapshot` message with the full current state
 { type: 'mute_changed';      roomName: string; agentName: string; muted: boolean }
 { type: 'activation_result'; roomName: string; agentName: string; ok: boolean; queued: boolean; reason?: string }
 { type: 'turn_changed';      roomName: string; agentName?: string; waitingForHuman?: boolean }
-{ type: 'macro_event';        roomName: string; event: 'started' | 'step' | 'completed' | 'cancelled'; detail?: Record<string, unknown> }
 { type: 'todo_changed';      roomName: string; action: 'added' | 'updated' | 'removed'; todo: TodoItem }
 { type: 'error';             message: string }
 ```
@@ -673,7 +643,7 @@ notes/research/           — Design exploration & research notes (not user-faci
 
 ## Multi-instance ("sandboxes")
 
-Samsinn supports many independent *instances* in one Bun process. Each instance has its own rooms, agents, message history, macros, todos, snapshot, and per-instance log directory. Instances share only the LLM provider gateways (one ProviderRouter, one Ollama gateway), provider keys, packs, and skills — i.e. things that are expensive to build and shouldn't be duplicated.
+Samsinn supports many independent *instances* in one Bun process. Each instance has its own rooms, agents, message history, todos, snapshot, and per-instance log directory. Instances share only the LLM provider gateways (one ProviderRouter, one Ollama gateway), provider keys, packs, and skills — i.e. things that are expensive to build and shouldn't be duplicated.
 
 **How a request is bound to an instance.** A signed `samsinn_instance` HttpOnly cookie carries a 16-character id. First-time visitors get a fresh id auto-assigned; subsequent requests reuse it. `?join=<id>` on any URL switches the cookie and 303-redirects to a clean URL — that's how you share an instance.
 
@@ -707,13 +677,11 @@ For full deployment instructions (Hetzner CAX11, systemd unit, Caddy reverse pro
 
 ## Persistence
 
-State is auto-saved to `$SAMSINN_HOME/instances/<id>/snapshot.json` after each message (debounced 5 seconds). On next startup, rooms, agents, message history, macros, todos, mute state, and delivery modes are all restored exactly as they were.
+State is auto-saved to `$SAMSINN_HOME/instances/<id>/snapshot.json` after each message (debounced 5 seconds). On next startup, rooms, agents, message history, todos, mute state, and delivery modes are all restored exactly as they were.
 
 A graceful shutdown (`Ctrl+C`) drains any in-flight agent evaluations, then flushes the snapshot immediately.
 
 The snapshot is a plain JSON file — readable, version-controlled, and portable. It carries a version number; the system validates it on load and will refuse to start if the snapshot is from a newer build, preventing silent data corruption.
-
-**Note:** Active macro execution state (which step a macro is on) is not persisted. After a restart, rooms restore to broadcast mode and macros must be restarted manually.
 
 ---
 
@@ -740,7 +708,7 @@ Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapsh
 
 **Tool protocol** — agents using text-protocol models produce `::TOOL::` lines which are parsed and executed in a ReAct loop. Agents using native-capable models use structured tool calls. The `ToolCapabilityCache` detects capability once per model and caches the result. Tool results are truncated to 4,000 characters by default to prevent context overflow; this limit is configurable per agent via `maxToolResultChars` in `AIAgentConfig`.
 
-**LLM context structure** — every agent evaluation assembles: house rules → room prompt → agent system prompt → skills (scope-matched behavioral templates) → auto-generated context (room, macro, participants, artifacts, tools) → response format → history (old + `[NEW]` tagged recent messages). The `context-builder.ts` is the single source of truth for what agents see.
+**LLM context structure** — every agent evaluation assembles: house rules → room prompt → agent system prompt → skills (scope-matched behavioral templates) → auto-generated context (room, participants, artifacts, tools) → response format → history (old + `[NEW]` tagged recent messages). The `context-builder.ts` is the single source of truth for what agents see.
 
 **External tools** — the `loadExternalTools()` function scans `./tools/`, `~/.samsinn/tools/`, and `SAMSINN_TOOLS_DIR` for `.ts` files with a default Tool or Tool[] export. Loaded before snapshot restore so restored agents have access to them. Conflicts with built-in tool names are silently skipped.
 

@@ -336,10 +336,6 @@
     .mode-btn[aria-pressed="true"]:not(#btn-mode-toggle)::after { content: ''; position: absolute; left: 4px; right: 4px; bottom: 0; height: 2px; background: var(--accent); border-radius: 2px 2px 0 0; }
     .mode-btn:hover:not(:disabled) { background: var(--surface-strong); }
     .mode-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-    /* Macro running chip */
-    .macro-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: var(--macro-accent-bg); color: var(--macro-accent); border: 1px solid var(--macro-accent-border); border-radius: 999px; padding: 2px 8px; }
-    .macro-chip button { background: transparent; border: none; cursor: pointer; color: var(--macro-accent); padding: 0 2px; font-size: 12px; }
-    .macro-chip button:hover { color: var(--danger-hover); }
     /* Next button */
     .btn-next { font-size: 11px; padding: 2px 8px; background: var(--accent); color: #ffffff; border: none; border-radius: 4px; cursor: pointer; }
     .btn-next:hover { background: var(--accent-hover); }
@@ -348,12 +344,6 @@
     #toast-container { position: fixed; bottom: 16px; right: 16px; z-index: 50; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     #toast-container .toast { background: var(--surface-inverse); color: #f9fafb; padding: 8px 12px; border-radius: 6px; font-size: 12px; max-width: 320px; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: toast-in 0.2s ease-out; }
     @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-    /* Macro picker popover */
-    .macro-popover { position: absolute; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); padding: 4px; min-width: 220px; max-width: 320px; z-index: 30; }
-    .macro-popover .macro-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px; border-radius: 4px; color: var(--text); }
-    .macro-popover .macro-item:hover { background: var(--surface-strong); }
-    .macro-popover .macro-item button { font-size: 11px; }
-    .macro-popover-empty { padding: 8px; font-size: 12px; color: var(--text-subtle); }
     } /* end @layer components */
   </style>
   <!-- Tailwind last so utilities (.hidden, .flex, etc.) reliably beat raw
@@ -459,13 +449,6 @@
                (rather than via Tailwind top-full) because the build doesn't
                always pick up that utility from inside this scope. -->
           <div id="room-switcher-popover" class="hidden absolute z-30 bg-surface border rounded shadow-lg py-1 text-sm overflow-y-auto" style="left: 0; top: 100%; margin-top: 4px; min-width: 220px; max-height: 60vh;"></div>
-          <!-- Running macro chip (hidden unless a run is active) -->
-          <span id="macro-chip" class="macro-chip hidden">
-            <span>▶</span>
-            <span id="macro-chip-name">—</span>
-            <span id="macro-chip-step" class="opacity-70">step 0/0</span>
-            <button id="btn-macro-stop" class="icon-btn" title="Stop macro" aria-label="Stop macro"><span data-icon="square"></span></button>
-          </span>
         </div>
         <div class="flex items-center gap-1">
           <!-- Cluster A: room actions (mode toggle now lives next to the
@@ -490,13 +473,6 @@
                  right edge since eye is the last child) and grows leftward. -->
             <div id="icon-visibility-popover" class="hidden absolute z-30 bg-surface border rounded shadow-lg py-1 text-sm" style="right: 0; top: 100%; margin-top: 4px; min-width: 260px;"></div>
           </div>
-          <!-- Cluster B: macros -->
-          <div id="macro-group" class="toolbar-group toolbar-divider">
-            <button id="btn-macro-picker" class="mode-btn icon-btn" data-room-icon-id="macro-picker" data-room-icon-label="Macros" title="Macros" aria-label="Macros" aria-pressed="false"><span data-icon="clapperboard"></span></button>
-            <button id="btn-macro-list" class="mode-btn icon-btn hidden" title="Select a macro" aria-label="Select a macro" disabled><span data-icon="list-checks"></span></button>
-            <button id="btn-macro-next" class="mode-btn icon-btn hidden" title="Next step — requires a selected macro" aria-label="Next step" disabled><span data-icon="chevron-right"></span></button>
-            <button id="btn-macro-create" class="mode-btn icon-btn hidden" title="Create new macro" aria-label="Create new macro"><span data-icon="plus"></span></button>
-          </div>
           <!-- Cluster C: summary / compression -->
           <div id="summary-group" class="toolbar-group toolbar-divider">
             <button id="btn-summary-toggle" class="mode-btn icon-btn" data-room-icon-id="summary" data-room-icon-label="Summary & compression" title="Summary & compression" aria-label="Summary & compression" aria-pressed="false"><span data-icon="archive"></span></button>
@@ -515,9 +491,8 @@
       <!-- Agent inspector area (inline, replaces chat when viewing an agent) -->
       <div id="agent-area" class="flex-1 overflow-y-auto p-4 hidden"></div>
 
-      <!-- Chat area (messages + pinned + chip row + input) -->
+      <!-- Chat area (messages + chip row + input) -->
       <div id="chat-area" class="flex-1 flex flex-col min-h-0 overflow-hidden hidden">
-        <div id="pinned-messages" class="border-b bg-warning-bg max-h-32 overflow-y-auto hidden"></div>
         <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
         <!-- Room members (chip row) sits just above the input — agent
              chips are most useful while composing a message. The mode

@@ -12,7 +12,7 @@
 // quick-access bar even when the icon is hidden in the header.
 //
 // The eye button itself is intentionally NOT in the registry (always visible
-// escape hatch). The room name, status dot, and macro chip aren't either.
+// escape hatch). The room name and status dot aren't either.
 // ============================================================================
 
 import { hydrateIconPlaceholders } from './icon.ts'

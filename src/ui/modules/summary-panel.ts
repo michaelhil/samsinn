@@ -228,7 +228,7 @@ export const handleSummaryRunFailed = (roomName: string, target: 'summary' | 'co
 }
 
 // --- Summary group DOM handlers (header group: toggle, settings, inspect, regen) ---
-// Mirrors macro-panel.ts: one init function wires the 4 handlers; app.ts
+// One init function wires the 4 handlers; app.ts
 // calls it once at startup and passes onRefreshRoomControls so btnSummaryToggle
 // can trigger the shared refresh after toggling expansion.
 

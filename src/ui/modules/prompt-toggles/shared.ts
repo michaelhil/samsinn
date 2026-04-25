@@ -45,7 +45,6 @@ export const PROMPT_KEYS = [
 
 export const CONTEXT_KEYS = [
   { code: 'participants', section: 'ctx_participants', label: 'Participants list' },
-  { code: 'macro',         section: 'ctx_flow',         label: 'Macro section' },
   { code: 'artifacts',    section: 'ctx_artifacts',    label: 'Artifacts' },
   { code: 'activity',     section: 'ctx_activity',     label: 'Activity in other rooms' },
   { code: 'knownAgents',  section: 'ctx_knownAgents',  label: 'Known agents', warning: 'breaks [[Name]] mentions' },
