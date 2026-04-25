@@ -152,10 +152,46 @@ export const bootstrap = async (): Promise<void> => {
     // Full mode: HTTP + WebSocket server with browser UI.
     // In ephemeral mode, pass undefined for onAutoSave so per-change writes
     // don't hit disk either.
+
+    // Reset commit: dispose autoSaver, drain agents, wipe state dirs, exit.
+    // We bypass the SIGTERM shutdown handler (which would re-flush a fresh
+    // snapshot via autoSaver and undo the wipe). systemd respawns the
+    // server within ~5s and clients reconnect to a fresh state.
+    const onResetCommit = async (): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      try {
+        autoSaver.dispose()
+        // Drain in-flight evals (best-effort, same timeout as shutdown).
+        const timeout = new Promise<void>(res => setTimeout(res, DRAIN_TIMEOUT_MS))
+        const aiAgents = system.team.listAgents().flatMap(a => { const ai = asAIAgent(a); return ai ? [ai] : [] })
+        await Promise.all(aiAgents.map(a => Promise.race([a.whenIdle(), timeout])))
+
+        const home = (await import('node:os')).homedir()
+        const targets = [
+          snapshotPath,
+          joinPath(home, '.samsinn', 'memory'),
+          joinPath(home, '.samsinn', 'packs'),
+          joinPath(home, '.samsinn', 'skills'),
+          joinPath(home, '.samsinn', 'tools'),
+        ]
+        const { rm } = await import('node:fs/promises')
+        for (const t of targets) {
+          await rm(t, { recursive: true, force: true })
+        }
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        console.error('Reset commit failed:', reason)
+        return { ok: false, reason }
+      }
+      // Exit on next tick so the route can flush its 200 response first.
+      setTimeout(() => process.exit(0), 100)
+      return { ok: true }
+    }
+
     const { createServer } = await import('./api/server.ts')
     createServer(system, {
       port: parseInt(process.env.PORT ?? String(DEFAULTS.port), 10),
       ...(ephemeral ? {} : { onAutoSave: autoSaver.scheduleSave }),
+      onResetCommit,
     })
   }
 }

@@ -95,6 +95,11 @@ export type WSOutbound =
   | { readonly type: 'providers_changed'; readonly providers: ReadonlyArray<string> }
   // Fired after a pack is installed / updated / uninstalled. UI panels refresh.
   | { readonly type: 'packs_changed' }
+  // Sandbox reset lifecycle. `commitsAtMs` is an absolute epoch ms — UI
+  // computes its own countdown (no clock-skew handshake needed for ±1 s).
+  | { readonly type: 'reset_pending'; readonly commitsAtMs: number }
+  | { readonly type: 'reset_cancelled' }
+  | { readonly type: 'reset_failed'; readonly reason: string }
   // Summary + compression
   | { readonly type: 'summary_config_changed'; readonly roomName: string; readonly config: SummaryConfig }
   | { readonly type: 'summary_run_started'; readonly roomName: string; readonly target: SummaryTarget }

@@ -494,6 +494,18 @@ const handlers: Handlers = {
     window.dispatchEvent(new CustomEvent('packs-changed'))
   },
 
+  reset_pending(msg) {
+    window.dispatchEvent(new CustomEvent('reset-pending', { detail: { commitsAtMs: msg.commitsAtMs } }))
+  },
+
+  reset_cancelled(_msg) {
+    window.dispatchEvent(new CustomEvent('reset-cancelled'))
+  },
+
+  reset_failed(msg) {
+    window.dispatchEvent(new CustomEvent('reset-failed', { detail: { reason: msg.reason } }))
+  },
+
   // --- Summary + compression ---
 
   summary_config_changed(_msg) {

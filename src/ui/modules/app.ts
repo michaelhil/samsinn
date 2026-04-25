@@ -664,6 +664,7 @@ btnModeManual.onclick = () => setMode('manual')
 // Wire macro + summary panel handlers now that refreshRoomControls is in scope.
 initMacroPanel({ onRefreshRoomControls: refreshRoomControls })
 initSummaryPanel({ onRefreshRoomControls: refreshRoomControls })
+void import('./reset-button.ts').then(m => m.initResetPanel())
 
 roomForm.onsubmit = (e) => {
   e.preventDefault()

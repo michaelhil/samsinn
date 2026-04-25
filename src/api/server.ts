@@ -21,6 +21,13 @@ interface ServerConfig {
   readonly port?: number
   readonly uiPath?: string
   readonly onAutoSave?: () => void
+  /**
+   * Invoked by the reset endpoint after the 10-second countdown ends.
+   * Implementation must dispose the autoSaver, wipe state directories,
+   * and process.exit(0). Returns { ok: false, reason } if the wipe
+   * fails so the route can broadcast reset_failed and stay alive.
+   */
+  readonly onResetCommit?: () => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 // === Static file serving (path traversal protected) ===
@@ -227,7 +234,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
 
       // API routes — resolve client IP for endpoints that gate source-serving.
       const remoteAddress = server.requestIP(req)?.address
-      const apiResponse = await handleAPI(req, pathname, system, wsManager.broadcast, wsManager.subscribeAgentState, wsManager.unsubscribeAgentState, remoteAddress)
+      const apiResponse = await handleAPI(req, pathname, system, wsManager.broadcast, wsManager.subscribeAgentState, wsManager.unsubscribeAgentState, remoteAddress, config?.onResetCommit)
       if (apiResponse) return apiResponse
 
       // Static files

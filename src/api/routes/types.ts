@@ -7,6 +7,7 @@ export interface RouteContext {
   readonly subscribeAgentState: (agentId: string, agentName: string) => void
   readonly unsubscribeAgentState?: (agentId: string) => void
   readonly remoteAddress?: string  // resolved client IP; used to gate source-serving endpoints
+  readonly onResetCommit?: () => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 export interface RouteEntry {

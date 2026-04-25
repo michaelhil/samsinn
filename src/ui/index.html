@@ -61,6 +61,17 @@
       --success-hover: #16a34a;       /* green-600 — button hover */
       --success-soft-bg: #f0fdf4;     /* green-50 — hover/soft bg */
       --shadow-overlay: rgba(0,0,0,0.4);
+
+      /* Non-color design tokens. Elevation scale: sm for subtle lift on rows
+         and interactive chips; md for popovers and hover-elevated panels; lg
+         for the biggest modal cards. Matches Material-style y-offset shadows
+         with soft alpha so dark mode doesn't pool. */
+      --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.04);
+      --shadow-md: 0 4px 8px -2px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.04);
+      --shadow-lg: 0 12px 24px -6px rgba(0,0,0,0.12), 0 4px 8px -4px rgba(0,0,0,0.06);
+      --radius-sm: 3px;
+      --radius-md: 6px;
+      --radius-lg: 10px;
     }
     :root.dark {
       --surface: #111827;             /* gray-900 */
@@ -93,6 +104,10 @@
       --success-hover: #22c55e;       /* green-500 */
       --success-soft-bg: #14532d;     /* green-900 */
       --shadow-overlay: rgba(0,0,0,0.6);
+      /* Dark-mode shadows: deeper alpha to read over dark surfaces. */
+      --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.5);
+      --shadow-md: 0 4px 8px -2px rgba(0,0,0,0.5), 0 2px 4px -2px rgba(0,0,0,0.35);
+      --shadow-lg: 0 12px 24px -6px rgba(0,0,0,0.6), 0 4px 8px -4px rgba(0,0,0,0.4);
     }
     /* Base body color flips automatically via token. */
     body { background: var(--surface-muted); color: var(--text); }
@@ -146,16 +161,107 @@
     .mute-btn:hover { background: color-mix(in srgb, var(--danger) 20%, transparent); border-color: var(--danger); }
     .mute-btn.muted { background: color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger-hover); border-color: var(--danger); }
     .agent-muted { opacity: 0.5; }
-    .sidebar-collapsed { width: 32px !important; min-width: 32px !important; max-width: 32px !important; overflow: hidden; }
-    /* `!important` needed because Tailwind's `.flex` and similar utilities
-       live in @layer utilities which outranks our @layer components. Same
-       reason `width` above uses !important. */
-    .sidebar-collapsed .sidebar-content { display: none !important; }
-    /* When the left icon group is hidden (via .sidebar-content above),
-       center the remaining expand button inside the 32px header. */
-    .sidebar-collapsed > :first-child { justify-content: center !important; }
+    /* Sidebar resize handle — absolute-positioned strip that sits on the
+       sidebar's right edge. Invisible until hover; becomes an accent line
+       while hovering or dragging. When the sidebar is collapsed (width 0),
+       the handle sits at viewport x=0 and is the user's way back. */
+    #sidebar-resize {
+      position: absolute; top: 0; bottom: 0;
+      width: 8px;
+      margin-left: -4px;
+      cursor: col-resize;
+      z-index: 40;
+    }
+    #sidebar-resize::before {
+      content: '';
+      position: absolute;
+      left: 50%; top: 0; bottom: 0;
+      width: 2px;
+      transform: translateX(-50%);
+      background: transparent;
+      transition: background 120ms;
+    }
+    #sidebar-resize:hover::before,
+    #sidebar-resize.dragging::before { background: var(--accent); }
+    body.sidebar-dragging { cursor: col-resize; user-select: none; }
+    body.sidebar-dragging * { user-select: none; }
     .workspace-handle { cursor: row-resize; }
     .workspace-handle:active { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+
+    /* === Global polish ================================================== */
+
+    /* Default transition on interactive surfaces — rows, buttons, links.
+       Opt in by adding .interactive to the element. Everything in the
+       button/input primitives gets this automatically. */
+    .interactive { transition: background-color 150ms, color 150ms, border-color 150ms, box-shadow 150ms; }
+
+    /* Keyboard focus: visible ring on any element that receives focus via
+       keyboard (not mouse clicks). Works for buttons, inputs, <dialog>
+       close buttons. Mouse-driven hovers still don't show the ring. */
+    :where(button, a, input, textarea, select, [tabindex]):focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
+
+    /* Minimum hit area for icon-only buttons: 24×24 px (WCAG 2.5.5 AA).
+       Applied via .icon-btn so it doesn't collide with layout buttons that
+       already control their size. */
+    .icon-btn {
+      min-width: 24px;
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* === Button + Input primitives (class-driven base) ================= */
+    /* createButton() in detail-modal.ts applies one of these .btn-* classes
+       plus any layout helpers. createInput()/createTextarea() use .input. */
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: var(--radius-md);
+      font-size: 12px; font-weight: 500; line-height: 1;
+      cursor: pointer;
+      transition: background-color 150ms, color 150ms, border-color 150ms, box-shadow 150ms;
+      border: 1px solid transparent;
+    }
+    .btn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+    /* Pending / dirty-state primary: rendered as muted until the form is
+       dirty; callers swap .btn-primary-pending → .btn-primary on dirty. */
+    .btn-primary-pending { background: var(--border-strong); color: #fff; cursor: not-allowed; }
+
+    .btn-ghost { background: var(--surface-muted); color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover:not(:disabled) { background: var(--surface-strong); }
+
+    .btn-danger { background: transparent; color: var(--danger); }
+    .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+    .input {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 12px; line-height: 1.4;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      transition: border-color 150ms, box-shadow 150ms;
+    }
+    .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+    .input:disabled { opacity: 0.5; cursor: not-allowed; }
+    textarea.input { font-family: var(--font-mono); resize: vertical; }
+    /* Native <dialog> backdrop matches createModal's overlay (same token). */
+    dialog::backdrop { background: var(--shadow-overlay); }
+    /* Restore modal centering — Tailwind Preflight resets margin to 0 on all
+       elements, which nukes the UA's `margin: auto` that centers [open] dialogs. */
+    dialog[open] { margin: auto; }
     /* Pause status dot (header + sidebar) */
     .room-status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; background: var(--success); cursor: pointer; border: none; padding: 0; flex-shrink: 0; }
     .room-status-dot[aria-pressed="true"] { background: var(--text-muted); }
@@ -203,92 +309,72 @@
 
   <!-- No header — app name + settings in sidebar -->
 
-  <main class="flex flex-1 overflow-hidden">
-    <!-- Sidebar (left, only sidebar) -->
-    <aside id="sidebar" class="shrink-0 flex flex-col transition-all" style="width: fit-content; min-width: 120px; max-width: 200px; background: var(--surface); border-right: 1px solid var(--border);">
-      <!-- Sidebar header — system icons only (title moved to footer) -->
-      <div class="p-2 border-b flex items-center justify-between gap-1" style="border-color: var(--border);">
-        <div class="sidebar-content flex items-center gap-1">
-          <button id="btn-system-prompt" class="w-5 h-5 flex items-center justify-center" style="color: var(--text-muted);" title="System Prompt">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          </button>
-          <button id="btn-ollama-dashboard" class="w-5 h-5 flex items-center justify-center" style="color: var(--text-muted);" title="Providers">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          </button>
-          <button id="btn-theme-toggle" class="w-5 h-5 flex items-center justify-center" style="color: var(--text-muted);" title="Toggle theme">
-            <!-- Sun in light mode, moon in dark mode — CSS swaps via :root.dark rule -->
-            <svg class="theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-            <svg class="theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          </button>
-          <span id="ollama-status-dot" style="display:none"></span>
-        </div>
-        <button id="btn-collapse-sidebar" class="w-6 h-6 flex items-center justify-center text-xs" style="color: var(--text-muted);" title="Toggle sidebar">◀</button>
-      </div>
+  <main class="flex flex-1 overflow-hidden relative">
+    <!-- Sidebar (left). Width is JS-controlled via the resize handle. -->
+    <aside id="sidebar" class="shrink-0 flex flex-col overflow-hidden" style="width: 160px; background: var(--surface); border-right: 1px solid var(--border);">
 
-      <!-- Rooms section -->
+      <!-- Rooms section. Outer wrapper handles row click → toggle; explicit
+           inner buttons (toggle / create) so we never nest <button> in <button>. -->
       <div class="sidebar-content border-b">
-        <div id="rooms-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted">
-          <span id="rooms-toggle" class="text-xs font-medium text-text-subtle uppercase whitespace-nowrap">▾ Rooms</span>
-          <button id="btn-create-room" class="text-xs text-text-subtle hover:text-text font-bold" title="Create Room">+</button>
+        <div id="rooms-header" class="px-3 py-1.5 flex items-center justify-between hover:bg-surface-muted interactive">
+          <button type="button" id="rooms-toggle-btn" class="bg-transparent border-0 p-0 cursor-pointer text-left flex-1" aria-expanded="true" aria-controls="room-list" aria-label="Toggle Rooms section">
+            <span id="rooms-toggle" class="text-xs font-semibold text-text-subtle uppercase tracking-wide whitespace-nowrap">▾ Rooms</span>
+          </button>
+          <button id="btn-create-room" class="icon-btn text-xs text-text-subtle hover:text-text font-bold" title="Create Room" aria-label="Create Room">+</button>
         </div>
-        <div id="room-list" class="overflow-y-auto max-h-48"></div>
+        <div id="room-list" class="overflow-y-auto max-h-64"></div>
       </div>
 
       <!-- Agents section -->
       <div class="sidebar-content border-b">
-        <div id="agents-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted">
-          <span id="agents-toggle" class="text-xs font-medium text-text-subtle uppercase whitespace-nowrap">▾ Agents</span>
-          <button id="btn-create-agent" class="text-xs text-text-subtle hover:text-text font-bold" title="Create Agent">+</button>
+        <div id="agents-header" class="px-3 py-1.5 flex items-center justify-between hover:bg-surface-muted interactive">
+          <button type="button" id="agents-toggle-btn" class="bg-transparent border-0 p-0 cursor-pointer text-left flex-1" aria-expanded="true" aria-controls="agent-list" aria-label="Toggle Agents section">
+            <span id="agents-toggle" class="text-xs font-semibold text-text-subtle uppercase tracking-wide whitespace-nowrap">▾ Agents</span>
+          </button>
+          <button id="btn-create-agent" class="icon-btn text-xs text-text-subtle hover:text-text font-bold" title="Create Agent" aria-label="Create Agent">+</button>
         </div>
-        <div id="agent-list" class="overflow-y-auto max-h-72"></div>
+        <div id="agent-list" class="overflow-y-auto max-h-96"></div>
       </div>
 
-      <!-- Tools section (collapsed by default) -->
+      <!-- Settings section (collapsed by default). Each row opens its own modal. -->
       <div class="sidebar-content border-b">
-        <div id="tools-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted">
-          <span id="tools-toggle" class="text-xs font-medium text-text-subtle uppercase whitespace-nowrap">▸ Tools</span>
-          <button id="btn-rescan-tools" data-tools-action class="text-xs text-text-subtle hover:text-text" title="Rescan external tool directories">↻</button>
+        <button type="button" id="settings-header" class="w-full px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted interactive bg-transparent border-0" aria-expanded="false">
+          <span id="settings-toggle" class="text-xs font-semibold text-text-subtle uppercase tracking-wide whitespace-nowrap">▸ Settings</span>
+        </button>
+        <div id="settings-list" class="hidden">
+          <button data-settings-row="prompt"    class="w-full text-left text-xs text-text py-1.5 px-3 hover:bg-surface-muted cursor-pointer interactive">Prompt</button>
+          <button data-settings-row="providers" class="w-full text-left text-xs text-text py-1.5 px-3 hover:bg-surface-muted cursor-pointer interactive">Providers</button>
+          <button data-settings-row="tools"     class="w-full text-left text-xs text-text py-1.5 px-3 hover:bg-surface-muted cursor-pointer interactive">Tools</button>
+          <button data-settings-row="skills"    class="w-full text-left text-xs text-text py-1.5 px-3 hover:bg-surface-muted cursor-pointer interactive">Skills</button>
+          <button data-settings-row="packs"     class="w-full text-left text-xs text-text py-1.5 px-3 hover:bg-surface-muted cursor-pointer interactive">Packs</button>
+          <button data-settings-row="logging"   class="w-full text-left text-xs text-text py-1.5 px-3 hover:bg-surface-muted cursor-pointer interactive flex items-center justify-between">
+            <span>Logging</span>
+            <span id="logging-state-dot" class="text-xs" title="Logging state">◌</span>
+          </button>
         </div>
-        <div id="tools-list" class="overflow-y-auto max-h-48 hidden"></div>
       </div>
 
-      <!-- Skills section (collapsed by default) -->
-      <div class="sidebar-content border-b">
-        <div id="skills-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted">
-          <span id="skills-toggle" class="text-xs font-medium text-text-subtle uppercase whitespace-nowrap">▸ Skills</span>
-          <button id="btn-create-skill" class="text-xs text-text-subtle hover:text-text font-bold" title="Create Skill">+</button>
-        </div>
-        <div id="skills-list" class="overflow-y-auto max-h-48 hidden"></div>
-      </div>
-
-      <!-- Packs section (collapsed by default) -->
-      <div class="sidebar-content border-b">
-        <div id="packs-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted">
-          <span id="packs-toggle" class="text-xs font-medium text-text-subtle uppercase whitespace-nowrap">▸ Packs</span>
-          <button id="btn-install-pack" data-packs-action class="text-xs text-text-subtle hover:text-text font-bold" title="Install pack from GitHub">+</button>
-        </div>
-        <div id="packs-list" class="overflow-y-auto max-h-48 hidden"></div>
-      </div>
-
-      <!-- Logging section (collapsed by default; shows recording state at a glance) -->
-      <div class="sidebar-content border-b">
-        <div id="logging-header" class="px-3 py-1.5 flex items-center justify-between cursor-pointer hover:bg-surface-muted">
-          <span id="logging-toggle" class="text-xs font-medium text-text-subtle uppercase whitespace-nowrap">▸ Logging</span>
-          <span id="logging-state-dot" class="text-xs" title="Logging state">◌</span>
-        </div>
-        <div id="logging-panel" class="hidden px-3 py-2 text-xs space-y-2"></div>
-      </div>
-
-      <!-- Sidebar footer — app name + version + repo link. Pushed to bottom by mt-auto. -->
+      <!-- Sidebar footer — samsinn (clickable → repo) + version + theme toggle. -->
       <div class="sidebar-content mt-auto p-2 flex items-center gap-1 text-xs whitespace-nowrap" style="border-top: 1px solid var(--border); color: var(--text-subtle);">
-        <span class="font-semibold" style="color: var(--text);">samsinn</span>
+        <button id="app-repo-link" type="button" class="font-semibold cursor-pointer bg-transparent border-0 p-0 text-left" style="color: var(--text);" title="Open repository">samsinn</button>
         <span id="app-version" style="color: var(--text-muted);">v…</span>
-        <a id="app-repo-link" href="#" target="_blank" rel="noopener noreferrer" class="ml-auto flex items-center justify-center" style="color: var(--text-muted); display: none;" title="Open repository">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
+        <button id="btn-reset-sandbox" class="ml-1 cursor-pointer" style="background: transparent; border: none; color: var(--danger); font-size: 11px; padding: 0 4px;" title="Reset sandbox to default — wipes all rooms, agents, messages, packs, and runtime-created skills/tools">↺ reset</button>
+        <span id="ollama-status-dot" style="display:none"></span>
+        <button id="btn-theme-toggle" class="icon-btn ml-auto" style="color: var(--text-muted);" title="Toggle theme" aria-label="Toggle theme">
+          <!-- Sun in light mode, moon in dark mode. icons are injected by app.ts init. -->
+          <span class="theme-icon-sun" data-icon="sun"></span>
+          <span class="theme-icon-moon" data-icon="moon" style="display:none"></span>
+        </button>
       </div>
 
     </aside>
+
+    <!-- Sidebar resize handle — sits on the sidebar's right edge; hover to
+         see an accent line, drag to resize. Drag below threshold to collapse
+         to zero width, in which case this handle becomes the peek-back grip
+         at the viewport's left edge. Positioned absolutely inside main;
+         left set by JS to match sidebar width. -->
+    <div id="sidebar-resize" title="Drag to resize"></div>
 
     <!-- Center section -->
     <section class="flex-1 flex flex-col min-w-0">
@@ -301,7 +387,7 @@
       <div id="room-header" class="px-3 py-1.5 border-b bg-surface flex items-center justify-between hidden">
         <div class="flex items-center gap-2 min-w-0">
           <button id="room-status-dot" class="room-status-dot" title="Active — click to pause" aria-pressed="false" aria-label="Toggle pause"></button>
-          <span id="room-name" class="text-sm font-medium text-text-strong truncate"></span>
+          <span id="room-name" class="text-base font-semibold text-text-strong truncate"></span>
           <!-- Running macro chip (hidden unless a run is active) -->
           <span id="macro-chip" class="macro-chip hidden">
             <span>▶</span>
@@ -312,8 +398,8 @@
         </div>
         <div class="flex items-center gap-1">
           <button id="btn-clear-messages" class="prompt-icon" title="Clear messages">🗑</button>
-          <button id="btn-bookmarks" class="prompt-icon" title="Bookmarks"><svg width="14" height="14" viewBox="0 0 24 24" fill="#ef4444" style="transform: rotate(45deg)"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>
-          <button id="btn-room-prompt" class="prompt-icon" title="Room Prompt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
+          <button id="btn-bookmarks" class="prompt-icon icon-btn" title="Bookmarks" aria-label="Bookmarks"><span data-icon="bookmark" data-icon-fill="var(--danger)" data-icon-style="transform: rotate(45deg)"></span></button>
+          <button id="btn-room-prompt" class="prompt-icon icon-btn" title="Room Prompt" aria-label="Edit room prompt"><span data-icon="message-square"></span></button>
           <div id="mode-switcher" class="mode-switcher">
             <button id="btn-mode-broadcast" class="mode-btn" title="Broadcast — every message goes to all agents" aria-pressed="true">📣</button>
             <button id="btn-mode-manual" class="mode-btn" title="Manual — AI agents wake only on Next or macro step" aria-pressed="false">👋</button>
@@ -350,9 +436,9 @@
         <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
         <form id="chat-form" class="p-3 border-t bg-surface flex gap-2">
           <input id="chat-input" type="text" placeholder="Type a message..."
-                 class="flex-1 px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-accent-ring"
+                 class="input flex-1"
                  autocomplete="off" disabled>
-          <button type="submit" id="btn-send" class="px-4 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover disabled:opacity-50" disabled>Send</button>
+          <button type="submit" id="btn-send" class="btn btn-primary" disabled>Send</button>
         </form>
       </div>
 
@@ -421,12 +507,18 @@
   </dialog>
 
   <!-- Ollama Dashboard Modal -->
-  <dialog id="ollama-dashboard" class="rounded-lg shadow-xl p-0 w-[820px] max-w-[95vw] max-h-[85vh]">
-    <div class="p-4 space-y-3 overflow-y-auto max-h-[85vh]">
-      <div class="flex items-center justify-between">
-        <h3 class="font-medium text-text-strong">Providers</h3>
-        <button id="ollama-dashboard-close" class="text-text-muted hover:text-text text-lg">&times;</button>
+  <dialog id="ollama-dashboard" class="rounded-lg shadow-xl p-0 w-[820px] max-w-[95vw] bg-surface text-text" style="max-height: 90vh;">
+    <!-- Inner wrapper carries the flex-col chrome. Can't put `display: flex`
+         on the <dialog> itself — it overrides the UA `display: none` that
+         showModal() relies on for modal behaviour. -->
+    <div class="flex flex-col overflow-hidden" style="max-height: 90vh;">
+      <!-- Fixed header — matches createModal chrome -->
+      <div class="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
+        <h3 class="text-lg font-semibold">Providers</h3>
+        <button id="ollama-dashboard-close" class="text-lg leading-none ml-2 text-text-muted">&times;</button>
       </div>
+      <!-- Scrollable body -->
+      <div class="px-6 py-4 overflow-y-auto min-h-0 flex-1 space-y-3">
 
       <!-- Order-locked-by-env notice (hidden unless PROVIDER_ORDER env is set) -->
       <div id="order-locked-notice" class="hidden text-[11px] text-warning bg-warning-bg border border-warning-border rounded px-2 py-1">
@@ -499,6 +591,7 @@
           </div>
         </details>
       </div>
+    </div>
     </div>
   </dialog>
 
