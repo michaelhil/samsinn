@@ -10,6 +10,7 @@ import type { Message } from '../core/types/messaging.ts'
 import type { WSOutbound } from '../core/types/ws-protocol.ts'
 import { DEFAULTS } from '../core/types/constants.ts'
 import { ensureUniqueName } from '../core/names.ts'
+import { authEnabled, isValidSession, sessionFromRequest } from './auth.ts'
 import { handleAPI } from './http-routes.ts'
 import { createWSManager, handleWSMessage, type WSData } from './ws-handler.ts'
 import { resolve, normalize } from 'node:path'
@@ -183,6 +184,10 @@ export const createServer = (system: System, config?: ServerConfig) => {
 
       // WebSocket upgrade
       if (pathname === '/ws') {
+        // Auth gate (deploy mode only). Cookie is set by /api/auth.
+        if (authEnabled() && !isValidSession(sessionFromRequest(req))) {
+          return new Response('Unauthorized', { status: 401 })
+        }
         const name = url.searchParams.get('name')
         if (!name) return new Response('name query parameter required', { status: 400 })
 

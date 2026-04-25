@@ -8,8 +8,9 @@
 
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { json } from './helpers.ts'
+import { json, errorResponse, parseBody } from './helpers.ts'
 import type { RouteEntry } from './types.ts'
+import { authEnabled, buildSessionCookie, issueSession, validateToken } from '../auth.ts'
 
 // Cached on first read. package.json doesn't change at runtime.
 let cachedInfo: { version: string; repoUrl: string } | null = null
@@ -42,6 +43,41 @@ export const systemRoutes: RouteEntry[] = [
     method: 'GET',
     pattern: /^\/api\/system\/info$/,
     handler: async () => json(await readPackageInfo()),
+  },
+  {
+    // Auth status — used by the UI to decide whether to show the token prompt.
+    // Always succeeds; the body says whether auth is required and whether the
+    // current request carries a valid session cookie.
+    method: 'GET',
+    pattern: /^\/api\/auth$/,
+    handler: async (req) => {
+      const enabled = authEnabled()
+      if (!enabled) return json({ authEnabled: false, authenticated: true })
+      const { sessionFromRequest, isValidSession } = await import('../auth.ts')
+      const session = sessionFromRequest(req)
+      return json({ authEnabled: true, authenticated: isValidSession(session) })
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/auth$/,
+    handler: async (req) => {
+      if (!authEnabled()) {
+        // Dev / unset-token mode — pretend success so the UI flow still runs.
+        return json({ ok: true })
+      }
+      const body = await parseBody(req)
+      const candidate = typeof body.token === 'string' ? body.token : ''
+      if (!validateToken(candidate)) return errorResponse('invalid token', 401)
+      const sessionId = issueSession()
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Set-Cookie': buildSessionCookie(sessionId),
+        },
+      })
+    },
   },
   {
     method: 'POST',

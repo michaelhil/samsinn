@@ -38,6 +38,7 @@ import {
 import { stopProvidersPanel } from './providers-panel.ts'
 import { startLoggingStateDot } from './logging-panel.ts'
 import { initSettingsNav } from './settings-nav.ts'
+import { hydrateIconPlaceholders } from './icon.ts'
 import {
   isSummaryGroupExpanded,
   initSummaryPanel,
@@ -699,20 +700,27 @@ artifactInput.onkeydown = (e) => {
 }
 
 // Sidebar section toggles
-roomsHeader.onclick = (e) => {
-  if ((e.target as HTMLElement).closest('button')) return
+// Section toggles: click the dedicated toggle button (with aria-expanded)
+// rather than the whole header — keeps the +create button and toggle as
+// distinct keyboard targets.
+const roomsToggleBtn = $('#rooms-toggle-btn') as HTMLButtonElement
+roomsToggleBtn.onclick = () => {
   roomsSectionExpanded = !roomsSectionExpanded
   roomList.classList.toggle('hidden', !roomsSectionExpanded)
   roomsToggle.textContent = `${roomsSectionExpanded ? '▾' : '▸'} Rooms (${Object.keys($rooms.get()).length})`
+  roomsToggleBtn.setAttribute('aria-expanded', String(roomsSectionExpanded))
 }
 
-agentsHeader.onclick = () => {
+const agentsToggleBtn = $('#agents-toggle-btn') as HTMLButtonElement
+agentsToggleBtn.onclick = () => {
   agentsSectionExpanded = !agentsSectionExpanded
   agentList.classList.toggle('hidden', !agentsSectionExpanded)
   updateAgentsLabel()
+  agentsToggleBtn.setAttribute('aria-expanded', String(agentsSectionExpanded))
 }
 
 // Settings sidebar section — single nav entry to six modal rows.
+hydrateIconPlaceholders()
 initSettingsNav()
 // Keep the logging recording dot fresh in the sidebar even when the
 // Logging modal isn't open.
@@ -815,9 +823,16 @@ nameForm.onsubmit = (e) => {
   connect(name)
 }
 
-if (savedName) {
-  $myName.set(savedName)
-  connect(savedName)
-} else {
-  nameModal.showModal()
-}
+// Boot order: auth gate must complete before we open a WebSocket — the
+// upgrade rejects unauthenticated connections in deploy mode and would
+// otherwise spin in the reconnect loop.
+void (async () => {
+  const { ensureAuthenticated } = await import('./auth.ts')
+  await ensureAuthenticated()
+  if (savedName) {
+    $myName.set(savedName)
+    connect(savedName)
+  } else {
+    nameModal.showModal()
+  }
+})()

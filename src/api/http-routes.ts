@@ -10,6 +10,7 @@
 
 import type { System } from '../main.ts'
 import type { WSOutbound } from '../core/types/ws-protocol.ts'
+import { authEnabled, isValidSession, sessionFromRequest } from './auth.ts'
 import { houseRoutes } from './routes/house.ts'
 import { roomRoutes } from './routes/rooms.ts'
 import { artifactRoutes } from './routes/artifacts.ts'
@@ -59,6 +60,15 @@ export const handleAPI = async (
   remoteAddress?: string,
 ): Promise<Response | null> => {
   const ctx: RouteContext = { system, broadcast, subscribeAgentState, unsubscribeAgentState, remoteAddress }
+
+  // Auth gate. /api/auth itself is exempt so the UI can submit the token.
+  // /api/system/info is exempt so the version banner can render at the
+  // token-prompt screen without a session.
+  if (authEnabled() && pathname !== '/api/auth' && pathname !== '/api/system/info') {
+    if (!isValidSession(sessionFromRequest(req))) {
+      return new Response('Unauthorized', { status: 401 })
+    }
+  }
 
   for (const route of allRoutes) {
     if (route.method !== req.method) continue
