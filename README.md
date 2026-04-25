@@ -127,6 +127,23 @@ Persistent memory survives restarts and is completely independent of the room me
 
 ---
 
+### Room Summary & Compression
+
+Every room has an evolving **summary** (running description of the conversation) and a **compression** mechanism that keeps context windows bounded as the room grows. Both are per-room, configurable, and streamed live.
+
+**Summary** — an LLM-generated running description of the room. Re-runs on a configurable schedule (time interval *or* message count), or on demand via the 🗜 room-header control. Aggressiveness is `low` / `medium` / `high`. An optional model override can be set per room.
+
+**Compression** — keeps the last `X` messages fresh. Once the uncompressed tail reaches `X + Y`, the oldest `Y` messages are folded into a single evolving `room_summary` at the top of the history and their IDs are tracked in `compressedIds`. The previous summary is replaced, not chained. Agents see this as `[Room Summary]` at the top of their room context via `context-builder.ts`.
+
+- **UI** — the 🗜 button in the room header reveals `⚙` (config), `🔍` (inspect with live deltas), `↻` (regenerate). First open auto-generates if no output exists.
+- **REST** — `GET/PUT /api/rooms/:name/summary-config`, `GET /api/rooms/:name/summary`, `POST /api/rooms/:name/summary/regenerate` (body: `{ target: 'summary' | 'compression' | 'both' }`).
+- **WebSocket** — `set_summary_config`, `regenerate_summary`; lifecycle events `summary_run_started` / `summary_run_delta` / `summary_run_completed` / `summary_run_failed`.
+- **Snapshot** — persisted as part of `SNAPSHOT_VERSION = 11`.
+
+This feature replaces the earlier message-cap pruning and per-agent history compression, which were removed in the same change.
+
+---
+
 ### Skills
 
 A skill is a reusable behavioral template stored as a markdown file. Skills tell agents *how to approach* a category of task — they shape reasoning, not just capability.

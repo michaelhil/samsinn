@@ -37,7 +37,7 @@ Runtime is **Bun** (required ≥1.0). Do not assume Node — some code uses `Bun
 
 ## Architecture (big picture)
 
-Samsinn is a multi-agent room-based chat system with three delivery modes and two front-doors (HTTP+WS browser UI, or MCP server).
+Samsinn is a multi-agent room-based chat system with two delivery modes (`broadcast`, `manual`) plus a macro overlay, and two front-doors (HTTP+WS browser UI, or MCP server).
 
 ### The one server rule
 
@@ -47,8 +47,9 @@ Samsinn is a multi-agent room-based chat system with three delivery modes and tw
 
 - `house.ts` — the root singleton owning all rooms and agents; every request goes through it
 - `room.ts` — membership, messages, mute/pause state; `room-macros.ts` holds macro orchestration state; `addressing.ts` resolves `[[AgentName]]` mentions
-- `delivery.ts` + `delivery-modes.ts` — decides which agents receive each posted message (broadcast / macro / directed)
-- `snapshot.ts` — persistence (load/save to `data/snapshot.json`). Bumping `SNAPSHOT_VERSION` requires a migration path
+- `delivery.ts` + `delivery-modes.ts` — decides which agents receive each posted message. Modes: `broadcast` (all eligible) and `manual` (humans + sender only; AI peers activated explicitly). Macro step delivery is an **overlay** on top of the mode, not a mode itself. `[[AgentName]]` / `[[tag:X]]` addressing overrides in all modes.
+- `snapshot.ts` — persistence (load/save to `data/snapshot.json`). Current `SNAPSHOT_VERSION = 11`. Bumping requires a migration path
+- `summary-engine.ts` + `summary-scheduler.ts` — per-room running summary + compression. Two independent schedules (time and message-count) per target (`summary` vs `compression`). Compression keeps last X fresh and folds older Y into a single evolving `room_summary` at the top of history; IDs tracked in `room.compressedIds`. Surfaced via 🗜 room-header control, `/api/rooms/:name/summary-config|summary|summary/regenerate`, and `summary_run_*` WS events. This replaced the earlier message-cap pruning and per-agent history compression
 - `artifact-store.ts` + `artifact-type-registry.ts` + `artifact-types/*` — pluggable per-room artifacts (task-list, macro, document, poll, mermaid). New artifact types register themselves via the registry pattern
 - `types/` — split into domain modules (`agent.ts`, `room.ts`, `artifact.ts`, `llm.ts`, `ws-protocol.ts`, etc). **Import from the specific submodule**, not a barrel
 
@@ -103,7 +104,7 @@ Wraps the same `House` object for external LLMs. Tool handlers live in `tools/*-
 - **No mocks / stubs / placeholder code** — see `memory/feedback_no_mocks.md`. Use real implementations or real test fixtures
 - **File size** — recent refactors split files approaching 500+ lines. Keep new files focused; split when a file grows beyond industry norms
 - **Snapshot compatibility** — changes to persisted shapes require bumping version + migration in `snapshot.ts`
-- **Three delivery modes** — `broadcast`, `macro`, plus staleness-based (see `delivery-modes.ts`). Any new delivery behavior should plug into that switch, not branch around it
+- **Two delivery modes + macro overlay** — `broadcast` and `manual` (see `delivery-modes.ts`). Macros are an orchestration overlay that works on top of either mode. Any new delivery behavior should plug into the mode switch or the overlay, not branch around them
 
 ## Docs worth reading before non-trivial work
 

@@ -1,12 +1,12 @@
 # Causality Tracking — Design Document
 
+> **Status (2026-04):** V1 (`inReplyTo` stamping + LLM rendering) is implemented — see `src/agents/ai-agent.ts`, `src/agents/evaluation.ts`, `src/agents/context-builder.ts`, `src/core/types/messaging.ts`. The V2 tombstone section below is **historical**: the message-cap pruning it was designed to fix was removed in commit 33aad8b in favour of per-room summary + compression (`src/core/summary-engine.ts`, `src/core/summary-scheduler.ts`). `compressedIds` still exists on Room, but is now driven by the new compression path, not by a silent splice. Read V2 as background only.
+
 ## Problem Statement
 
 Multi-agent room conversations are stored as flat timelines (`Message[]`). When an agent receives several messages while evaluating (they buffer in `incoming`), its response is causally linked to all of them — but the stored record only shows chronological order. There is no way to reconstruct who was responding to whom, especially when multiple agents respond to the same message independently, or when one agent's response is a joint reply to messages from several others.
 
 The missing structure is a **directed acyclic graph (DAG)**: each message can have multiple parents (the buffered cluster that triggered it), and each message can have multiple children (all agents that independently responded to it). The current linear array is a degenerate case of this graph.
-
-A secondary, already-active problem: Room.post() silently splices old messages when the room hits 500 messages. If `inReplyTo` IDs reference spliced messages, those references become silently unresolvable. The tombstone design must be in place before causality stamping is used in high-traffic rooms.
 
 ---
 
