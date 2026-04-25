@@ -1,8 +1,8 @@
 # Samsinn
 
-**A multi-agent collaboration system.** Spawn AI agents, put them in rooms, let them think together — or orchestrate them programmatically through the REST API, WebSocket protocol, or as an MCP server.
+**A multi-agent collaboration system.** Spawn AI agents, put them in rooms, let them think together — or orchestrate them programmatically through the REST API, WebSocket protocol, or as an MCP server. Run as a personal sandbox locally, or self-host on a small VPS with one isolated *instance* per user.
 
-> v0.6.0 — [Changelog](#changelog)
+> v0.7.0 — [Changelog](#changelog) · [Deploy runbook](deploy/RUNBOOK.md)
 
 ---
 
@@ -15,6 +15,7 @@
 - **Self-extending agents** — agents create Skills (behavioral templates) and write new tools at runtime, making the system grow its own capabilities
 - **Embed in your own LLM workflow** — run headless as an MCP server; external LLMs orchestrate everything via 23 tools
 - **Integrate programmatically** — full REST API + WebSocket protocol for building your own UI or automation
+- **Self-host with multi-instance isolation** — one Bun process serves many independent sandboxes, each cookie-bound to its own user. Manage them from Settings → Instances (list, switch, create, delete, reset). See [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md) for the Hetzner CAX11 (~€4/mo) deploy path.
 
 ---
 
@@ -42,11 +43,9 @@ Open **http://localhost:3000** in your browser, enter your name, and you're in.
 | Dependency | Version | Notes |
 |---|---|---|
 | [Bun](https://bun.sh) | ≥ 1.0 | Runtime and package manager |
-| [Ollama](https://ollama.ai) | any | Runs AI models locally |
+| [Ollama](https://ollama.ai) | optional | Runs AI models locally; remote via `OLLAMA_URL` |
 
-Ollama can run remotely — set `OLLAMA_URL=http://your-server:11434`.
-
-No cloud services, no API keys, no accounts. Everything runs locally.
+Cloud providers (Anthropic, Gemini, Groq, Cerebras, OpenRouter, Mistral, SambaNova) are also supported via API keys configurable in Settings → Providers and stored at `$SAMSINN_HOME/providers.json` (mode 0600). Ollama-only is fine — keys are optional and never required to start.
 
 ---
 
@@ -650,89 +649,65 @@ Models with native function-calling (e.g. `qwen2.5`, `llama3.1`) use the OpenAI 
 
 ```
 src/
-  core/
-    types.ts              — All type definitions (Message, Room, Agent, Macro, Todo, …)
-    room.ts               — Room: messages, member management, delivery dispatch
-    room-todos.ts         — Per-room todo store (CRUD operations)
-    room-macros.ts         — Per-room macro store (macro lifecycle + step advancement)
-    house.ts              — House: room collection + house-level prompts
-    delivery.ts           — routeMessage(): routes to rooms and agent DMs
-    delivery-modes.ts     — Broadcast and macro delivery implementations
-    addressing.ts         — [[AgentName]] directed addressing parser
-    tool-registry.ts      — Tool store: register, registerAll, get, list, has
-    snapshot.ts           — System serialisation + versioned restore (JSON file)
-    names.ts              — Name uniqueness and case-insensitive lookups
-  agents/
-    ai-agent.ts           — AI agent factory: AgentHistory, ReAct loop
-    concurrency.ts        — Agent concurrency manager: generation tracking + idle detection
-    human-agent.ts        — Human agent factory: WebSocket relay
-    context-builder.ts    — LLM context assembly: history + prompts + tools + todos
-    evaluation.ts         — LLM call + tool execution loop (with result truncation)
-    team.ts               — Agent collection
-    actions.ts            — Room join/leave with visible messages
-    spawn.ts              — Agent creation + registration + tool wiring
-    shared.ts             — Shared utilities (type guards, metadata helpers)
-  llm/
-    ollama.ts             — Ollama HTTP client with timing
-    tool-capability.ts    — Per-model native tool-calling detection + cache
-  tools/
-    built-in/             — 19 built-in tools, grouped by domain
-      room-tools.ts       — list_rooms, create/delete_room, set_room_prompt, pause_room, set_delivery_mode, add/remove_from_room
-      agent-tools.ts      — list_agents, query_agent, mute_agent, delegate, get_my_context
-      todo-tools.ts       — list_todos, add_todo, update_todo
-      utility-tools.ts    — get_time, post_to_room, get_room_history
-    format.ts             — Text-protocol tool formatting for system prompts
-    loader.ts             — Filesystem tool discovery (./tools/, ~/.samsinn/tools/)
-  skills/
-    loader.ts             — Skill discovery, frontmatter parsing, bundled tool loading
-  integrations/
-    mcp/
-      client.ts           — MCP client: consume external tool servers
-      server.ts           — MCP server: expose Samsinn as 23 tools + 3 resources
-      tools/              — MCP tool implementations (room, agent, todo, message)
-      resources.ts        — MCP resource definitions (rooms, agents, messages)
-  api/
-    server.ts             — Bun.serve: HTTP + WebSocket + static file serving
-    http-routes.ts        — REST dispatcher (routes to api/routes/ handlers)
-    ws-handler.ts         — WebSocket session management + command dispatch
-    routes/               — REST handlers grouped by resource
-      rooms.ts            — /api/rooms and sub-paths
-      agents.ts           — /api/agents and sub-paths
-      messages.ts         — /api/messages
-      todos.ts            — /api/rooms/:name/todos
-      house.ts            — /api/house/*, /api/models, /api/tools
-    ws-commands/          — WebSocket command handlers grouped by domain
-      room-commands.ts    — create/delete/join/leave room, delivery mode, pause, mute
-      agent-commands.ts   — spawn, remove, mute agent
-      macro-commands.ts    — add/remove/start/cancel macro
-      todo-commands.ts    — add/update/remove todo
-      message-commands.ts — post message
-  ui/
-    index.html            — Browser UI (Tailwind CSS + marked + DOMPurify)
-    modules/
-      app.ts              — Application orchestrator
-      ws-client.ts        — WebSocket client with reconnect
-      ui-renderer.ts      — DOM rendering (messages, agents, rooms, macros, todos)
-      modal.ts            — Modal dialogs
-  main.ts                 — createSystem() factory + entry point
-  bootstrap.ts            — Startup orchestration (snapshot, tools, MCP, server)
-  index.ts                — Library exports
+  core/                   — House, Room, Team, snapshot, registry, paths, artifacts
+  agents/                 — AI + human agents, spawn, evaluation, history, concurrency
+  llm/                    — ProviderRouter, gateways (Ollama + OpenAI-compat cloud), errors
+  tools/                  — Built-in tools + filesystem loader for drop-ins
+  skills/                 — SKILL.md loader, packs
+  integrations/mcp/       — MCP client (consume) + MCP server (expose 37+ tools)
+  api/                    — Bun.serve, REST routes, WS handler, instance cookie, rate limiter
+  logging/                — JSONL sink with 2-file rotation
+  ui/                     — Browser UI: index.html + modules/*.ts (manual DOM, nanostores)
+  main.ts                 — createSystem() factory
+  bootstrap.ts            — Startup: shared runtime, registry, janitor, server
 
-tools/                    — External filesystem tools (auto-loaded at startup)
-  memory.ts               — think, note, my_notes, remember, recall, forget
-  compute.ts              — calculate, json_extract, format_table
-  web.ts                  — web_search, fetch_url
-  research.ts             — arxiv_search, doi_lookup, semantic_scholar
-
-docs/
-  tools.md                — Full tool reference with parameters, usage, return values
+tools/                    — External drop-in tools (auto-loaded at startup)
+deploy/                   — Caddyfile, samsinn.service, RUNBOOK.md
+docs/                     — User docs (tools, packs, logging, artifacts, getting-started)
+notes/research/           — Design exploration & research notes (not user-facing)
 ```
+
+`bun run check` and `find src -type f -name '*.ts'` are the source of truth — this tree is intentionally high-level so it doesn't drift.
+
+---
+
+## Multi-instance ("sandboxes")
+
+Samsinn supports many independent *instances* in one Bun process. Each instance has its own rooms, agents, message history, macros, todos, snapshot, and per-instance log directory. Instances share only the LLM provider gateways (one ProviderRouter, one Ollama gateway), provider keys, packs, and skills — i.e. things that are expensive to build and shouldn't be duplicated.
+
+**How a request is bound to an instance.** A signed `samsinn_instance` HttpOnly cookie carries a 16-character id. First-time visitors get a fresh id auto-assigned; subsequent requests reuse it. `?join=<id>` on any URL switches the cookie and 303-redirects to a clean URL — that's how you share an instance.
+
+**Layout on disk** (override the root with `SAMSINN_HOME`):
+
+```
+$SAMSINN_HOME/                              ← default ~/.samsinn (dev) or /var/lib/samsinn (deploy)
+  providers.json                            ← provider keys (shared across instances)
+  packs/<namespace>/                        ← shared packs
+  skills/<name>/                            ← shared skills
+  tools/                                    ← shared drop-in tools
+  instances/
+    <id>/
+      snapshot.json                         ← per-instance state
+      logs/*.jsonl                          ← per-instance logging (2-file ring, 50 MB each)
+      memory/<agentName>/{notes.log,facts.json}
+    .trash/<id>-<unix-ts>/                  ← evicted/reset, purged after 7 days
+```
+
+**The Instances modal** (Settings → Instances) lets you list every sandbox on disk, switch between them, create new ones, reset the current one (10-second cancellable countdown), and bulk-delete others. The current instance has a "Reset" action; non-current rows have "Switch" / "Delete". Click the header `Delete` button to enter bulk-delete mode (checkboxes appear pre-checked).
+
+**Lifecycle.** Idle instances are evicted from memory after `SAMSINN_IDLE_MS` (default 30 min): drained, snapshot-flushed, dropped. The next request lazy-reloads from disk. The `instance-cleanup` janitor demotes long-idle directories to `.trash/` and purges trash after `SAMSINN_TRASH_TTL_MS` (default 7 days). Per-instance reset (`/api/system/reset`) trashes the directory but preserves the cookie's id, so the user reconnects to a fresh empty House under the same id.
+
+**Resource caps and rate limits.** A per-IP sliding-window limiter (5 requests / 60 s, env-tunable) covers `POST /api/instances` and `POST /api/bugs`. Log files rotate at `SAMSINN_LOG_MAX_BYTES` (default 50 MB) into a 2-file ring (`<base>.jsonl` + `<base>.1.jsonl`) — per-instance footprint capped at 100 MB.
+
+**Bug reporting.** Settings → Report bug (or the bug icon in the room header) opens a form that submits to `POST /api/bugs`. The server uses `SAMSINN_GH_TOKEN` to create a GitHub issue on `SAMSINN_GH_REPO` (default `michaelhil/samsinn`). Disabled if the token is unset. The browser never sees the token; submissions include only the user-typed title/description plus app version + browser UA.
+
+For full deployment instructions (Hetzner CAX11, systemd unit, Caddy reverse proxy, `/etc/samsinn/env`, backup pattern, day-2 ops) see [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).
 
 ---
 
 ## Persistence
 
-State is auto-saved to `data/snapshot.json` after each message (debounced 5 seconds). On next startup, rooms, agents, message history, macros, todos, mute state, and delivery modes are all restored exactly as they were.
+State is auto-saved to `$SAMSINN_HOME/instances/<id>/snapshot.json` after each message (debounced 5 seconds). On next startup, rooms, agents, message history, macros, todos, mute state, and delivery modes are all restored exactly as they were.
 
 A graceful shutdown (`Ctrl+C`) drains any in-flight agent evaluations, then flushes the snapshot immediately.
 
@@ -779,6 +754,7 @@ Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapsh
 
 | Version | Changes |
 |---|---|
+| v0.7.0 | **Multi-instance** — one Bun process serves many cookie-bound sandboxes; `$SAMSINN_HOME/instances/<id>/`, lazy load + idle eviction + janitor + 7-day trash purge; per-instance reset replaces whole-process exit. **Instances UI** under Settings (list / switch / create / delete + bulk delete + reset). **Room switcher** dropdown next to room name. **Visibility popover** — eye icon hides/shows room-header buttons (localStorage), doubles as a quick-access bar. **Bug reporting** to GitHub Issues via server-side PAT (`SAMSINN_GH_TOKEN`). **Deploy mode** — `SAMSINN_AUTH_TOKEN` shared-token auth, systemd unit + Caddyfile + Hetzner CAX11 RUNBOOK. HTTP security headers, per-IP rate limiter, log rotation 2-file ring (env-tunable). |
 | v0.6.0 | File-based skills system (Claude Skills compatible SKILL.md format with bundled tools); runtime code generation (`write_skill`, `write_tool`, `list_skills`); dynamic tool resolution (`refreshTools` — agents gain new tools without respawning); dedicated `=== SKILLS ===` prompt section; fix: `ToolContext.llm` now tracks current model instead of spawn-time model |
 | v0.5.14 | Unified `AgentHistory` struct (rooms/DMs/incoming in one place); flush-on-pass (agents never re-evaluate passed messages); `ConcurrencyManager` extraction; snapshot migration framework; tool result truncation (4,000 char default, configurable); comprehensive file splitting (tools/built-in/, api/routes/, api/ws-commands/, mcp/tools/); config object consolidation; delivery-mode bug fix; graceful shutdown with eval drain |
 | v0.5.13 | 19 built-in tools, 16 external tools (memory/compute/web/research), structured tool descriptions with usage/returns fields, filesystem tool loader, `delegate` tool with todo integration |
@@ -793,21 +769,20 @@ Tests cover: room logic, delivery modes, agent behaviour, tool execution, snapsh
 
 ## Security posture
 
-Samsinn is designed for **local, single-user operation**. The HTTP + WebSocket
-surface has **no authentication** — any client that can reach the port has
-full read/write access to rooms, agents, prompts, provider keys, and tool
-source code (on loopback). Ship accordingly:
+Samsinn supports two operating modes:
 
-- Bind only to `localhost` / loopback. The default does this.
-- Do not expose the port to the public internet.
-- If you put this behind a reverse proxy, add authentication at the proxy.
-- Provider API keys live in `~/.samsinn/providers.json` (mode 0600) and are
-  never returned raw via the admin endpoints. The `maskKey` helper keeps
-  them out of logs and network responses.
-- `GET /api/tools/:name` serves raw TypeScript source for external /
-  skill-bundled tools, but only when the request originates from the
-  loopback interface (`127.0.0.1` / `::1` / `::ffff:127.0.0.1`). If you
-  run Samsinn on a non-loopback bind, the source field is omitted.
+**Personal mode (default).** No `SAMSINN_AUTH_TOKEN` set. Any client that can reach the port has full access — bind to `localhost` only. Treat it like a dev server.
+
+**Deploy mode.** `SAMSINN_AUTH_TOKEN` set in `/etc/samsinn/env`. The HTTP + WebSocket surface requires a session cookie issued by `POST /api/auth` against the shared token. The systemd unit + Caddyfile in `deploy/` set this up; see [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).
+
+**Shared by both modes:**
+
+- Provider API keys live in `$SAMSINN_HOME/providers.json` (mode 0600) and are never returned raw via the admin endpoints. The `maskKey` helper keeps them out of logs and network responses.
+- `GET /api/tools/:name` serves raw TypeScript source for external / skill-bundled tools, but only when the request originates from loopback (`127.0.0.1` / `::1` / `::ffff:127.0.0.1`). On a non-loopback bind the source field is omitted.
+- Bun.serve sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` on every response. The Caddyfile in `deploy/` adds CSP + HSTS on top.
+- Instance creation and bug submission share a per-IP sliding-window rate limiter (5 / 60 s, env-tunable via `SAMSINN_CREATE_RATE_LIMIT` / `SAMSINN_CREATE_RATE_WINDOW_MS`).
+- The `samsinn_instance` cookie is HttpOnly, SameSite=Lax, and Secure when behind an HTTPS proxy (`X-Forwarded-Proto: https`) or `SAMSINN_SECURE_COOKIES=1`.
+- Bug reports never include conversation content. Auto-attached context is limited to app version + browser UA.
 
 ## License
 

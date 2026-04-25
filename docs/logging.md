@@ -66,7 +66,7 @@ get_logging()  →  {enabled, dir, sessionId, kinds, currentFile, stats: {eventC
 | Control | Env var | REST field | Default |
 |---|---|---|---|
 | On/off | `SAMSINN_LOG_ENABLED=1` | `enabled: true` | `false` |
-| Output directory | `SAMSINN_LOG_DIR` | `dir` | `~/.samsinn/logs/` |
+| Output directory | `SAMSINN_LOG_DIR` | `dir` | `$SAMSINN_HOME/instances/<id>/logs/` |
 | Session identifier | `SAMSINN_SESSION_ID` | `sessionId` | `session-<ts>-<shortId>` |
 | Kind filter | `SAMSINN_LOG_KINDS` (comma-separated) | `kinds: string[]` | `["*"]` |
 
@@ -76,13 +76,15 @@ Changing `dir` at runtime behaves the same way — old file closes, new file ope
 
 ## File layout
 
+In multi-instance deploys, each instance writes to its own log directory under `$SAMSINN_HOME/instances/<id>/logs/`. The `dir` config above is the per-instance default; override only if you want to merge or relocate.
+
 ```
 <dir>/
-  <sessionId>.jsonl       ← first file
-  <sessionId>.1.jsonl     ← rotated when first exceeds 100 MB
-  <sessionId>.2.jsonl
-  ...
+  <sessionId>.jsonl       ← active file
+  <sessionId>.1.jsonl     ← rolled (rotation on overflow)
 ```
+
+Rotation is a 2-file ring: when the active file exceeds `SAMSINN_LOG_MAX_BYTES` (default 50 MB), any prior `.1.jsonl` is removed, the active is renamed to `.1`, and a fresh active is started. Per-instance footprint is therefore capped at 2 × the threshold (~100 MB by default).
 
 Each line is one JSON object:
 

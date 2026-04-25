@@ -212,5 +212,6 @@ You now know the core flow. Here's what everything else in the UI does — skim,
 - **Add an artifact type.** [`docs/artifact-modules.md`](artifact-modules.md) — the task-list / document / poll / mermaid system is pluggable.
 - **Headless / MCP.** Run Samsinn as an MCP server so another LLM can orchestrate everything through 23 tools: `bun run headless`. See the README section on MCP integration.
 - **REST + WebSocket API.** Everything the UI does is available as HTTP + WS — see the README for endpoints.
+- **Multiple sandboxes.** Settings → Instances lets you list, create, switch, and delete isolated session instances. The current cookie binds you to one; share a link with `?join=<id>` to hand someone else access. See the README "Multi-instance" section and [`deploy/RUNBOOK.md`](../deploy/RUNBOOK.md).
 
 When something breaks or confuses you, the **📋 context inspector** on any message is almost always the fastest way to understand why. Start there.
