@@ -45,11 +45,13 @@ const fetchList = async (): Promise<{ instances: InstanceRow[]; currentId: strin
 
 const confirmDelete = (id: string): Promise<boolean> =>
   new Promise(resolve => {
-    const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;inset:0;background:var(--shadow-overlay);display:flex;align-items:center;justify-content:center;z-index:10001'
-    const card = document.createElement('div')
-    card.style.cssText = 'background:var(--surface);padding:20px;border-radius:8px;box-shadow:0 4px 24px var(--shadow-overlay);max-width:440px;width:90%'
-    card.innerHTML = `
+    // Use a <dialog> with showModal() so this stacks on the browser's top
+    // layer above the parent Instances <dialog>. A z-indexed div sits below
+    // any open native modal regardless of z-index.
+    const dlg = document.createElement('dialog')
+    dlg.className = 'rounded-lg shadow-xl p-0 bg-surface text-text'
+    dlg.style.cssText = 'max-width:440px;width:90%;padding:20px;border:none'
+    dlg.innerHTML = `
       <h2 style="margin:0 0 8px;font-size:16px;font-weight:600;color:var(--text-strong)">⚠ Delete instance?</h2>
       <p style="margin:0 0 12px;font-size:13px;line-height:1.5;color:var(--text)">
         Wipes this sandbox's snapshot and per-instance data. Same blast radius as Reset, but the instance is removed from the list rather than re-created empty under the same id. Type the last 6 characters of the id to confirm:
@@ -61,20 +63,27 @@ const confirmDelete = (id: string): Promise<boolean> =>
         <button type="button" id="del-ok" disabled style="padding:8px 14px;border:none;border-radius:4px;background:var(--danger);color:#fff;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.5">Delete</button>
       </div>
     `
-    overlay.appendChild(card)
-    document.body.appendChild(overlay)
-    const input = card.querySelector<HTMLInputElement>('#del-confirm')!
-    const okBtn = card.querySelector<HTMLButtonElement>('#del-ok')!
-    const cancelBtn = card.querySelector<HTMLButtonElement>('#del-cancel')!
+    document.body.appendChild(dlg)
+    const input = dlg.querySelector<HTMLInputElement>('#del-confirm')!
+    const okBtn = dlg.querySelector<HTMLButtonElement>('#del-ok')!
+    const cancelBtn = dlg.querySelector<HTMLButtonElement>('#del-cancel')!
     const expected = id.slice(-6)
+    const close = (result: boolean) => {
+      dlg.close()
+      dlg.remove()
+      resolve(result)
+    }
     input.oninput = () => {
       const match = input.value.trim() === expected
       okBtn.disabled = !match
       okBtn.style.cursor = match ? 'pointer' : 'not-allowed'
       okBtn.style.opacity = match ? '1' : '0.5'
     }
-    okBtn.onclick = () => { overlay.remove(); resolve(true) }
-    cancelBtn.onclick = () => { overlay.remove(); resolve(false) }
+    okBtn.onclick = () => close(true)
+    cancelBtn.onclick = () => close(false)
+    // Esc key triggers <dialog>'s native cancel event.
+    dlg.addEventListener('cancel', () => close(false))
+    dlg.showModal()
     setTimeout(() => input.focus(), 0)
   })
 
