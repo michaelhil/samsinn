@@ -8,6 +8,7 @@
 // ============================================================================
 
 import { createSystem } from './main.ts'
+import { createSharedRuntime } from './core/shared-runtime.ts'
 import { DEFAULTS } from './core/types/constants.ts'
 import { registerAllMCPServers } from './integrations/mcp/client.ts'
 import { existsSync } from 'node:fs'
@@ -46,7 +47,11 @@ export const bootstrap = async (): Promise<void> => {
 
   const providerConfig = parseProviderConfig({ fileStore })
   const providerSetup = buildProvidersFromConfig(providerConfig)
-  const system = createSystem({ providerConfig, providerSetup })
+  // Build the shared runtime once. Phase D will pass this to many
+  // createSystem calls (one per cookie-bound instance). Today bootstrap
+  // creates a single instance from it — but the wiring is right.
+  const shared = createSharedRuntime({ providerConfig, providerSetup })
+  const system = createSystem({ shared })
 
   const pkg = await Bun.file(`${import.meta.dir}/../package.json`).json() as { version: string }
   console.log(`Samsinn v${pkg.version}${headless ? ' (headless)' : ''}`)

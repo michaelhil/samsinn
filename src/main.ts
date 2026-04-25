@@ -27,10 +27,10 @@ import { createTeam } from './agents/team.ts'
 import { createMessageRouter } from './core/delivery.ts'
 import type { LLMGateway } from './llm/gateway.ts'
 import type { ProviderRouter } from './llm/router.ts'
-import { buildProvidersFromConfig, type ProviderSetupResult } from './llm/providers-setup.ts'
-import { parseProviderConfig, type ProviderConfig } from './llm/providers-config.ts'
-import { createProviderKeys, type ProviderKeys } from './llm/provider-keys.ts'
-import { mergeWithEnv } from './llm/providers-store.ts'
+import type { ProviderSetupResult } from './llm/providers-setup.ts'
+import type { ProviderConfig } from './llm/providers-config.ts'
+import type { ProviderKeys } from './llm/provider-keys.ts'
+import { createSharedRuntime, type SharedRuntime } from './core/shared-runtime.ts'
 import type { ProviderGateway } from './llm/provider-gateway.ts'
 import { createToolRegistry } from './core/tool-registry.ts'
 import { spawnAIAgent, spawnHumanAgent, buildToolSupport, type SpawnOptions } from './agents/spawn.ts'
@@ -166,22 +166,23 @@ export interface LoggingHandle {
 }
 
 export interface CreateSystemOptions {
+  // Pre-built shared runtime. When passed, createSystem skips internal
+  // provider construction and uses these. Phase D's HouseRegistry passes
+  // one shared runtime to many createSystem calls — that's the whole point.
+  readonly shared?: SharedRuntime
+  // Legacy: when shared is absent, build from these (preserves test API).
   readonly providerConfig?: ProviderConfig
   readonly providerSetup?: ProviderSetupResult
 }
 
 export const createSystem = (options: CreateSystemOptions = {}): System => {
-  const providerConfig = options.providerConfig ?? parseProviderConfig()
-  // Build keys registry from the merged boot config so runtime key edits can
-  // flow into the gateways without restart. Tests pass a pre-built
-  // providerSetup and skip this by never mutating the keys object.
-  const providerKeys = createProviderKeys(mergeWithEnv({ version: 1, providers: {} }, { env: {} as Record<string, string | undefined> }))
-  // Seed from providerConfig.cloud so boot-time env/stored keys land in the
-  // mutable registry. This loop handles both env and stored sources.
-  for (const [name, cc] of Object.entries(providerConfig.cloud)) {
-    if (cc?.apiKey) providerKeys.set(name, cc.apiKey)
-  }
-  const providerSetup = options.providerSetup ?? buildProvidersFromConfig(providerConfig, { providerKeys })
+  // Either reuse a shared runtime (multi-instance) or build one inline
+  // (legacy single-tenant + tests). The result is the same shape either way.
+  const shared: SharedRuntime = options.shared ?? createSharedRuntime({
+    ...(options.providerConfig ? { providerConfig: options.providerConfig } : {}),
+    ...(options.providerSetup ? { providerSetup: options.providerSetup } : {}),
+  })
+  const { providerConfig, providerKeys, providerSetup } = shared
   const { router: llm, ollama, ollamaRaw, gateways } = providerSetup
   const team = createTeam()
 
