@@ -115,7 +115,7 @@ describe('WS Handler', () => {
     system = makeSystem()
     const human = createHumanAgent({ name: 'Human' }, () => {})
     system.team.addAgent(human)
-    session = { agent: human, lastActivity: Date.now() }
+    session = { agent: human, instanceId: 'test0123456789ab', lastActivity: Date.now() }
     wsManager = createWSManager(system)
   })
 

@@ -195,7 +195,7 @@ export const bootstrap = async (): Promise<void> => {
     const { createServer } = await import('./api/server.ts')
     createServer(system, {
       port: parseInt(process.env.PORT ?? String(DEFAULTS.port), 10),
-      ...(ephemeral ? {} : { onAutoSave: autoSaver.scheduleSave }),
+      ...(ephemeral ? {} : { autoSaver }),
       onResetCommit,
     })
   }

@@ -94,6 +94,10 @@ export interface SystemRegistry {
   readonly shutdown: () => Promise<void>
   // For tests + boundary handlers that need to know the configured timer.
   readonly idleMs: () => number
+  // Boundary access to the in-memory autosaver for an active instance.
+  // wireSystemEvents needs it to schedule saves from broadcast callbacks.
+  // Returns null if the instance is not currently in memory.
+  readonly autoSaverFor: (id: string) => AutoSaver | null
 }
 
 // ============================================================================
@@ -113,54 +117,12 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
     await Promise.all(aiAgents.map(a => Promise.race([a.whenIdle(), timeout])))
   }
 
-  // Attach an autosaver to a system so any state change gets debounced
-  // to disk. Wires into the system's onMessagePosted etc. by relying on
-  // the per-system event-callback layer.
-  const attachAutoSaver = (system: System, snapshotPath: string): AutoSaver => {
-    const saver = createAutoSaver(system, snapshotPath)
-    // The boundary layer (Phase F) wires its own callbacks; here we only
-    // ensure scheduleSave fires on every mutation. We do this by chaining
-    // onto whatever the boundary already set, via a minimal proxy.
-    //
-    // The pattern: capture the boundary's primary cb, replace with one
-    // that calls the boundary cb then schedules save. If no boundary cb
-    // is set yet, the registry-installed cb is what runs.
-    //
-    // We trigger save on the highest-frequency mutations: messages,
-    // delivery-mode, mode-auto-switch, macro events, artifact changes,
-    // membership, room create/delete, bookmarks. Same set as the existing
-    // bootstrap.ts auto-save callbacks.
-    const wrapPrimary = <T extends (...args: never[]) => void>(
-      setter: (cb: T) => void,
-      schedule = true,
-    ) => {
-      let prev: T | undefined
-      const wrapped = ((...args: Parameters<T>) => {
-        prev?.(...args)
-        if (schedule) saver.scheduleSave()
-      }) as T
-      // Capture any pre-existing primary by overriding setter once.
-      const realSetter = setter
-      realSetter(wrapped)
-      // Note: if Phase F's wireSystemEvents calls these setters AFTER us,
-      // it'll replace our wrapper — auto-save is then the boundary's job.
-      // The boundary documentation must call saver.scheduleSave from its
-      // own callbacks. We'll wire that explicitly in Phase F.
-      void prev
-    }
-    // Apply the wrappers — these are no-ops if Phase F overrides them
-    // afterwards, but safe in tests + the early lifecycle.
-    wrapPrimary(system.setOnMessagePosted)
-    wrapPrimary(system.setOnDeliveryModeChanged)
-    wrapPrimary(system.setOnMacroEvent)
-    wrapPrimary(system.setOnMacroSelectionChanged)
-    wrapPrimary(system.setOnArtifactChanged)
-    wrapPrimary(system.setOnRoomCreated)
-    wrapPrimary(system.setOnRoomDeleted)
-    wrapPrimary(system.setOnMembershipChanged)
-    wrapPrimary(system.setOnBookmarksChanged)
-    return saver
-  }
+  // Build the per-instance autosaver. Callback wiring (which schedules
+  // save on each mutation) lives in src/api/wire-system-events.ts, which
+  // gets the saver via autoSaverFor(id). Phase F's onSystemCreated hook
+  // calls wireSystemEvents — that's the single source of save scheduling.
+  const buildAutoSaver = (_system: System, snapshotPath: string): AutoSaver =>
+    createAutoSaver(_system, snapshotPath)
 
   // Build a fresh System for `id`, restoring from snapshot if present.
   const buildSystem = async (id: string): Promise<{ system: System; autoSaver: AutoSaver }> => {
@@ -184,7 +146,7 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
       }
     }
 
-    const autoSaver = attachAutoSaver(system, paths.snapshot)
+    const autoSaver = buildAutoSaver(system, paths.snapshot)
 
     // Notify the registry's caller (e.g. WS broadcast wiring).
     opts.onSystemCreated?.(system, id)
@@ -329,6 +291,11 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
     await Promise.all(ids.map(evictOne))
   }
 
+  const autoSaverFor = (id: string): AutoSaver | null => {
+    const entry = map.get(id)
+    return entry ? entry.autoSaver : null
+  }
+
   return {
     getOrLoad,
     evictOne,
@@ -338,5 +305,6 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
     list,
     shutdown,
     idleMs: () => idleMs,
+    autoSaverFor,
   }
 }

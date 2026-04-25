@@ -8,19 +8,31 @@
 import type { System } from '../main.ts'
 import type { Message } from '../core/types/messaging.ts'
 import type { WSOutbound } from '../core/types/ws-protocol.ts'
+import type { AutoSaver } from '../core/snapshot.ts'
 import { DEFAULTS } from '../core/types/constants.ts'
 import { ensureUniqueName } from '../core/names.ts'
 import { authEnabled, isValidSession, sessionFromRequest } from './auth.ts'
 import { handleAPI } from './http-routes.ts'
 import { createWSManager, handleWSMessage, type WSData } from './ws-handler.ts'
+import { wireSystemEvents } from './wire-system-events.ts'
 import { resolve, normalize } from 'node:path'
+
+// Single-tenant placeholder instance ID used by the boot path until Phase F4
+// wires real per-cookie ids. Sessions are tagged with this; broadcastToInstance
+// then reaches every session (they all share the same id), preserving the
+// pre-multi-tenant broadcast semantics.
+const SINGLE_TENANT_INSTANCE_ID = 'singletontenantid'
 
 // === Server Config ===
 
 interface ServerConfig {
   readonly port?: number
   readonly uiPath?: string
-  readonly onAutoSave?: () => void
+  // The autosaver owned by bootstrap. wireSystemEvents calls scheduleSave()
+  // from each mutating callback. Optional so tests + ephemeral mode can
+  // skip persistence (autoSaver=undefined → save calls are no-ops via the
+  // optional chain in the wire helper).
+  readonly autoSaver?: AutoSaver
   /**
    * Invoked by the reset endpoint after the 10-second countdown ends.
    * Implementation must dispose the autoSaver, wipe state directories,
@@ -103,84 +115,21 @@ export const createServer = (system: System, config?: ServerConfig) => {
 
   const wsManager = createWSManager(system)
 
-  const triggerAutoSave = config?.onAutoSave ?? (() => {})
-
-  // Wraps a callback to trigger auto-save after it runs
-  const withAutoSave = <T extends unknown[]>(fn: (...args: T) => void) =>
-    (...args: T): void => { fn(...args); triggerAutoSave() }
-
-  // Wire room event callbacks to WebSocket broadcast
-  // All messages posted to any room are broadcast to all WS clients (UI always sees everything)
-  system.setOnMessagePosted(withAutoSave((_roomId, message) => {
-    wsManager.broadcast({ type: 'message', message })
-  }))
-
-  system.setOnTurnChanged((roomId, agentId, waitingForHuman) => {
-    const room = system.house.getRoom(roomId)
-    const agent = (typeof agentId === 'string') ? system.team.getAgent(agentId) : undefined
-    wsManager.broadcast({
-      type: 'turn_changed',
-      roomName: room?.profile.name ?? roomId,
-      agentName: agent?.name,
-      waitingForHuman,
-    })
-  })
-
-  system.setOnDeliveryModeChanged(withAutoSave((roomId, mode) => {
-    const room = system.house.getRoom(roomId)
-    wsManager.broadcast({
-      type: 'delivery_mode_changed',
-      roomName: room?.profile.name ?? roomId,
-      mode,
-      paused: room?.paused ?? false,
-    })
-  }))
-
-  system.setOnMacroEvent(withAutoSave((roomId, event, detail) => {
-    const room = system.house.getRoom(roomId)
-    const roomName = room?.profile.name ?? roomId
-    // TS can't narrow the generic event/detail pair at this call site — narrow manually.
-    switch (event) {
-      case 'started':
-        wsManager.broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string; readonly agentName: string } | undefined })
-        break
-      case 'step':
-        wsManager.broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string; readonly stepIndex: number; readonly agentName: string } | undefined })
-        break
-      case 'completed':
-      case 'cancelled':
-        wsManager.broadcast({ type: 'macro_event', roomName, event, detail: detail as { readonly macroId: string } | undefined })
-        break
-    }
-  }))
-
-  system.setOnArtifactChanged(withAutoSave((action, artifact) => {
-    wsManager.broadcast({ type: 'artifact_changed', action, artifact })
-  }))
-
-  system.setOnModeAutoSwitched((roomId, toMode, reason) => {
-    const room = system.house.getRoom(roomId)
-    wsManager.broadcast({
-      type: 'mode_auto_switched',
-      roomName: room?.profile.name ?? roomId,
-      toMode,
-      reason,
-    })
-  })
-
-  system.setOnMacroSelectionChanged(withAutoSave((roomId, macroArtifactId) => {
-    const room = system.house.getRoom(roomId)
-    wsManager.broadcast({
-      type: 'macro_selection_changed',
-      roomName: room?.profile.name ?? roomId,
-      macroArtifactId,
-    })
-  }))
-
-  // Bookmark mutations arrive via REST; the callback only needs to schedule
-  // a snapshot save — there is no WS broadcast (single-user admin surface,
-  // panel refetches on open).
-  system.setOnBookmarksChanged(withAutoSave(() => {}))
+  // Wire all per-system event slots — WS broadcasts + autosave scheduling.
+  // Single source of truth for callback wiring lives in wire-system-events.ts.
+  // For the single-tenant boot path, we tag broadcasts with a placeholder
+  // instance id; sessions also carry that id, so broadcastToInstance reaches
+  // all clients exactly as the previous global broadcast did. Phase F4
+  // replaces this call with registry.onSystemCreated wiring per cookie-bound
+  // System.
+  if (config?.autoSaver) {
+    wireSystemEvents(system, wsManager, config.autoSaver, SINGLE_TENANT_INSTANCE_ID)
+  } else {
+    // Ephemeral / test path: build a noop autosaver so wireSystemEvents
+    // can wire broadcasts without touching disk.
+    const noopSaver = { scheduleSave: () => {}, flush: async () => {}, dispose: () => {} }
+    wireSystemEvents(system, wsManager, noopSaver, SINGLE_TENANT_INSTANCE_ID)
+  }
 
   const server = Bun.serve<WSData>({
     port,
@@ -202,7 +151,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
 
         // Session token reconnect (same browser tab, brief disconnect)
         if (wsManager.sessions.has(sessionToken)) {
-          const upgraded = server.upgrade(req, { data: { sessionToken, reconnect: true } })
+          const upgraded = server.upgrade(req, { data: { sessionToken, instanceId: SINGLE_TENANT_INSTANCE_ID, reconnect: true } })
           return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
         }
 
@@ -220,7 +169,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
             }
           }
           const useToken = reclaimedToken ?? sessionToken
-          const upgraded = server.upgrade(req, { data: { sessionToken: useToken, reconnect: true, name } })
+          const upgraded = server.upgrade(req, { data: { sessionToken: useToken, instanceId: SINGLE_TENANT_INSTANCE_ID, reconnect: true, name } })
           return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
         }
 
@@ -228,7 +177,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
         const activeNames = system.team.listAgents().filter(a => !a.inactive).map(a => a.name)
         const assignedName = activeNames.includes(name) ? ensureUniqueName(name, activeNames) : name
 
-        const upgraded = server.upgrade(req, { data: { sessionToken, name: assignedName } })
+        const upgraded = server.upgrade(req, { data: { sessionToken, instanceId: SINGLE_TENANT_INSTANCE_ID, name: assignedName } })
         return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
       }
 
@@ -274,7 +223,7 @@ export const createServer = (system: System, config?: ServerConfig) => {
           },
         )
 
-        const session = { agent, lastActivity: Date.now() }
+        const session = { agent, instanceId: ws.data.instanceId, lastActivity: Date.now() }
         wsManager.sessions.set(ws.data.sessionToken, session)
         wsManager.wsConnections.set(ws.data.sessionToken, ws)
 

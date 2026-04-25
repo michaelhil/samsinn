@@ -25,11 +25,13 @@ import { sendError } from './ws-commands/types.ts'
 
 export interface ClientSession {
   readonly agent: HumanAgent
+  readonly instanceId: string         // which per-tenant House this session belongs to
   lastActivity: number
 }
 
 export interface WSData {
   sessionToken: string
+  instanceId: string                  // bound at upgrade from cookie
   name?: string
   reconnect?: boolean
 }
@@ -39,7 +41,13 @@ export interface WSData {
 export interface WSManager {
   readonly sessions: Map<string, ClientSession>
   readonly wsConnections: Map<string, { send: (data: string) => void }>
+  // Global broadcast — used for shared state (Ollama health, reset, etc.)
+  // that applies regardless of which instance a client belongs to.
   readonly broadcast: (msg: WSOutbound) => void
+  // Per-instance broadcast — only delivers to ws connections whose session
+  // has matching instanceId. Used by wireSystemEvents so an event fired in
+  // instance A doesn't reach instance B's clients.
+  readonly broadcastToInstance: (instanceId: string, msg: WSOutbound) => void
   readonly subscribeAgentState: (agentId: string, agentName: string) => void
   readonly unsubscribeAgentState: (agentId: string) => void
   readonly subscribeOllamaMetrics: (sessionToken: string) => void
@@ -59,83 +67,22 @@ export const createWSManager = (system: System): WSManager => {
     }
   }
 
-  // Wire system callbacks → WS broadcasts
-  system.setOnRoomCreated((profile) => {
-    broadcast({ type: 'room_created', profile })
-  })
-  system.setOnRoomDeleted((_roomId, roomName) => {
-    broadcast({ type: 'room_deleted', roomName })
-  })
-  system.setOnMembershipChanged((roomId, roomName, agentId, agentName, action) => {
-    broadcast({ type: 'membership_changed', roomId, roomName, agentId, agentName, action })
-  })
+  // Per-instance broadcast — filters wsConnections by session.instanceId
+  // so events fired in one tenant don't reach another tenant's clients.
+  const broadcastToInstance = (instanceId: string, msg: WSOutbound): void => {
+    const data = JSON.stringify(msg)
+    for (const [token, session] of sessions) {
+      if (session.instanceId !== instanceId) continue
+      const ws = wsConnections.get(token)
+      if (!ws) continue
+      try { ws.send(data) } catch { /* client gone */ }
+    }
+  }
 
-  system.setOnEvalEvent((agentName, event) => {
-    broadcast({ type: 'agent_activity', agentName, event })
-  })
-
-  // Wire gateway health changes → broadcast to all clients (only if
-  // Ollama is a configured provider).
-  system.ollama?.onHealthChange((health) => {
-    broadcast({ type: 'ollama_health', health })
-  })
-
-  // Provider routing events → UI toasts. agentName resolution tolerates
-  // missing agents (e.g. agent deleted between emission and receive).
-  const nameFor = (agentId: string | null): string | null =>
-    agentId ? (system.team.getAgent(agentId)?.name ?? null) : null
-
-  system.setOnProviderBound((agentId, model, oldProvider, newProvider) => {
-    broadcast({
-      type: 'provider_bound',
-      agentId, agentName: nameFor(agentId),
-      model, oldProvider, newProvider,
-    })
-  })
-  system.setOnProviderAllFailed((agentId, model, attempts) => {
-    broadcast({
-      type: 'provider_all_failed',
-      agentId, agentName: nameFor(agentId),
-      model, attempts,
-    })
-  })
-  system.setOnProviderStreamFailed((agentId, model, provider, reason) => {
-    broadcast({
-      type: 'provider_stream_failed',
-      agentId, agentName: nameFor(agentId),
-      model, provider, reason,
-    })
-  })
-
-  // Summary + compression — config changes and run lifecycle.
-  const roomNameFor = (roomId: string): string | null =>
-    system.house.getRoom(roomId)?.profile.name ?? null
-
-  system.setOnSummaryConfigChanged((roomId, config) => {
-    const roomName = roomNameFor(roomId)
-    if (!roomName) return
-    broadcast({ type: 'summary_config_changed', roomName, config })
-  })
-  system.setOnSummaryRunStarted((roomId, target) => {
-    const roomName = roomNameFor(roomId)
-    if (!roomName) return
-    broadcast({ type: 'summary_run_started', roomName, target })
-  })
-  system.setOnSummaryRunDelta((roomId, target, delta) => {
-    const roomName = roomNameFor(roomId)
-    if (!roomName) return
-    broadcast({ type: 'summary_run_delta', roomName, target, delta })
-  })
-  system.setOnSummaryRunCompleted((roomId, target, text) => {
-    const roomName = roomNameFor(roomId)
-    if (!roomName) return
-    broadcast({ type: 'summary_run_completed', roomName, target, text })
-  })
-  system.setOnSummaryRunFailed((roomId, target, reason) => {
-    const roomName = roomNameFor(roomId)
-    if (!roomName) return
-    broadcast({ type: 'summary_run_failed', roomName, target, reason })
-  })
+  // System callback wiring (room/membership/agent-activity/provider-events/
+  // summary lifecycle/ollama-health) lives in src/api/wire-system-events.ts.
+  // Called once per System (here for now via the call site in createServer
+  // for backward compat; Phase F4 moves it into registry.onSystemCreated).
 
   // Subscribe-based ollama metrics push (keyed by agent ID)
   const metricsSubscribers = new Set<string>()
@@ -190,10 +137,10 @@ export const createWSManager = (system: System): WSManager => {
     }
   }
 
-  // Subscribe to all existing AI agents at startup
-  for (const agent of system.team.listAgents()) {
-    if (agent.kind === 'ai') subscribeAgentState(agent.id, agent.name)
-  }
+  // Existing-agent subscription seeding moved into wireSystemEvents so
+  // it runs at the right time (after the System is fully populated by
+  // any snapshot restore). Single-tenant boot path calls wireSystemEvents
+  // immediately after createWSManager, so behavior is preserved.
 
   const buildSnapshot = (agentId: string, sessionToken?: string): Extract<WSOutbound, { type: 'snapshot' }> => {
     const roomStates: Record<string, RoomState> = {}
@@ -218,7 +165,7 @@ export const createWSManager = (system: System): WSManager => {
     }
   }
 
-  return { sessions, wsConnections, broadcast, subscribeAgentState, unsubscribeAgentState, subscribeOllamaMetrics, unsubscribeOllamaMetrics, buildSnapshot }
+  return { sessions, wsConnections, broadcast, broadcastToInstance, subscribeAgentState, unsubscribeAgentState, subscribeOllamaMetrics, unsubscribeOllamaMetrics, buildSnapshot }
 }
 
 // === Command dispatch order — first handler that returns true wins ===
