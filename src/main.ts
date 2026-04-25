@@ -57,6 +57,7 @@ import { documentArtifactType } from './core/artifact-types/document.ts'
 import { mermaidArtifactType } from './core/artifact-types/mermaid.ts'
 // Native-only tool calling — no capability probing needed
 import { createSkillStore, type SkillStore } from './skills/loader.ts'
+import { createScriptStore, type ScriptStore } from './core/script-store.ts'
 import { sharedPaths } from './core/paths.ts'
 
 import { createOllamaUrlRegistry, type OllamaUrlRegistry } from './core/ollama-urls.ts'
@@ -96,6 +97,8 @@ export interface System {
   readonly refreshAllAgentTools: () => Promise<void>
   readonly skillStore: SkillStore
   readonly skillsDir: string
+  readonly scriptStore: ScriptStore
+  readonly scriptsDir: string
   readonly packsDir: string
   readonly knowledgeDir: string
   readonly providersStorePath: string
@@ -518,8 +521,13 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
 
   // Skill system — file-based behavioral templates with bundled tools
   const skillsDir = sharedPaths.skills()
+  const scriptsDir = sharedPaths.scripts()
   const packsDir = sharedPaths.packs()
   const skillStore = createSkillStore()
+  const scriptStore = createScriptStore(scriptsDir)
+  // Fire-and-forget initial load — store is empty until this completes,
+  // matching the skills loader pattern (which runs from bootstrap.ts).
+  void scriptStore.reload().catch(err => console.error('[scripts] reload failed:', err))
 
   const getSkillsForRoom = (roomName: string): string => {
     const skills = skillStore.forScope(roomName)
@@ -691,6 +699,7 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     house, team, routeMessage,
     llm, ollama, providerConfig, providerKeys, gateways,
     toolRegistry, refreshAllAgentTools, skillStore, skillsDir,
+    scriptStore, scriptsDir,
     packsDir,
     knowledgeDir: sharedPaths.knowledge(),
     providersStorePath: sharedPaths.providers(),

@@ -36,6 +36,7 @@ export const sharedPaths = {
   providers: (): string => join(samsinnHome(), 'providers.json'),
   packs: (): string => join(samsinnHome(), 'packs'),
   skills: (): string => join(samsinnHome(), 'skills'),
+  scripts: (): string => join(samsinnHome(), 'scripts'),
   tools: (): string => join(samsinnHome(), 'tools'),
   knowledge: (): string => join(samsinnHome(), 'knowledge'),
   // Legacy global memory dir. Moves to per-instance in Phase I; keep for
