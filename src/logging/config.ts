@@ -5,11 +5,9 @@
 // runtime-reconfigure path (PUT /api/logging + configure_logging MCP tool).
 // ============================================================================
 
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { LogConfig } from './types.ts'
-
-const DEFAULT_LOG_SUBDIR = ['.samsinn', 'logs'] as const
+import { samsinnHome } from '../core/paths.ts'
 
 // Short random tail on auto-generated session ids. 8 hex chars (32 bits of
 // entropy) is plenty for uniqueness within a study and keeps filenames short.
@@ -18,8 +16,9 @@ const shortId = (): string => crypto.randomUUID().replace(/-/g, '').slice(0, 8)
 export const defaultSessionId = (): string =>
   `session-${Date.now()}-${shortId()}`
 
-export const defaultLogDir = (): string =>
-  join(homedir(), ...DEFAULT_LOG_SUBDIR)
+// Phase A keeps the global default (preserves existing single-tenant UX).
+// Phase H carves this per-instance.
+export const defaultLogDir = (): string => join(samsinnHome(), 'logs')
 
 // Read boot config from environment. Missing/empty → sensible defaults.
 // Disabled by default — opt-in to avoid surprise disk writes.

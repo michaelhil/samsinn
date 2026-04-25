@@ -58,8 +58,7 @@ import { documentArtifactType } from './core/artifact-types/document.ts'
 import { mermaidArtifactType } from './core/artifact-types/mermaid.ts'
 // Native-only tool calling — no capability probing needed
 import { createSkillStore, type SkillStore } from './skills/loader.ts'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { sharedPaths } from './core/paths.ts'
 
 import { createOllamaUrlRegistry, type OllamaUrlRegistry } from './core/ollama-urls.ts'
 export type { OllamaUrlRegistry }
@@ -524,8 +523,8 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   toolRegistry.register(createWriteDocumentSectionTool(house.artifacts))
 
   // Skill system — file-based behavioral templates with bundled tools
-  const skillsDir = join(homedir(), '.samsinn', 'skills')
-  const packsDir = join(homedir(), '.samsinn', 'packs')
+  const skillsDir = sharedPaths.skills()
+  const packsDir = sharedPaths.packs()
   const skillStore = createSkillStore()
 
   const getSkillsForRoom = (roomName: string): string => {
@@ -690,8 +689,8 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     llm, ollama, providerConfig, providerKeys, gateways,
     toolRegistry, refreshAllAgentTools, skillStore, skillsDir,
     packsDir,
-    knowledgeDir: join(homedir(), '.samsinn', 'knowledge'),
-    providersStorePath: join(homedir(), '.samsinn', 'providers.json'),
+    knowledgeDir: sharedPaths.knowledge(),
+    providersStorePath: sharedPaths.providers(),
     ollamaUrls,
     removeAgent,
     removeRoom: systemRemoveRoom,

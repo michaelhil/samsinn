@@ -17,7 +17,7 @@
 import type { Tool, ToolRegistry } from '../core/types/tool.ts'
 import { readdir, stat } from 'node:fs/promises'
 import { join, resolve, extname, basename } from 'node:path'
-import { homedir } from 'node:os'
+import { sharedPaths } from '../core/paths.ts'
 
 // Only letters, digits, underscores, hyphens — matches tool name conventions
 export const VALID_NAME = /^[a-zA-Z0-9_-]+$/
@@ -146,7 +146,7 @@ export const loadToolDirectory = async (
 const externalDirs = (): string[] => {
   const dirs = [
     resolve(process.cwd(), 'tools'),
-    join(homedir(), '.samsinn', 'tools'),
+    sharedPaths.tools(),
   ]
   const envDir = process.env.SAMSINN_TOOLS_DIR
   if (envDir) dirs.push(resolve(envDir))

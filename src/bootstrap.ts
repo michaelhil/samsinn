@@ -21,8 +21,7 @@ import { parseProviderConfig, summariseProviderConfig } from './llm/providers-co
 import { buildProvidersFromConfig, warmProviderModels } from './llm/providers-setup.ts'
 import { loadProviderStore, mergeWithEnv } from './llm/providers-store.ts'
 import { parseLogConfigFromEnv } from './logging/config.ts'
-import { homedir } from 'node:os'
-import { join as joinPath } from 'node:path'
+import { sharedPaths } from './core/paths.ts'
 
 const DRAIN_TIMEOUT_MS = 5_000
 
@@ -40,7 +39,7 @@ export const bootstrap = async (): Promise<void> => {
   }
 
   // Load stored provider config (file-backed, user-editable via UI).
-  const providersStorePath = joinPath(homedir(), '.samsinn', 'providers.json')
+  const providersStorePath = sharedPaths.providers()
   const { data: storeData, warnings: storeWarnings } = await loadProviderStore(providersStorePath)
   for (const w of storeWarnings) console.warn(`[providers.json] ${w}`)
   const fileStore = mergeWithEnv(storeData)
@@ -165,13 +164,14 @@ export const bootstrap = async (): Promise<void> => {
         const aiAgents = system.team.listAgents().flatMap(a => { const ai = asAIAgent(a); return ai ? [ai] : [] })
         await Promise.all(aiAgents.map(a => Promise.race([a.whenIdle(), timeout])))
 
-        const home = (await import('node:os')).homedir()
         const targets = [
           snapshotPath,
-          joinPath(home, '.samsinn', 'memory'),
-          joinPath(home, '.samsinn', 'packs'),
-          joinPath(home, '.samsinn', 'skills'),
-          joinPath(home, '.samsinn', 'tools'),
+          // Memory dir: still under shared root for now. Phase H/I move to
+          // per-instance, at which point this path becomes per-cookie.
+          sharedPaths.memoryLegacy(),
+          sharedPaths.packs(),
+          sharedPaths.skills(),
+          sharedPaths.tools(),
         ]
         const { rm } = await import('node:fs/promises')
         for (const t of targets) {
