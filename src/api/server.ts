@@ -217,7 +217,7 @@ export const createServer = (config: ServerConfig) => {
       const system = await registry.getOrLoad(instanceId)
       const remoteAddress = server.requestIP(req)?.address
       const apiResponse = await handleAPI(
-        req, pathname, system,
+        req, pathname, system, instanceId,
         wsManager.broadcast, wsManager.subscribeAgentState, wsManager.unsubscribeAgentState,
         remoteAddress,
         config.onResetCommit,
@@ -256,14 +256,14 @@ export const createServer = (config: ServerConfig) => {
           // Reactivate if was inactive (name-based reclaim)
           if (session.agent.inactive) {
             session.agent.setInactive?.(false)
-            wsManager.broadcast({ type: 'agent_joined', agent: {
+            wsManager.broadcastToInstance(session.instanceId, { type: 'agent_joined', agent: {
               id: session.agent.id, name: session.agent.name,
               kind: session.agent.kind,
             }})
           }
           session.lastActivity = Date.now()
           wsManager.wsConnections.set(ws.data.sessionToken, ws)
-          ws.send(JSON.stringify(wsManager.buildSnapshot(session.agent.id)))
+          ws.send(JSON.stringify(wsManager.buildSnapshot(session.instanceId, session.agent.id)))
           return
         }
 
@@ -279,7 +279,7 @@ export const createServer = (config: ServerConfig) => {
         wsManager.sessions.set(ws.data.sessionToken, session)
         wsManager.wsConnections.set(ws.data.sessionToken, ws)
 
-        ws.send(JSON.stringify(wsManager.buildSnapshot(agent.id, ws.data.sessionToken)))
+        ws.send(JSON.stringify(wsManager.buildSnapshot(ws.data.instanceId, agent.id, ws.data.sessionToken)))
       },
 
       async message(ws, raw) {

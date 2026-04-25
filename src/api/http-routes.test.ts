@@ -16,7 +16,8 @@ import type { System } from '../main.ts'
 
 const noopDeliver: DeliverFn = () => {}
 const noopBroadcast = (_msg: WSOutbound): void => {}
-const noopSubscribe = (_id: string, _name: string): void => {}
+const noopSubscribe = (): void => {}
+const TEST_INSTANCE_ID = 'test-instance'
 
 const makeSystem = (): System => {
   const house = createHouse({ deliver: noopDeliver })
@@ -77,7 +78,7 @@ const req = (method: string, path: string, body?: unknown): Request => {
 }
 
 const call = (system: System, r: Request, path: string) =>
-  handleAPI(r, path, system, noopBroadcast, noopSubscribe)
+  handleAPI(r, path, system, TEST_INSTANCE_ID, noopBroadcast, noopSubscribe)
 
 // === Tests ===
 

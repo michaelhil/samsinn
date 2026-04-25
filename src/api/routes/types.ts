@@ -1,4 +1,5 @@
 import type { System } from '../../main.ts'
+import type { Agent } from '../../core/types/agent.ts'
 import type { WSOutbound } from '../../core/types/ws-protocol.ts'
 
 export interface ResetInstanceOk {
@@ -13,9 +14,11 @@ export type ResetInstanceResult = ResetInstanceOk | ResetInstanceFail
 
 export interface RouteContext {
   readonly system: System
+  // Instance bound to this request via the cookie (resolved before dispatch).
+  readonly instanceId: string
   readonly broadcast: (msg: WSOutbound) => void
   readonly broadcastToInstance?: (instanceId: string, msg: WSOutbound) => void
-  readonly subscribeAgentState: (agentId: string, agentName: string) => void
+  readonly subscribeAgentState: (agent: Agent, instanceId: string) => void
   readonly unsubscribeAgentState?: (agentId: string) => void
   readonly remoteAddress?: string
   // Legacy whole-process reset (still used in single-tenant mode).

@@ -204,10 +204,10 @@ export const wireSystemEvents = (
   })
 
   // === Existing AI agent state subscriptions — populate at wire time ===
-  // Mirrors the previous behavior in createWSManager: after wiring,
-  // subscribe each existing AI agent so the UI sees state changes.
+  // After wiring, subscribe each existing AI agent so the UI sees state
+  // changes scoped to this instance.
   for (const agent of system.team.listAgents()) {
-    if (agent.kind === 'ai') wsManager.subscribeAgentState(agent.id, agent.name)
+    if (agent.kind === 'ai') wsManager.subscribeAgentState(agent, instanceId)
   }
   // (asAIAgent is imported for future use by other extracted blocks.)
   void asAIAgent

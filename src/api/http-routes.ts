@@ -54,8 +54,9 @@ export const handleAPI = async (
   req: Request,
   pathname: string,
   system: System,
+  instanceId: string,
   broadcast: (msg: WSOutbound) => void,
-  subscribeAgentState: (agentId: string, agentName: string) => void,
+  subscribeAgentState: RouteContext['subscribeAgentState'],
   unsubscribeAgentState?: (agentId: string) => void,
   remoteAddress?: string,
   onResetCommit?: RouteContext['onResetCommit'],
@@ -63,7 +64,7 @@ export const handleAPI = async (
   broadcastToInstance?: RouteContext['broadcastToInstance'],
 ): Promise<Response | null> => {
   const ctx: RouteContext = {
-    system, broadcast, subscribeAgentState, unsubscribeAgentState,
+    system, instanceId, broadcast, subscribeAgentState, unsubscribeAgentState,
     remoteAddress, onResetCommit, resetInstance, broadcastToInstance,
   }
 

@@ -107,11 +107,10 @@ export const bootstrap = async (): Promise<void> => {
 
   // === WS manager — lifecycle owned here ===
   // Built before the registry so onSystemCreated can call wireSystemEvents
-  // (which subscribes to the wsManager). The wsManager's subscribeAgentState
-  // closures over the boot system; agents in non-boot instances don't get
-  // state subscriptions yet (limitation: state events for those agents
-  // won't be broadcast). Phase F5 / follow-up refactors this to be
-  // instance-aware.
+  // The wsManager is registry-aware: buildSnapshot and subscribeAgentState
+  // resolve the live System per instanceId rather than closing over a single
+  // boot system. State subscriptions broadcast scoped to the originating
+  // instance via broadcastToInstance.
   let wsManager: ReturnType<typeof createWSManager> | undefined
 
   // === SystemRegistry ===
@@ -149,20 +148,24 @@ export const bootstrap = async (): Promise<void> => {
         if (autoSaver) wireSystemEvents(system, wsManager, autoSaver, id)
       }
     },
-    onSystemEvicted: (_system, id) => {
+    onSystemEvicted: (system, id) => {
       // Close WS sessions for this instance — they hold dangling references.
-      if (!wsManager) return
-      for (const [token, sess] of [...wsManager.sessions]) {
-        if (sess.instanceId !== id) continue
-        const ws = wsManager.wsConnections.get(token) as { close?: (code: number, reason?: string) => void } | undefined
-        try { ws?.close?.(1001, 'instance evicted') } catch { /* ignore */ }
-        wsManager.sessions.delete(token)
-        wsManager.wsConnections.delete(token)
+      if (wsManager) {
+        for (const [token, sess] of [...wsManager.sessions]) {
+          if (sess.instanceId !== id) continue
+          const ws = wsManager.wsConnections.get(token) as { close?: (code: number, reason?: string) => void } | undefined
+          try { ws?.close?.(1001, 'instance evicted') } catch { /* ignore */ }
+          wsManager.sessions.delete(token)
+          wsManager.wsConnections.delete(token)
+        }
       }
       // Detach all agents from the reverse index — late provider events
-      // for evicted agents drop silently.
-      // (per-agent detach also fires on removeAgent; this catches the
-      // bulk evict path where individual removes don't run.)
+      // for evicted agents drop silently. (per-agent detach also fires on
+      // removeAgent; this catches the bulk evict path where individual
+      // removes don't run.)
+      for (const a of system.team.listAgents()) {
+        registry.detachAgent(a.id)
+      }
     },
   })
 
@@ -171,19 +174,12 @@ export const bootstrap = async (): Promise<void> => {
     if (!event.agentId) return   // events without an agentId can't be routed
     const instanceId = registry.instanceForAgent(event.agentId)
     if (!instanceId) return      // late event for evicted/removed agent
-    // Dispatch to that instance's subscribers via System.dispatchProviderEvent.
-    // The system might be evicted by now; getOrLoad would re-create it,
-    // which we don't want for an inflight provider event. Instead, look
-    // up live entry only.
-    const liveEntries = registry.list()
-    if (!liveEntries.some(m => m.id === instanceId)) return
-    // Get the live system without forcing a load.
-    void (async () => {
-      try {
-        const sys = await registry.getOrLoad(instanceId)
-        sys.dispatchProviderEvent(event)
-      } catch { /* drop */ }
-    })()
+    // tryGetLive returns the in-memory system if it's currently active;
+    // does NOT trigger a lazy-load (we don't want a late provider event
+    // to resurrect an evicted instance just to dispatch one event).
+    const sys = registry.tryGetLive(instanceId)
+    if (!sys) return
+    try { sys.dispatchProviderEvent(event) } catch { /* drop */ }
   })
 
   // === Boot the appropriate runtime ===
@@ -234,11 +230,14 @@ export const bootstrap = async (): Promise<void> => {
   // agentId so this is just the seed instance.
   const bootInstanceId = generateInstanceId()
   const bootSystem = await registry.getOrLoad(bootInstanceId)
-  // wsManager closures over bootSystem for legacy subscribers
-  // (subscribeAgentState, buildSnapshot). New per-cookie instances also
-  // get wireSystemEvents wired via onSystemCreated, but their state-
-  // subscription is not yet per-instance — limitation noted.
-  wsManager = createWSManager(bootSystem)
+  // wsManager is registry-aware: snapshot building + state subscriptions
+  // resolve the live System per instanceId. Ollama is shared across
+  // instances (one gateway in SharedRuntime) — we read it from the boot
+  // system, but any active system would yield the same gateway reference.
+  wsManager = createWSManager({
+    getSystem: (id) => registry.tryGetLive(id),
+    getOllama: () => bootSystem.ollama,
+  })
 
   // Now that wsManager exists, re-wire the boot system's events (the
   // first onSystemCreated ran with wsManager=undefined).

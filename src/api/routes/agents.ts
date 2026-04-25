@@ -106,7 +106,7 @@ export const agentRoutes: RouteEntry[] = [
   {
     method: 'POST',
     pattern: /^\/api\/agents$/,
-    handler: async (req, _match, { system, broadcast, subscribeAgentState }) => {
+    handler: async (req, _match, { system, instanceId, broadcast, broadcastToInstance, subscribeAgentState }) => {
       const body = await parseBody(req)
       if (!body.name || !body.model || !body.persona) {
         return errorResponse('name, model, and persona are required')
@@ -129,9 +129,11 @@ export const agentRoutes: RouteEntry[] = [
           temperature: body.temperature as number | undefined,
           historyLimit: body.historyLimit as number | undefined,
         })
-        subscribeAgentState(agent.id, agent.name)
+        subscribeAgentState(agent, instanceId)
         const aiA = asAIAgent(agent)
-        broadcast({ type: 'agent_joined', agent: { id: agent.id, name: agent.name, kind: agent.kind, ...(aiA ? { model: aiA.getModel() } : {}) } })
+        const evt = { type: 'agent_joined' as const, agent: { id: agent.id, name: agent.name, kind: agent.kind, ...(aiA ? { model: aiA.getModel() } : {}) } }
+        if (broadcastToInstance) broadcastToInstance(instanceId, evt)
+        else broadcast(evt)
         return json({ id: agent.id, name: agent.name }, 201)
       } catch (err) {
         return errorResponse(err instanceof Error ? err.message : 'Failed to create agent')
@@ -235,13 +237,15 @@ export const agentRoutes: RouteEntry[] = [
   {
     method: 'DELETE',
     pattern: /^\/api\/agents\/([^/]+)$/,
-    handler: (_req, match, { system, broadcast, unsubscribeAgentState }) => {
+    handler: (_req, match, { system, instanceId, broadcast, broadcastToInstance, unsubscribeAgentState }) => {
       const name = decodeURIComponent(match[1]!)
       const agent = system.team.getAgent(name)
       if (!agent) return errorResponse(`Agent "${name}" not found`, 404)
       unsubscribeAgentState?.(agent.id)
       system.removeAgent(agent.id)
-      broadcast({ type: 'agent_removed', agentName: name })
+      const evt = { type: 'agent_removed' as const, agentName: name }
+      if (broadcastToInstance) broadcastToInstance(instanceId, evt)
+      else broadcast(evt)
       return json({ removed: true })
     },
   },

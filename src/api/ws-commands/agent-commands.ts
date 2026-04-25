@@ -9,9 +9,9 @@ export const handleAgentCommand = async (msg: WSInbound, ctx: CommandContext): P
   switch (msg.type) {
     case 'create_agent': {
       const agent = await system.spawnAIAgent(msg.config)
-      ctx.wsManager.subscribeAgentState(agent.id, agent.name)
+      ctx.wsManager.subscribeAgentState(agent, ctx.session.instanceId)
       const ai = asAIAgent(agent)
-      ctx.wsManager.broadcast({ type: 'agent_joined', agent: { id: agent.id, name: agent.name, kind: agent.kind, ...(ai ? { model: ai.getModel() } : {}) } })
+      ctx.wsManager.broadcastToInstance(ctx.session.instanceId, { type: 'agent_joined', agent: { id: agent.id, name: agent.name, kind: agent.kind, ...(ai ? { model: ai.getModel() } : {}) } })
       return true
     }
     case 'remove_agent': {
@@ -19,7 +19,7 @@ export const handleAgentCommand = async (msg: WSInbound, ctx: CommandContext): P
       if (agent) {
         ctx.wsManager.unsubscribeAgentState(agent.id)
         system.removeAgent(agent.id)
-        ctx.wsManager.broadcast({ type: 'agent_removed', agentName: msg.name })
+        ctx.wsManager.broadcastToInstance(ctx.session.instanceId, { type: 'agent_removed', agentName: msg.name })
       }
       return true
     }

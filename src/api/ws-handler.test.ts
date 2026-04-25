@@ -116,7 +116,10 @@ describe('WS Handler', () => {
     const human = createHumanAgent({ name: 'Human' }, () => {})
     system.team.addAgent(human)
     session = { agent: human, instanceId: 'test0123456789ab', lastActivity: Date.now() }
-    wsManager = createWSManager(system)
+    wsManager = createWSManager({
+      getSystem: () => system,
+      getOllama: () => system.ollama,
+    })
   })
 
   // --- Protocol errors ---

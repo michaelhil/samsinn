@@ -100,6 +100,12 @@ export interface SystemRegistry {
   // wireSystemEvents needs it to schedule saves from broadcast callbacks.
   // Returns null if the instance is not currently in memory.
   readonly autoSaverFor: (id: string) => AutoSaver | null
+  // In-memory only lookup. Returns the live System for `id` if it is
+  // currently loaded and active (not evicting), else undefined. Used by
+  // boundary code that must NOT trigger a lazy-load — e.g. WS snapshot
+  // building (caller already resolved the system to bind the session)
+  // and late provider routing events for evicted instances.
+  readonly tryGetLive: (id: string) => System | undefined
   // Agent → instance reverse index for provider routing events. Phase F4
   // wires shared.setProviderEventDispatcher to use this.
   readonly attachAgent: (agentId: string, instanceId: string) => void
@@ -310,6 +316,12 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
   const instanceForAgent = (agentId: string): string | undefined =>
     agentInstanceMap.get(agentId)
 
+  const tryGetLive = (id: string): System | undefined => {
+    const entry = map.get(id)
+    if (!entry || entry.state !== 'active') return undefined
+    return entry.system
+  }
+
   return {
     getOrLoad,
     evictOne,
@@ -320,6 +332,7 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
     shutdown,
     idleMs: () => idleMs,
     autoSaverFor,
+    tryGetLive,
     attachAgent,
     detachAgent,
     instanceForAgent,

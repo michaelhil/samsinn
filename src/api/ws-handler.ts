@@ -10,6 +10,7 @@
 
 import type { System } from '../main.ts'
 import type { HumanAgent } from '../agents/human-agent.ts'
+import type { Agent } from '../core/types/agent.ts'
 import type { AgentProfile } from '../core/types/messaging.ts'
 import type { RoomState } from '../core/types/room.ts'
 import type { StateValue } from '../core/types/agent.ts'
@@ -48,14 +49,25 @@ export interface WSManager {
   // has matching instanceId. Used by wireSystemEvents so an event fired in
   // instance A doesn't reach instance B's clients.
   readonly broadcastToInstance: (instanceId: string, msg: WSOutbound) => void
-  readonly subscribeAgentState: (agentId: string, agentName: string) => void
+  readonly subscribeAgentState: (agent: Agent, instanceId: string) => void
   readonly unsubscribeAgentState: (agentId: string) => void
   readonly subscribeOllamaMetrics: (sessionToken: string) => void
   readonly unsubscribeOllamaMetrics: (sessionToken: string) => void
-  readonly buildSnapshot: (agentId: string, sessionToken?: string) => Extract<WSOutbound, { type: 'snapshot' }>
+  readonly buildSnapshot: (instanceId: string, agentId: string, sessionToken?: string) => Extract<WSOutbound, { type: 'snapshot' }>
 }
 
-export const createWSManager = (system: System): WSManager => {
+// Resolver: given an instanceId, return the live System if currently in
+// memory, or undefined. WSManager uses this to scope buildSnapshot/state
+// subscriptions to the caller's tenant rather than closing over a single
+// boot system. The shared Ollama gateway is the same across instances, so
+// any live system's ollama field works (callers pass the resolved one in).
+export interface WSManagerDeps {
+  readonly getSystem: (instanceId: string) => System | undefined
+  readonly getOllama: () => System['ollama']
+}
+
+export const createWSManager = (deps: WSManagerDeps): WSManager => {
+  const { getSystem, getOllama } = deps
   const sessions = new Map<string, ClientSession>()
   const wsConnections = new Map<string, { send: (data: string) => void }>()
   const stateUnsubs = new Map<string, () => void>()
@@ -92,8 +104,9 @@ export const createWSManager = (system: System): WSManager => {
     if (metricsPushTimer) return
     metricsPushTimer = setInterval(() => {
       if (metricsSubscribers.size === 0) return
-      if (!system.ollama) return
-      const metrics = system.ollama.getMetrics()
+      const ollama = getOllama()
+      if (!ollama) return
+      const metrics = ollama.getMetrics()
       const data = JSON.stringify({ type: 'ollama_metrics', metrics })
       // Find WS connections for subscribed agents
       for (const agentId of metricsSubscribers) {
@@ -120,13 +133,14 @@ export const createWSManager = (system: System): WSManager => {
     }
   }
 
-  const subscribeAgentState = (agentId: string, agentName: string): void => {
-    const agent = system.team.getAgent(agentId)
-    if (!agent || agent.kind !== 'ai') return
+  const subscribeAgentState = (agent: Agent, instanceId: string): void => {
+    if (agent.kind !== 'ai') return
+    if (stateUnsubs.has(agent.id)) return
+    const agentName = agent.name
     const unsub = agent.state.subscribe((state: StateValue, _agentId: string, context?: string) => {
-      broadcast({ type: 'agent_state', agentName, state, context })
+      broadcastToInstance(instanceId, { type: 'agent_state', agentName, state, context })
     })
-    stateUnsubs.set(agentId, unsub)
+    stateUnsubs.set(agent.id, unsub)
   }
 
   const unsubscribeAgentState = (agentId: string): void => {
@@ -142,13 +156,22 @@ export const createWSManager = (system: System): WSManager => {
   // any snapshot restore). Single-tenant boot path calls wireSystemEvents
   // immediately after createWSManager, so behavior is preserved.
 
-  const buildSnapshot = (agentId: string, sessionToken?: string): Extract<WSOutbound, { type: 'snapshot' }> => {
+  const buildSnapshot = (instanceId: string, agentId: string, sessionToken?: string): Extract<WSOutbound, { type: 'snapshot' }> => {
+    const sys = getSystem(instanceId)
+    if (!sys) {
+      // Instance evicted between connect and snapshot. Return an empty
+      // shell — the caller's reconnect path will re-resolve and try again.
+      return {
+        type: 'snapshot', rooms: [], agents: [], agentId, roomStates: {},
+        ...(sessionToken ? { sessionToken } : {}),
+      }
+    }
     const roomStates: Record<string, RoomState> = {}
-    for (const profile of system.house.listAllRooms()) {
-      const room = system.house.getRoom(profile.id)
+    for (const profile of sys.house.listAllRooms()) {
+      const room = sys.house.getRoom(profile.id)
       if (room) roomStates[profile.id] = room.getRoomState()
     }
-    const agents: AgentProfile[] = system.team.listAgents()
+    const agents: AgentProfile[] = sys.team.listAgents()
       .filter(a => !a.inactive)
       .map(a => {
         const ai = asAIAgent(a)
@@ -157,7 +180,7 @@ export const createWSManager = (system: System): WSManager => {
       })
     return {
       type: 'snapshot',
-      rooms: system.house.listAllRooms(),
+      rooms: sys.house.listAllRooms(),
       agents,
       agentId,
       roomStates,
