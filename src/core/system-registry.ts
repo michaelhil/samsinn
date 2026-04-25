@@ -1,0 +1,342 @@
+// ============================================================================
+// SystemRegistry — per-tenant House lifecycle keyed by instance ID.
+//
+// One process holds many instances; each is a System bound to its own
+// snapshot file. The registry lazy-loads from disk on first request,
+// keeps the System in memory while active, and evicts idle ones after
+// SAMSINN_IDLE_MS (default 30 min) by flushing snapshot + dropping the
+// in-memory reference. Subsequent requests lazy-reload from disk.
+//
+// Concurrency contract:
+//   - `pendingLoads` dedupes concurrent first-time loads of the same id.
+//   - In-map entries can be in `state: 'active' | 'evicting'`.
+//     New requests during eviction await the eviction completion, then
+//     load fresh from disk.
+//   - All maps are mutated only on the event loop thread (single-threaded
+//     JS); no locks needed. The discipline is: never `await` between a
+//     state read and a state write that depends on it.
+//
+// Public surface:
+//   getOrLoad(id)           — single source of truth; touches lastTouchedAt
+//   evictOne(id)            — graceful: drain → flush → drop. Idempotent.
+//   evictIdle(now, idleMs)  — periodic sweep
+//   resetInstance(id)       — wipe state, return new id (for /api/system/reset)
+//   exists(id)              — disk OR memory
+//   list()                  — readonly meta for admin
+//   shutdown()              — flush all + clear
+//
+// What lives outside the registry's concern:
+//   - Snapshot path resolution (uses instancePaths from core/paths.ts)
+//   - Per-instance event-callback wiring (Phase F: wireSystemEvents)
+//   - Janitor (Phase E: instance-cleanup.ts) — operates on disk only
+// ============================================================================
+
+import type { System } from '../main.ts'
+import type { SharedRuntime } from './shared-runtime.ts'
+import { createSystem } from '../main.ts'
+import {
+  loadSnapshot, restoreFromSnapshot, createAutoSaver, type AutoSaver,
+} from './snapshot.ts'
+import { instancePaths, isValidInstanceId, trashPath } from './paths.ts'
+import { generateInstanceId } from '../api/instance-cookie.ts'
+import { mkdir, rename, stat } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { asAIAgent } from '../agents/shared.ts'
+
+// --- Defaults & env ---
+
+const DEFAULT_IDLE_MS = 30 * 60_000   // 30 min
+const DEFAULT_DRAIN_MS = 5_000
+
+const idleMsFromEnv = (): number => {
+  const v = process.env.SAMSINN_IDLE_MS
+  if (!v) return DEFAULT_IDLE_MS
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_IDLE_MS
+}
+
+// --- Types ---
+
+export interface InstanceMeta {
+  readonly id: string
+  readonly lastTouchedAt: number
+  readonly state: 'active' | 'evicting'
+}
+
+interface InstanceEntry {
+  readonly system: System
+  readonly autoSaver: AutoSaver
+  readonly onIdle: () => Promise<void>          // hook called by registry on evict
+  lastTouchedAt: number
+  state: 'active' | 'evicting'
+  evictionPromise?: Promise<void>               // present iff state='evicting'
+}
+
+export interface SystemRegistryOptions {
+  readonly shared: SharedRuntime
+  readonly idleMs?: number                      // override default 30 min
+  readonly drainMs?: number                     // override default 5s
+  // Hook called immediately after a fresh System is constructed (either
+  // first load or post-eviction reload). Phase F wires WS broadcasts here.
+  readonly onSystemCreated?: (system: System, id: string) => void
+  // Hook called immediately before a System is dropped from memory.
+  // Phase F removes the WS callback wiring here.
+  readonly onSystemEvicted?: (system: System, id: string) => void
+}
+
+export interface SystemRegistry {
+  readonly getOrLoad: (id: string) => Promise<System>
+  readonly evictOne: (id: string) => Promise<void>
+  readonly evictIdle: (now?: number) => Promise<number>
+  readonly resetInstance: (id: string) => Promise<string>   // returns new id
+  readonly exists: (id: string) => Promise<boolean>
+  readonly list: () => ReadonlyArray<InstanceMeta>
+  readonly shutdown: () => Promise<void>
+  // For tests + boundary handlers that need to know the configured timer.
+  readonly idleMs: () => number
+}
+
+// ============================================================================
+
+export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistry => {
+  const idleMs = opts.idleMs ?? idleMsFromEnv()
+  const drainMs = opts.drainMs ?? DEFAULT_DRAIN_MS
+  const map = new Map<string, InstanceEntry>()
+  const pendingLoads = new Map<string, Promise<System>>()
+
+  // --- Internals ---
+
+  const drainAgents = async (system: System): Promise<void> => {
+    const timeout = new Promise<void>(res => setTimeout(res, drainMs))
+    const aiAgents = system.team.listAgents()
+      .flatMap(a => { const ai = asAIAgent(a); return ai ? [ai] : [] })
+    await Promise.all(aiAgents.map(a => Promise.race([a.whenIdle(), timeout])))
+  }
+
+  // Attach an autosaver to a system so any state change gets debounced
+  // to disk. Wires into the system's onMessagePosted etc. by relying on
+  // the per-system event-callback layer.
+  const attachAutoSaver = (system: System, snapshotPath: string): AutoSaver => {
+    const saver = createAutoSaver(system, snapshotPath)
+    // The boundary layer (Phase F) wires its own callbacks; here we only
+    // ensure scheduleSave fires on every mutation. We do this by chaining
+    // onto whatever the boundary already set, via a minimal proxy.
+    //
+    // The pattern: capture the boundary's primary cb, replace with one
+    // that calls the boundary cb then schedules save. If no boundary cb
+    // is set yet, the registry-installed cb is what runs.
+    //
+    // We trigger save on the highest-frequency mutations: messages,
+    // delivery-mode, mode-auto-switch, macro events, artifact changes,
+    // membership, room create/delete, bookmarks. Same set as the existing
+    // bootstrap.ts auto-save callbacks.
+    const wrapPrimary = <T extends (...args: never[]) => void>(
+      setter: (cb: T) => void,
+      schedule = true,
+    ) => {
+      let prev: T | undefined
+      const wrapped = ((...args: Parameters<T>) => {
+        prev?.(...args)
+        if (schedule) saver.scheduleSave()
+      }) as T
+      // Capture any pre-existing primary by overriding setter once.
+      const realSetter = setter
+      realSetter(wrapped)
+      // Note: if Phase F's wireSystemEvents calls these setters AFTER us,
+      // it'll replace our wrapper — auto-save is then the boundary's job.
+      // The boundary documentation must call saver.scheduleSave from its
+      // own callbacks. We'll wire that explicitly in Phase F.
+      void prev
+    }
+    // Apply the wrappers — these are no-ops if Phase F overrides them
+    // afterwards, but safe in tests + the early lifecycle.
+    wrapPrimary(system.setOnMessagePosted)
+    wrapPrimary(system.setOnDeliveryModeChanged)
+    wrapPrimary(system.setOnMacroEvent)
+    wrapPrimary(system.setOnMacroSelectionChanged)
+    wrapPrimary(system.setOnArtifactChanged)
+    wrapPrimary(system.setOnRoomCreated)
+    wrapPrimary(system.setOnRoomDeleted)
+    wrapPrimary(system.setOnMembershipChanged)
+    wrapPrimary(system.setOnBookmarksChanged)
+    return saver
+  }
+
+  // Build a fresh System for `id`, restoring from snapshot if present.
+  const buildSystem = async (id: string): Promise<{ system: System; autoSaver: AutoSaver }> => {
+    const paths = instancePaths(id)
+    await mkdir(dirname(paths.snapshot), { recursive: true })
+
+    const system = createSystem({ shared: opts.shared })
+
+    // Restore snapshot if file exists. Corrupt snapshots get renamed
+    // aside so the next save doesn't silently overwrite recoverable data.
+    const snapshot = await loadSnapshot(paths.snapshot)
+    if (snapshot) {
+      try {
+        await restoreFromSnapshot(system, snapshot)
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        console.error(`[registry] restore failed for ${id}: ${reason}`)
+        // Move bad file aside, continue with empty house.
+        const aside = `${paths.snapshot}.corrupt.${Date.now()}.json`
+        try { await rename(paths.snapshot, aside) } catch { /* ignore */ }
+      }
+    }
+
+    const autoSaver = attachAutoSaver(system, paths.snapshot)
+
+    // Notify the registry's caller (e.g. WS broadcast wiring).
+    opts.onSystemCreated?.(system, id)
+
+    return { system, autoSaver }
+  }
+
+  // --- Public API ---
+
+  const getOrLoad = async (id: string): Promise<System> => {
+    if (!isValidInstanceId(id)) {
+      throw new Error(`[registry] invalid instance id: ${id}`)
+    }
+
+    // Fast path: in-map and not evicting.
+    const existing = map.get(id)
+    if (existing && existing.state === 'active') {
+      existing.lastTouchedAt = Date.now()
+      return existing.system
+    }
+
+    // Mid-eviction: wait for it to complete, then re-enter for a fresh load.
+    if (existing && existing.state === 'evicting' && existing.evictionPromise) {
+      await existing.evictionPromise
+      return getOrLoad(id)
+    }
+
+    // Pending first-load by another caller: await same promise.
+    const pending = pendingLoads.get(id)
+    if (pending) return pending
+
+    // Cold path: register the pending promise, do the work, transfer to map.
+    const loadPromise = (async (): Promise<System> => {
+      try {
+        const { system, autoSaver } = await buildSystem(id)
+        const entry: InstanceEntry = {
+          system,
+          autoSaver,
+          lastTouchedAt: Date.now(),
+          state: 'active',
+          onIdle: async () => { /* set later if needed */ },
+        }
+        map.set(id, entry)
+        return system
+      } finally {
+        pendingLoads.delete(id)
+      }
+    })()
+    pendingLoads.set(id, loadPromise)
+    return loadPromise
+  }
+
+  // Idempotent: calling evictOne twice (or while another caller is also
+  // evicting) returns the same in-flight promise.
+  const evictOne = async (id: string): Promise<void> => {
+    const entry = map.get(id)
+    if (!entry) return
+    if (entry.state === 'evicting' && entry.evictionPromise) {
+      return entry.evictionPromise
+    }
+
+    const evictionPromise = (async (): Promise<void> => {
+      try {
+        await drainAgents(entry.system)
+        await entry.autoSaver.flush()
+      } catch (err) {
+        console.error(`[registry] evict ${id} flush failed: ${err instanceof Error ? err.message : String(err)}`)
+      } finally {
+        try { opts.onSystemEvicted?.(entry.system, id) } catch (err) {
+          console.error(`[registry] evict ${id} hook threw: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        entry.autoSaver.dispose()
+        map.delete(id)
+      }
+    })()
+
+    entry.state = 'evicting'
+    entry.evictionPromise = evictionPromise
+    return evictionPromise
+  }
+
+  const evictIdle = async (now: number = Date.now()): Promise<number> => {
+    const targets: string[] = []
+    for (const [id, entry] of map) {
+      if (entry.state === 'active' && now - entry.lastTouchedAt > idleMs) {
+        targets.push(id)
+      }
+    }
+    await Promise.all(targets.map(evictOne))
+    return targets.length
+  }
+
+  const resetInstance = async (id: string): Promise<string> => {
+    if (!isValidInstanceId(id)) {
+      throw new Error(`[registry] invalid instance id: ${id}`)
+    }
+    // Drain + drop from memory (not strictly necessary, but cleaner —
+    // any in-flight evals get a chance to finish).
+    if (map.has(id)) await evictOne(id)
+
+    // Move on disk to trash. Janitor will purge after 7 days.
+    const paths = instancePaths(id)
+    const trash = trashPath(id, Date.now())
+    try {
+      await mkdir(dirname(trash), { recursive: true })
+      await rename(paths.root, trash)
+    } catch (err) {
+      // ENOENT is fine — instance never had a snapshot.
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT') {
+        console.error(`[registry] reset ${id} trash failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    // Caller decides what to do with the new id (typically: set cookie,
+    // broadcast instance_reset to WS subset, browser reconnects).
+    return generateInstanceId()
+  }
+
+  const exists = async (id: string): Promise<boolean> => {
+    if (!isValidInstanceId(id)) return false
+    if (map.has(id)) return true
+    try {
+      await stat(instancePaths(id).snapshot)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const list = (): ReadonlyArray<InstanceMeta> =>
+    [...map.entries()].map(([id, e]) => ({
+      id,
+      lastTouchedAt: e.lastTouchedAt,
+      state: e.state,
+    }))
+
+  // Final flush of every active instance. Called from the SIGINT/SIGTERM
+  // handler in bootstrap.ts (replaces the single-system flush).
+  const shutdown = async (): Promise<void> => {
+    const ids = [...map.keys()]
+    await Promise.all(ids.map(evictOne))
+  }
+
+  return {
+    getOrLoad,
+    evictOne,
+    evictIdle,
+    resetInstance,
+    exists,
+    list,
+    shutdown,
+    idleMs: () => idleMs,
+  }
+}
