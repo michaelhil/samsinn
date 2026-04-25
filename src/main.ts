@@ -715,16 +715,14 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   // ref is filled at the end of createSystem (just before return).
   const systemRef: { current: System | undefined } = { current: undefined }
   const scriptEngine = createScriptEngine({
-    get system() { return systemRef.current as System },
+    getSystem: () => systemRef.current as System,
     registry: scriptRegistry,
     castMap,
     updateBeatTool,
     emit: ((roomId: string, event: string, detail: unknown) => {
-      // Cast through generic position — late-binding proxy is generic, the
-      // emitter is generic, but the call site is monomorphic at runtime.
       ;(scriptEvent.proxy as (roomId: string, event: string, detail: unknown) => void)(roomId, event, detail)
     }) as ScriptEventEmitter,
-  } as unknown as Parameters<typeof createScriptEngine>[0])
+  })
   // Wire the engine's room-message hook into the late-bound proxy that
   // houseCallbacks already routes through.
   scriptHook.set((roomId, message) => scriptEngine.onRoomMessage(roomId, message))

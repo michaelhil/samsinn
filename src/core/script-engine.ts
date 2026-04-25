@@ -65,7 +65,10 @@ export interface ScriptEngine {
 }
 
 export interface ScriptEngineDeps {
-  readonly system: System
+  // Lazy ref so the engine can be constructed before `System` is fully assembled.
+  // (createSystem returns System, but the engine has to live inside that
+  //  return value — chicken/egg solved by deferring system access via a getter.)
+  readonly getSystem: () => System
   readonly registry: ScriptRegistry
   readonly castMap: MutableCastMap
   readonly updateBeatTool: Tool
@@ -95,7 +98,8 @@ export const createCastMap = (): MutableCastMap => {
 // === Engine ===
 
 export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
-  const { system, registry, castMap, updateBeatTool, emit } = deps
+  const { getSystem, registry, castMap, updateBeatTool, emit } = deps
+  const system = (): System => getSystem()
 
   // Per-room cast id list and original delivery mode (restored on stop).
   const spawnedCast = new Map<string, string[]>()         // roomId → agent ids spawned by us
@@ -112,10 +116,10 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
   const start = async (roomId: string, scriptName: string): Promise<{ ok: boolean; reason?: string }> => {
     if (registry.get(roomId)) return { ok: false, reason: 'a script is already running in this room' }
 
-    const room = system.house.getRoom(roomId)
+    const room = system().house.getRoom(roomId)
     if (!room) return { ok: false, reason: 'room not found' }
 
-    const script = system.scriptStore.get(scriptName)
+    const script = system().scriptStore.get(scriptName)
     if (!script) return { ok: false, reason: `script "${scriptName}" not found` }
 
     // Spawn AI cast under scoped names.
@@ -125,18 +129,18 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
       if (!member.agentConfig) continue
       const scopedName = scopedAgentName(roomId, member.name)
       try {
-        const agent = await system.spawnAIAgent({
+        const agent = await system().spawnAIAgent({
           ...member.agentConfig,
           name: scopedName,
           tools: ensureUpdateBeatInTools(member.agentConfig.tools, updateBeatTool.name),
         })
         spawned.push(agent.id)
         castMap.set(roomId, agent.id, member.name)
-        await system.addAgentToRoom(agent.id, roomId, 'script-engine')
+        await system().addAgentToRoom(agent.id, roomId, 'script-engine')
       } catch (err) {
         // Roll back any spawned cast members from this attempt.
         for (const id of spawned) {
-          try { system.removeAgent(id) } catch { /* best-effort */ }
+          try { system().removeAgent(id) } catch { /* best-effort */ }
         }
         castMap.clearRoom(roomId)
         return { ok: false, reason: `cast spawn failed: ${err instanceof Error ? err.message : String(err)}` }
@@ -149,8 +153,8 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
       if (member.kind !== 'human') continue
       const wantedName = member.humanAgentName
       const candidates = wantedName
-        ? [system.team.getAgent(wantedName)].filter((a): a is NonNullable<typeof a> => !!a && a.kind === 'human' && room.hasMember(a.id))
-        : system.team.listByKind('human').filter(a => room.hasMember(a.id))
+        ? [system().team.getAgent(wantedName)].filter((a): a is NonNullable<typeof a> => !!a && a.kind === 'human' && room.hasMember(a.id))
+        : system().team.listByKind('human').filter(a => room.hasMember(a.id))
       const human = candidates[0]
       if (!human) {
         await teardown(roomId, spawned)
@@ -200,9 +204,9 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
     lastSpokeTurn.delete(roomId)
     inFlight.delete(roomId)
     for (const id of spawned) {
-      try { system.removeAgent(id) } catch { /* best-effort */ }
+      try { system().removeAgent(id) } catch { /* best-effort */ }
     }
-    const room = system.house.getRoom(roomId)
+    const room = system().house.getRoom(roomId)
     const prior = priorMode.get(roomId)
     if (room && prior && room.deliveryMode !== prior) room.setDeliveryMode(prior)
     priorMode.delete(roomId)
@@ -335,11 +339,11 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
   ): Promise<{ beat: BeatRecord } | undefined> => {
     // Skip if this character is already met/abandoned — they're reactive only.
     if (run.statuses[castName] !== 'pursuing') return undefined
-    const agent = system.team.getAgent(agentId)
+    const agent = system().team.getAgent(agentId)
     const ai = agent ? asAIAgent(agent) : undefined
     if (!ai) return undefined
 
-    const room = system.house.getRoom(roomId)
+    const room = system().house.getRoom(roomId)
     if (!room) return undefined
 
     const objective = scene.objectives[castName]!
@@ -375,7 +379,7 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
 
     let response
     try {
-      response = await withTimeout(system.llm.chat(request), PHASE1_TIMEOUT_MS, `phase-1 ${castName}`)
+      response = await withTimeout(system().llm.chat(request), PHASE1_TIMEOUT_MS, `phase-1 ${castName}`)
     } catch (err) {
       console.warn(`[script:${roomId}] phase-1 ${castName} failed: ${err instanceof Error ? err.message : err}`)
       return undefined
@@ -401,13 +405,13 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
     // Find the speaker's agent id.
     const agentId = findAgentIdForCast(roomId, speaker)
     if (!agentId) return
-    const agent = system.team.getAgent(agentId)
+    const agent = system().team.getAgent(agentId)
     const ai = agent ? asAIAgent(agent) : undefined
     if (!ai) return
 
     // Activate the agent for one turn. They'll catch up on history, run a
     // full eval, post their dialogue to the room, and call update_beat.
-    const result = system.activateAgentInRoom(agentId, roomId)
+    const result = system().activateAgentInRoom(agentId, roomId)
     if (!result.ok) {
       console.warn(`[script:${roomId}] phase-2 activate ${speaker} failed: ${result.reason}`)
       return
@@ -443,12 +447,12 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
     if (!member) return undefined
     if (member.kind === 'ai') {
       const scopedName = scopedAgentName(roomId, castName)
-      return system.team.getAgent(scopedName)?.id
+      return system().team.getAgent(scopedName)?.id
     }
     if (member.kind === 'human') {
       // Find the human cast's agent id by walking the castMap.
       // Cheap: linear scan via team.listByKind('human') and asking castMap.get.
-      for (const human of system.team.listByKind('human')) {
+      for (const human of system().team.listByKind('human')) {
         if (castMap.get(roomId, human.id) === castName) return human.id
       }
     }
@@ -477,19 +481,25 @@ export const createScriptEngine = (deps: ScriptEngineDeps): ScriptEngine => {
   }
 
   const deliverSceneSetup = (roomId: string, run: ScriptRun, scene: Scene): void => {
-    const room = system.house.getRoom(roomId)
+    const room = system().house.getRoom(roomId)
     if (!room) return
     const cast = scene.present.join(', ')
+    // Post as 'chat' so cast agents pick it up in their context. (System
+    // messages are filtered out by the context-builder.)
     room.post({
       senderId: SYSTEM_SENDER_ID,
-      content: `Scene ${run.sceneIndex + 1} — ${scene.setup}\nPresent: ${cast}`,
-      type: 'system',
+      senderName: 'Narrator',
+      content: `[Scene ${run.sceneIndex + 1}] ${scene.setup}\n(Present: ${cast})`,
+      type: 'chat',
     })
   }
 
   const scheduleTick = (roomId: string): void => {
-    // Defer to the next microtask so we don't blow the stack.
-    queueMicrotask(() => { void tick(roomId) })
+    // setTimeout (not queueMicrotask) so the scheduling escapes the
+    // currently-pending tick's whenIdle continuation chain. Microtasks can
+    // get re-entrancy-rejected when they run inside the parent's await
+    // boundary; setTimeout pushes to a clean macrotask cycle.
+    setTimeout(() => { void tick(roomId) }, 0)
   }
 
   // --- Public hook for room.onMessagePosted ---
