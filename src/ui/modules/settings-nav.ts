@@ -4,7 +4,7 @@
 
 import { domRefs } from './app-dom.ts'
 
-type SettingsRow = 'prompt' | 'providers' | 'tools' | 'skills' | 'packs' | 'logging' | 'instances' | 'reset'
+type SettingsRow = 'prompt' | 'providers' | 'tools' | 'skills' | 'packs' | 'logging' | 'instances'
 
 const openers: Record<SettingsRow, () => Promise<void> | void> = {
   prompt: async () => {
@@ -34,10 +34,6 @@ const openers: Record<SettingsRow, () => Promise<void> | void> = {
   instances: async () => {
     const m = await import('./instances-modal.ts')
     await m.openInstancesModal()
-  },
-  reset: async () => {
-    const m = await import('./reset-button.ts')
-    await m.triggerReset()
   },
 }
 

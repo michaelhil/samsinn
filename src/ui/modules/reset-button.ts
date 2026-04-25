@@ -61,41 +61,35 @@ const showCountdownBanner = (commitsAtMs: number): void => {
 
 const showConfirmModal = (): Promise<boolean> =>
   new Promise(resolve => {
-    const overlay = document.createElement('div')
-    overlay.style.cssText = 'position:fixed;inset:0;background:var(--shadow-overlay);display:flex;align-items:center;justify-content:center;z-index:9998'
-
-    const card = document.createElement('div')
-    card.style.cssText = 'background:var(--surface);padding:20px;border-radius:8px;box-shadow:0 4px 24px var(--shadow-overlay);max-width:420px;width:90%;font-family:system-ui,sans-serif'
-
-    const title = document.createElement('h2')
-    title.textContent = '⚠ Reset sandbox?'
-    title.style.cssText = 'margin:0 0 8px;font-size:16px;font-weight:600;color:var(--text-strong)'
-
-    const desc = document.createElement('p')
-    desc.textContent = 'Wipes all rooms, agents, messages, agent memory, installed packs, and any user-created skills/tools. Returns to the default state. There is a 10-second window after confirming where any user can cancel.'
-    desc.style.cssText = 'margin:0 0 16px;font-size:13px;line-height:1.5;color:var(--text)'
-
-    const actions = document.createElement('div')
-    actions.style.cssText = 'display:flex;gap:8px;justify-content:flex-end'
-
-    const cancel = document.createElement('button')
-    cancel.textContent = 'Cancel'
-    cancel.style.cssText = 'padding:8px 14px;border:1px solid var(--border-strong);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer'
-    cancel.onclick = () => { overlay.remove(); resolve(false) }
-
-    const confirm = document.createElement('button')
-    confirm.textContent = 'Reset'
-    confirm.style.cssText = 'padding:8px 14px;border:none;border-radius:4px;background:var(--danger);color:#fff;font-size:13px;font-weight:600;cursor:pointer'
-    confirm.onclick = () => { overlay.remove(); resolve(true) }
-
-    actions.appendChild(cancel)
-    actions.appendChild(confirm)
-    card.appendChild(title)
-    card.appendChild(desc)
-    card.appendChild(actions)
-    overlay.appendChild(card)
-    document.body.appendChild(overlay)
-    cancel.focus()
+    // Use a <dialog> with showModal() so the confirm sits on the browser's
+    // top layer above any other open <dialog> (e.g. when Reset is triggered
+    // from inside the Instances modal).
+    const dlg = document.createElement('dialog')
+    dlg.className = 'rounded-lg shadow-xl bg-surface text-text'
+    dlg.style.cssText = 'max-width:420px;width:90%;padding:20px;border:none'
+    dlg.innerHTML = `
+      <h2 style="margin:0 0 8px;font-size:16px;font-weight:600;color:var(--text-strong)">⚠ Reset this sandbox?</h2>
+      <p style="margin:0 0 16px;font-size:13px;line-height:1.5;color:var(--text)">
+        Wipes all rooms, agents, messages, and per-instance memory in this sandbox. Shared packs, skills, and provider keys are kept. There is a 10-second window after confirming where any user can cancel.
+      </p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" id="reset-cancel" style="padding:8px 14px;border:1px solid var(--border-strong);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer">Cancel</button>
+        <button type="button" id="reset-ok" style="padding:8px 14px;border:none;border-radius:4px;background:var(--danger);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Reset</button>
+      </div>
+    `
+    const close = (result: boolean) => {
+      dlg.close()
+      dlg.remove()
+      resolve(result)
+    }
+    document.body.appendChild(dlg)
+    const cancelBtn = dlg.querySelector<HTMLButtonElement>('#reset-cancel')!
+    const okBtn = dlg.querySelector<HTMLButtonElement>('#reset-ok')!
+    cancelBtn.onclick = () => close(false)
+    okBtn.onclick = () => close(true)
+    dlg.addEventListener('cancel', () => close(false))
+    dlg.showModal()
+    cancelBtn.focus()
   })
 
 // Triggered from the Settings drawer. Shows a confirmation modal, then POSTs

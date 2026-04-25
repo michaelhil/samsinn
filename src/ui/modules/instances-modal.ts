@@ -138,7 +138,13 @@ const renderList = async (listEl: HTMLElement): Promise<void> => {
       reset.className = 'px-2 py-1 text-xs border border-danger text-danger rounded hover:bg-danger hover:text-white'
       reset.textContent = 'Reset'
       reset.title = 'Wipe this sandbox (10-second cancellable countdown)'
-      reset.onclick = () => { void triggerReset() }
+      reset.onclick = () => {
+        // Close the Instances dialog so the post-confirm countdown banner
+        // (a position:fixed div) isn't hidden behind the modal's top-layer.
+        const dlg = document.getElementById('instances-modal') as HTMLDialogElement | null
+        dlg?.close()
+        void triggerReset()
+      }
       actions.appendChild(reset)
     } else {
       const sw = document.createElement('button')
