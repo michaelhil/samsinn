@@ -4,6 +4,9 @@
 export interface UIMessage {
   id: string
   senderId: string
+  senderName?: string   // forwarded from server Message; used as render fallback
+                        // when the sender isn't in the local agents map (e.g.
+                        // the local human before their AgentJoined snapshot).
   content: string
   timestamp: number
   type: string

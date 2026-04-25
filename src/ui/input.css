@@ -51,5 +51,16 @@
   --color-macro-accent-soft:  var(--macro-accent-soft);
   --color-macro-accent-bg:    var(--macro-accent-bg);
   --color-macro-accent-border:var(--macro-accent-border);
+
+  /* Elevation — drives Tailwind's shadow-{sm,md,lg}. shadow-xl stays the
+     Tailwind default (used only by modal cards). */
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  /* Radius — drives rounded-{sm,md,lg}. */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
 }
 

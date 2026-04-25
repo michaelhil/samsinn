@@ -1,15 +1,15 @@
 // ============================================================================
-// Packs panel — sidebar section listing installed packs with per-pack
-// update/uninstall buttons and a header "+" that prompts for install source.
+// Packs panel — renderers used by the Settings > Packs modal.
 //
-// Re-renders on:
-//   - initial sidebar expand
-//   - `packs-changed` custom event (fired by ws-dispatch on packs_changed)
+// `renderPacksInto(container)` populates the given element with the current
+// pack list (rows + update/uninstall per row). `promptInstall()` is the
+// install-new-pack flow triggered by the modal's header "+" button.
 //
-// No polling — packs mutate rarely enough that the WS broadcast is enough.
+// Re-renders on `packs-changed` DOM event (fired by ws-dispatch on WS
+// packs_changed). Listener is registered once on module load and only acts
+// when the container it last rendered into is still in the DOM.
 // ============================================================================
 
-import { domRefs } from './app-dom.ts'
 import { showToast } from './toast.ts'
 
 interface InstalledPack {
@@ -28,28 +28,29 @@ const fetchPacks = async (): Promise<InstalledPack[]> => {
   } catch { return [] }
 }
 
-const renderPacksList = async (): Promise<void> => {
+export const renderPacksInto = async (container: HTMLElement): Promise<void> => {
   const packs = await fetchPacks()
-  domRefs.packsList.innerHTML = ''
+  container.innerHTML = ''
 
   if (packs.length === 0) {
-    domRefs.packsList.innerHTML = '<div class="text-xs text-text-muted px-3 py-1">No packs installed</div>'
+    container.innerHTML = '<div class="text-xs text-text-muted px-3 py-2">No packs installed</div>'
     return
   }
 
   for (const pack of packs) {
     const row = document.createElement('div')
-    row.className = 'px-3 py-1 text-xs hover:bg-surface-muted flex items-center gap-1'
+    row.className = 'px-3 py-2 text-xs hover:bg-surface-muted flex items-center gap-2 border-b border-border'
     const label = pack.manifest.name ?? pack.namespace
     const desc = pack.manifest.description ?? ''
     const counts = `${pack.tools.length} tool${pack.tools.length === 1 ? '' : 's'}, ${pack.skills.length} skill${pack.skills.length === 1 ? '' : 's'}`
     row.innerHTML = `
-      <div class="flex-1 min-w-0 truncate" title="${desc || counts}">
-        <span class="text-text-strong">${label}</span>
-        <span class="text-text-muted"> · ${counts}</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-text-strong font-medium truncate">${label}</div>
+        <div class="text-text-muted truncate" title="${desc}">${desc || counts}</div>
+        <div class="text-text-subtle text-[10px]">${counts}</div>
       </div>
-      <button class="pack-update text-text-subtle hover:text-text" title="Update (git pull)">↻</button>
-      <button class="pack-uninstall text-text-subtle hover:text-danger" title="Uninstall">✕</button>
+      <button class="pack-update text-text-subtle hover:text-text px-2 py-1" title="Update (git pull)">↻</button>
+      <button class="pack-uninstall text-text-subtle hover:text-danger px-2 py-1" title="Uninstall">✕</button>
     `
     row.querySelector<HTMLButtonElement>('.pack-update')?.addEventListener('click', async () => {
       showToast(document.body, `${pack.namespace}: updating…`, { position: 'fixed' })
@@ -67,11 +68,11 @@ const renderPacksList = async (): Promise<void> => {
         type: ok ? 'success' : 'error', position: 'fixed',
       })
     })
-    domRefs.packsList.appendChild(row)
+    container.appendChild(row)
   }
 }
 
-const promptInstall = async (): Promise<void> => {
+export const promptInstall = async (): Promise<void> => {
   const source = prompt(
     'Install pack from:\n\n' +
     '  name                → github.com/samsinn-packs/<name>\n' +
@@ -98,38 +99,4 @@ const promptInstall = async (): Promise<void> => {
     `${data.namespace}: ${data.tools.length} tools, ${data.skills.length} skills`,
     { type: 'success', position: 'fixed' },
   )
-}
-
-let loaded = false
-let changeListener: ((ev: Event) => void) | null = null
-
-export const initPacksPanel = (): void => {
-  const { packsHeader, packsList, packsToggle } = domRefs
-
-  const updateLabel = (expanded: boolean): void => {
-    packsToggle.textContent = `${expanded ? '▾' : '▸'} Packs`
-  }
-
-  packsHeader.onclick = async (e) => {
-    if ((e.target as HTMLElement).closest('button[data-packs-action]')) return
-    const nowHidden = packsList.classList.toggle('hidden')
-    updateLabel(!nowHidden)
-    if (!nowHidden && !loaded) {
-      loaded = true
-      await renderPacksList()
-    }
-  }
-
-  const installBtn = document.getElementById('btn-install-pack')
-  if (installBtn) {
-    installBtn.onclick = (e) => { e.stopPropagation(); void promptInstall() }
-  }
-
-  // WS-driven refresh: re-render whenever packs change (install/update/uninstall).
-  if (!changeListener) {
-    changeListener = () => {
-      if (loaded) void renderPacksList()
-    }
-    window.addEventListener('packs-changed', changeListener)
-  }
 }

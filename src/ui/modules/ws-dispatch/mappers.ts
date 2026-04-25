@@ -10,6 +10,7 @@ import type { AgentEntry } from '../stores.ts'
 export const toUIMessage = (m: Message): UIMessage => ({
   id: m.id,
   senderId: m.senderId,
+  ...(m.senderName !== undefined ? { senderName: m.senderName } : {}),
   content: m.content,
   timestamp: m.timestamp,
   type: m.type,

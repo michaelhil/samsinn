@@ -3,6 +3,7 @@
 
 import type { UIMessage, AgentInfo } from './render-types.ts'
 import { renderMermaidBlocks } from './mermaid/index.ts'
+import { icon } from './icon.ts'
 
 // Render Markdown content safely. Falls back to textContent if libraries not loaded.
 // Post-processes mermaid code blocks into rendered diagrams.
@@ -51,7 +52,7 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
 
   if (isPass) {
     const senderInfo = getAgent(msg.senderId)
-    const senderName = senderInfo?.name ?? msg.senderId
+    const senderName = senderInfo?.name ?? msg.senderName ?? msg.senderId
     div.className = 'msg-pass text-xs py-1 px-2'
     div.textContent = `${senderName} ${msg.content}`
   } else if (isMute) {
@@ -61,15 +62,15 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
     div.className = 'msg-system text-xs py-1 px-2'
     div.textContent = msg.content
   } else {
-    div.className = `rounded px-3 py-2 text-sm ${isSelf ? 'msg-self' : 'msg-agent'}`
+    div.className = `rounded-md px-3 py-2 text-sm border border-border shadow-sm ${isSelf ? 'msg-self' : 'msg-agent'}`
 
     const header = document.createElement('div')
     header.className = 'flex items-center gap-2 mb-1'
 
     const nameEl = document.createElement('span')
-    nameEl.className = 'font-medium text-text-strong text-xs'
+    nameEl.className = 'font-semibold text-text-strong text-xs'
     const sender = getAgent(msg.senderId)
-    nameEl.textContent = sender?.name ?? msg.senderId
+    nameEl.textContent = sender?.name ?? msg.senderName ?? msg.senderId
 
     const timeEl = document.createElement('span')
     timeEl.className = 'text-xs text-text-muted'
@@ -136,9 +137,10 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
 
       if (onBookmark) {
         const bmBtn = document.createElement('button')
-        bmBtn.className = 'text-xs opacity-0 group-hover:opacity-100'
-        bmBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="#ef4444" style="transform: rotate(45deg); display: inline-block; vertical-align: middle;"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
+        bmBtn.className = 'icon-btn opacity-0 group-hover:opacity-100'
         bmBtn.title = 'Bookmark message'
+        bmBtn.setAttribute('aria-label', 'Bookmark message')
+        bmBtn.appendChild(icon('bookmark', { size: 12, fill: 'var(--danger)', style: 'transform: rotate(45deg);' }))
         bmBtn.onclick = (e) => { e.stopPropagation(); onBookmark(msg.content) }
         header.appendChild(bmBtn)
       }
@@ -148,7 +150,7 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
         pinBtn.className = 'text-border-strong hover:text-warning text-xs opacity-0 group-hover:opacity-100'
         pinBtn.textContent = '📌'
         pinBtn.title = 'Pin message'
-        pinBtn.onclick = (e) => { e.stopPropagation(); onPin(msg.id, sender?.name ?? msg.senderId, msg.content) }
+        pinBtn.onclick = (e) => { e.stopPropagation(); onPin(msg.id, sender?.name ?? msg.senderName ?? msg.senderId, msg.content) }
         header.appendChild(pinBtn)
       }
 

@@ -38,7 +38,7 @@ import {
 import { stopProvidersPanel } from './providers-panel.ts'
 import { startLoggingStateDot } from './logging-panel.ts'
 import { initSettingsNav } from './settings-nav.ts'
-import { hydrateIconPlaceholders } from './icon.ts'
+import { hydrateIconPlaceholders, icon } from './icon.ts'
 import {
   isSummaryGroupExpanded,
   initSummaryPanel,
@@ -88,16 +88,14 @@ import { createThinkingController } from './app-thinking.ts'
 const {
   roomList, roomHeader, roomNameEl, roomInfoBar, roomsToggle, roomsHeader,
   agentList, roomMembers, noRoomState, agentArea, chatArea, pinnedMessagesDiv,
-  workspaceBar, workspacePane, workspaceContent, workspaceLabel, workspaceAddRow,
-  artifactInput, btnArtifactSubmit, messagesDiv, chatForm, chatInput,
-  roomStatusDot, btnModeBroadcast, btnModeManual,
+  messagesDiv, chatForm, chatInput,
+  roomStatusDot, btnModeToggle, btnWorkspace,
   btnMacroPicker, btnMacroList, btnMacroNext, btnMacroCreate,
   macroChip, macroChipName, macroChipStep, btnMacroStop,
   btnSummaryToggle, btnSummarySettings, btnSummaryInspect, btnSummaryRegenerate,
   roomModeInfo,
   nameModal, nameForm, roomModal, roomForm, agentModal, agentForm,
   agentsHeader, agentsToggle,
-  artifactTypeSelect,
   ollamaStatusDot, ollamaDashboard, ollamaDashboardClose,
   ollamaUrlSelect, ollamaUrlInput, btnOllamaUrlAdd, btnOllamaUrlDelete,
 } = domRefs
@@ -107,7 +105,9 @@ const {
 // throwing ReferenceError at module load and halting handler wiring.
 const $ = (sel: string) => document.querySelector(sel)!
 
-const workspace = createWorkspace({ bar: workspaceBar, pane: workspacePane, chatArea, label: workspaceLabel })
+// Workspace is wired later (below handleArtifactAction).
+// eslint-disable-next-line prefer-const
+let workspace: ReturnType<typeof createWorkspace>
 
 // === WS client ===
 // The `client` reference is held in ws-send.ts so any UI module can call
@@ -176,23 +176,15 @@ const handleArtifactAction = (action: ArtifactAction): void => {
 // Prompt-context modal + per-message view-context handler live in context-modal.ts.
 import { showContextModal, handleViewContext } from './context-modal.ts'
 
-const submitArtifact = (): void => {
-  const roomId = $selectedRoomId.get()
-  if (!roomId) return
-  const roomName = roomIdToName(roomId)
-  if (!roomName) return
-  const title = artifactInput.value.trim()
-  if (!title) return
-  const artifactType = artifactTypeSelect.value
-  const defaultBodies: Record<string, Record<string, unknown>> = {
-    task_list: { tasks: [] },
-    document: { blocks: [] },
-    poll: { question: '', options: [{ id: '1', text: 'Option 1' }, { id: '2', text: 'Option 2' }], allowMultiple: false, votes: {} },
-    mermaid: { source: 'graph TD\n  A-->B' },
-  }
-  send({ type: 'add_artifact', artifactType, title, body: defaultBodies[artifactType] ?? {}, scope: [roomName] })
-  artifactInput.value = ''
-}
+// Workspace wired here, after handleArtifactAction is in scope. Subscribers
+// to $selectedRoomArtifacts and the btn-workspace click handler use this.
+workspace = createWorkspace({
+  button: btnWorkspace,
+  send,
+  roomIdToName,
+  onAction: handleArtifactAction,
+})
+btnWorkspace.onclick = () => workspace.open()
 
 // === Data fetching (triggered by subscriptions) ===
 // Lives in room-fetchers.ts — imported above.
@@ -219,9 +211,17 @@ const refreshRoomControls = (): void => {
   roomStatusDot.setAttribute('aria-pressed', paused ? 'true' : 'false')
   roomStatusDot.title = paused ? 'Paused — click to resume' : 'Active — click to pause'
 
-  // Mode icons
-  btnModeBroadcast.setAttribute('aria-pressed', mode === 'broadcast' ? 'true' : 'false')
-  btnModeManual.setAttribute('aria-pressed', mode === 'manual' ? 'true' : 'false')
+  // Mode toggle: swap the inner icon and labels based on current mode.
+  // aria-pressed reflects "is manual active" (the alternative to default
+  // broadcast) so screen readers can announce the toggled state.
+  const isManual = mode === 'manual'
+  btnModeToggle.setAttribute('aria-pressed', String(isManual))
+  const altMode = isManual ? 'Broadcast' : 'Manual'
+  const currentLabel = isManual ? 'Manual' : 'Broadcast'
+  const labelText = `${currentLabel} — click to switch to ${altMode}`
+  btnModeToggle.title = labelText
+  btnModeToggle.setAttribute('aria-label', labelText)
+  btnModeToggle.replaceChildren(icon(isManual ? 'hand' : 'megaphone', { size: 14 }))
 
   // Macro group expand state (per-room) — state lives in macro-panel.ts
   const expanded = roomId ? isMacroGroupExpanded(roomId) : false
@@ -495,21 +495,15 @@ $agents.listen((_agents, _old, _changedId) => {
 //     Preview / tools / contexts / warnings listeners wired by initThinkingDisplay. ---
 initThinkingDisplay({ messagesDiv, firstChunkSeen, showContextModal })
 
-// --- Artifacts → workspace ---
+// --- Artifacts → workspace badge ---
+// The modal subscribes to $selectedRoomArtifacts itself for live content;
+// here we only mirror the count to the toolbar badge and refresh room
+// controls (macro artifacts may have changed).
 $selectedRoomArtifacts.subscribe((artifacts) => {
   const roomId = $selectedRoomId.get()
   if (!roomId) return
   const active = artifacts.filter(a => !a.resolvedAt)
   workspace.setCount(active.length)
-  workspaceAddRow.classList.toggle('hidden', workspace.getMode() === 'collapsed')
-  if (workspace.getMode() !== 'collapsed') {
-    if (active.length > 0) {
-      renderArtifacts(workspaceContent, active, $myAgentId.get() ?? '', handleArtifactAction)
-    } else {
-      workspaceContent.innerHTML = '<p class="text-xs text-text-muted italic py-0.5">No artifacts yet</p>'
-    }
-  }
-  // Update mode selector (macro artifacts may have changed)
   refreshRoomControls()
 })
 
@@ -652,8 +646,12 @@ const setMode = (mode: 'broadcast' | 'manual'): void => {
   if (!roomName) return
   send({ type: 'set_delivery_mode', roomName, mode })
 }
-btnModeBroadcast.onclick = () => setMode('broadcast')
-btnModeManual.onclick = () => setMode('manual')
+// Single mode toggle — flips between broadcast and manual. The icon and
+// title are kept in sync by refreshRoomControls() driven by $modeView.
+btnModeToggle.onclick = () => {
+  const next = $currentDeliveryMode.get() === 'manual' ? 'broadcast' : 'manual'
+  setMode(next)
+}
 
 // --- Macro group (Stop, Picker, List, Next, Create) lives in macro-panel.ts.
 //     Wired once below via initMacroPanel. ---
@@ -694,11 +692,8 @@ agentModal.addEventListener('close', () => {
   clearAutoAddRoom()
 })
 
-btnArtifactSubmit.onclick = (e) => { e.stopPropagation(); submitArtifact() }
-artifactInput.onkeydown = (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); submitArtifact() }
-  if (e.key === 'Escape') { artifactInput.value = ''; artifactInput.blur() }
-}
+// Artifact submit + input handlers now live inside the workspace modal
+// (workspace.ts), so app.ts no longer wires them.
 
 // Sidebar section toggles
 // Section toggles: click the dedicated toggle button (with aria-expanded)

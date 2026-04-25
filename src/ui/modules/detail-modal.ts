@@ -69,14 +69,6 @@ export const prettyJson = (value: unknown): string => {
   try { return JSON.stringify(value, null, 2) } catch { return String(value) }
 }
 
-export const createTextarea = (value: string, rows = 12): HTMLTextAreaElement => {
-  const ta = document.createElement('textarea')
-  ta.className = 'w-full border rounded p-3 text-sm font-mono resize-y focus:outline-none bg-surface border-border text-text'
-  ta.style.height = `${rows * 1.5}rem`
-  ta.value = value
-  return ta
-}
-
 export const createButtonRow = (
   onCancel: () => void,
   onSave: () => void,
@@ -94,6 +86,83 @@ export const createButtonRow = (
   save.onclick = onSave
   row.appendChild(cancel); row.appendChild(save)
   return row
+}
+
+// ============================================================================
+// Button + Input primitives — class-driven; visual rules live in index.html
+// (.btn, .btn-primary, .btn-ghost, .btn-danger, .input). Helpers below own
+// the *contract* so callers don't construct elements by hand.
+// ============================================================================
+
+export type ButtonVariant = 'primary' | 'primary-pending' | 'ghost' | 'danger'
+
+export interface ButtonOptions {
+  readonly variant?: ButtonVariant   // default 'ghost'
+  readonly label?: string            // text inside the button
+  readonly icon?: SVGElement         // prepended before label; from icon()
+  readonly title?: string            // tooltip
+  readonly ariaLabel?: string        // explicit a11y label (defaults to title or label)
+  readonly className?: string        // extra utility classes appended (layout helpers)
+  readonly type?: 'button' | 'submit'
+  readonly onClick?: (e: MouseEvent) => void
+  readonly disabled?: boolean
+}
+
+export const createButton = (opts: ButtonOptions = {}): HTMLButtonElement => {
+  const btn = document.createElement('button')
+  btn.type = opts.type ?? 'button'
+  const variant = opts.variant ?? 'ghost'
+  btn.className = `btn btn-${variant}${opts.className ? ' ' + opts.className : ''}`
+  if (opts.icon) btn.appendChild(opts.icon)
+  if (opts.label) {
+    const span = document.createElement('span')
+    span.textContent = opts.label
+    btn.appendChild(span)
+  }
+  if (opts.title) btn.title = opts.title
+  const a11y = opts.ariaLabel ?? opts.title ?? opts.label
+  if (a11y) btn.setAttribute('aria-label', a11y)
+  if (opts.disabled) btn.disabled = true
+  if (opts.onClick) btn.onclick = opts.onClick
+  return btn
+}
+
+// Mutate a button's pending vs primary class — used by dirty-state save buttons.
+export const setButtonPending = (btn: HTMLButtonElement, pending: boolean): void => {
+  btn.classList.toggle('btn-primary-pending', pending)
+  btn.classList.toggle('btn-primary', !pending)
+  btn.style.cursor = pending ? 'not-allowed' : 'pointer'
+}
+
+export interface InputOptions {
+  readonly placeholder?: string
+  readonly value?: string
+  readonly disabled?: boolean
+  readonly type?: 'text' | 'number' | 'password' | 'email'
+  readonly className?: string
+  readonly mono?: boolean
+}
+
+export const createInput = (opts: InputOptions = {}): HTMLInputElement => {
+  const el = document.createElement('input')
+  el.type = opts.type ?? 'text'
+  el.className = `input${opts.mono ? ' font-mono' : ''}${opts.className ? ' ' + opts.className : ''}`
+  if (opts.placeholder) el.placeholder = opts.placeholder
+  if (opts.value !== undefined) el.value = opts.value
+  if (opts.disabled) el.disabled = true
+  return el
+}
+
+export const createTextarea = (
+  value: string = '',
+  rows: number = 6,
+  opts: { readonly className?: string } = {},
+): HTMLTextAreaElement => {
+  const el = document.createElement('textarea')
+  el.className = `input${opts.className ? ' ' + opts.className : ''}`
+  el.rows = rows
+  el.value = value
+  return el
 }
 
 // ============================================================================
@@ -165,6 +234,65 @@ export const createModal = (config: ModalConfig): ModalElements => {
   document.addEventListener('keydown', onEsc)
 
   return { overlay, card, header, scrollBody, footer, close }
+}
+
+// ============================================================================
+// Master / detail modal — left list + right detail pane, sharing one header
+// and footer. Single source of truth for the "list-then-inspect" pattern
+// used by Tools and Skills so future lists don't re-derive the flex layout
+// (and don't fall victim to Tailwind utilities missing from the compiled
+// CSS — all critical layout dimensions here are inline styles).
+// ============================================================================
+
+export interface MasterDetailModalConfig {
+  readonly title: string
+  readonly masterWidth?: string      // CSS value, default '18rem'
+  readonly width?: string            // Tailwind max-w class, default 'max-w-4xl'
+  readonly height?: string           // CSS value, default '75vh' — master-detail
+                                     //   needs a substantial canvas regardless of
+                                     //   detail content height, or the list column
+                                     //   collapses with the flex-1 scrollBody.
+  readonly maxHeight?: string        // default '90vh'
+}
+
+export interface MasterDetailElements extends ModalElements {
+  readonly master: HTMLDivElement    // append list rows here
+  readonly detail: HTMLDivElement    // swap detail content here
+}
+
+export const createMasterDetailModal = (config: MasterDetailModalConfig): MasterDetailElements => {
+  const modal = createModal({
+    title: config.title,
+    width: config.width ?? 'max-w-4xl',
+    maxHeight: config.maxHeight,
+  })
+
+  // Fixed canvas height so the master list has room even when the detail
+  // pane is empty or short. Without this the card sizes to content and the
+  // flex-1 scrollBody collapses with no children to stretch it.
+  modal.card.style.height = config.height ?? '75vh'
+
+  // Neutralise the default scrollBody chrome so it hosts a side-by-side layout.
+  modal.scrollBody.className = 'flex-1 flex overflow-hidden'
+  modal.scrollBody.style.minHeight = '0'
+
+  const master = document.createElement('div')
+  master.className = 'border-r border-border flex flex-col'
+  master.style.flex = `0 0 ${config.masterWidth ?? '18rem'}`
+  master.style.minHeight = '0'
+  master.style.overflow = 'hidden'
+
+  const detail = document.createElement('div')
+  detail.className = 'flex flex-col'
+  detail.style.flex = '1 1 0'
+  detail.style.minWidth = '0'
+  detail.style.minHeight = '0'
+  detail.style.overflow = 'auto'
+
+  modal.scrollBody.appendChild(master)
+  modal.scrollBody.appendChild(detail)
+
+  return { ...modal, master, detail }
 }
 
 // Read-only preview modal: show a title + token estimate + pre-formatted body.

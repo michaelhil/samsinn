@@ -210,11 +210,17 @@ export const $pendingModelChanges = map<Record<string, PendingModelChange>>({})
 
 // === UI chrome ===
 
-export const $sidebarCollapsed = atom(
-  typeof localStorage !== 'undefined'
-    ? localStorage.getItem('samsinn-sidebar-collapsed') === 'true'
-    : false,
-)
+// Sidebar width in pixels. 0 = collapsed. Persisted to localStorage by the
+// resize handler; stored here so any subscriber (e.g. layout measurements)
+// can react. Read at boot from localStorage.
+const readSidebarWidth = (): number => {
+  if (typeof localStorage === 'undefined') return 160
+  const raw = localStorage.getItem('samsinn-sidebar-width')
+  if (raw === null) return 160
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : 160
+}
+export const $sidebarWidth = atom<number>(readSidebarWidth())
 
 // Tools/skills sidebar atoms moved to sidebar.ts (not shared).
 

@@ -3,7 +3,7 @@
 // dirty-state tracking and a single Update button that PUTs back to the
 // house endpoint.
 
-import { createModal, createTextarea } from './detail-modal.ts'
+import { createModal, createTextarea, createButton, setButtonPending } from './detail-modal.ts'
 import { showToast } from './toast.ts'
 
 export const openSystemPromptModal = async (): Promise<void> => {
@@ -30,10 +30,7 @@ export const openSystemPromptModal = async (): Promise<void> => {
 
   const btnRow = document.createElement('div')
   btnRow.className = 'flex justify-end relative w-full'
-  const updateBtn = document.createElement('button')
-  updateBtn.className = 'text-xs px-3 py-1 rounded text-white bg-border-strong'
-  updateBtn.style.cursor = 'not-allowed'
-  updateBtn.textContent = 'Update'
+  const updateBtn = createButton({ variant: 'primary-pending', label: 'Update' })
   btnRow.appendChild(updateBtn)
   modal.footer.appendChild(btnRow)
 
@@ -43,10 +40,7 @@ export const openSystemPromptModal = async (): Promise<void> => {
     houseArea.value !== savedHouse || formatArea.value !== savedFormat
 
   const updateStyle = (): void => {
-    const dirty = isDirty()
-    updateBtn.classList.toggle('bg-accent', dirty)
-    updateBtn.classList.toggle('bg-border-strong', !dirty)
-    updateBtn.style.cursor = dirty ? 'pointer' : 'not-allowed'
+    setButtonPending(updateBtn, !isDirty())
   }
 
   houseArea.oninput = updateStyle

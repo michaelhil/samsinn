@@ -185,10 +185,32 @@
     #sidebar-resize.dragging::before { background: var(--accent); }
     body.sidebar-dragging { cursor: col-resize; user-select: none; }
     body.sidebar-dragging * { user-select: none; }
-    .workspace-handle { cursor: row-resize; }
-    .workspace-handle:active { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+    /* Workspace toolbar badge: tiny numeric chip overlaid on the icon
+       button when count > 0. Position: top-right of the 24×24 hit area. */
+    .workspace-badge {
+      position: absolute;
+      top: -2px; right: -4px;
+      min-width: 14px; height: 14px;
+      padding: 0 3px;
+      border-radius: 7px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 10px; font-weight: 600; line-height: 14px;
+      text-align: center;
+      pointer-events: none;
+    }
+    #btn-workspace { position: relative; }
 
     /* === Global polish ================================================== */
+
+    /* Room-header toolbar groupings. Three logical clusters separated by
+       a thin vertical divider; .toolbar-divider is added to clusters 2..n. */
+    .toolbar-group { display: flex; align-items: center; gap: 4px; }
+    .toolbar-divider {
+      border-left: 1px solid var(--border);
+      margin-left: 6px;
+      padding-left: 6px;
+    }
 
     /* Default transition on interactive surfaces — rows, buttons, links.
        Opt in by adding .interactive to the element. Everything in the
@@ -351,6 +373,7 @@
             <span>Logging</span>
             <span id="logging-state-dot" class="text-xs" title="Logging state">◌</span>
           </button>
+          <button data-settings-row="reset"     class="w-full text-left text-xs text-danger py-1.5 px-3 hover:bg-surface-muted cursor-pointer interactive" title="Wipes all rooms, agents, messages, packs, and runtime-created skills/tools. 10-second cancellable countdown.">Reset to default</button>
         </div>
       </div>
 
@@ -358,7 +381,6 @@
       <div class="sidebar-content mt-auto p-2 flex items-center gap-1 text-xs whitespace-nowrap" style="border-top: 1px solid var(--border); color: var(--text-subtle);">
         <button id="app-repo-link" type="button" class="font-semibold cursor-pointer bg-transparent border-0 p-0 text-left" style="color: var(--text);" title="Open repository">samsinn</button>
         <span id="app-version" style="color: var(--text-muted);">v…</span>
-        <button id="btn-reset-sandbox" class="ml-1 cursor-pointer" style="background: transparent; border: none; color: var(--danger); font-size: 11px; padding: 0 4px;" title="Reset sandbox to default — wipes all rooms, agents, messages, packs, and runtime-created skills/tools">↺ reset</button>
         <span id="ollama-status-dot" style="display:none"></span>
         <button id="btn-theme-toggle" class="icon-btn ml-auto" style="color: var(--text-muted);" title="Toggle theme" aria-label="Toggle theme">
           <!-- Sun in light mode, moon in dark mode. icons are injected by app.ts init. -->
@@ -393,28 +415,31 @@
             <span>▶</span>
             <span id="macro-chip-name">—</span>
             <span id="macro-chip-step" class="opacity-70">step 0/0</span>
-            <button id="btn-macro-stop" title="Stop macro">⏹</button>
+            <button id="btn-macro-stop" class="icon-btn" title="Stop macro" aria-label="Stop macro"><span data-icon="square"></span></button>
           </span>
         </div>
         <div class="flex items-center gap-1">
-          <button id="btn-clear-messages" class="prompt-icon" title="Clear messages">🗑</button>
-          <button id="btn-bookmarks" class="prompt-icon icon-btn" title="Bookmarks" aria-label="Bookmarks"><span data-icon="bookmark" data-icon-fill="var(--danger)" data-icon-style="transform: rotate(45deg)"></span></button>
-          <button id="btn-room-prompt" class="prompt-icon icon-btn" title="Room Prompt" aria-label="Edit room prompt"><span data-icon="message-square"></span></button>
-          <div id="mode-switcher" class="mode-switcher">
-            <button id="btn-mode-broadcast" class="mode-btn" title="Broadcast — every message goes to all agents" aria-pressed="true">📣</button>
-            <button id="btn-mode-manual" class="mode-btn" title="Manual — AI agents wake only on Next or macro step" aria-pressed="false">👋</button>
+          <!-- Cluster A: room actions -->
+          <div class="toolbar-group">
+            <button id="btn-clear-messages" class="mode-btn icon-btn" title="Clear messages" aria-label="Clear messages"><span data-icon="trash"></span></button>
+            <button id="btn-bookmarks" class="mode-btn icon-btn" title="Bookmarks" aria-label="Bookmarks"><span data-icon="bookmark" data-icon-fill="var(--danger)" data-icon-style="transform: rotate(45deg)"></span></button>
+            <button id="btn-room-prompt" class="mode-btn icon-btn" title="Room Prompt" aria-label="Edit room prompt"><span data-icon="message-square"></span></button>
+            <button id="btn-mode-toggle" class="mode-btn icon-btn" title="Broadcast — click to switch to Manual" aria-label="Broadcast — click to switch to Manual" aria-pressed="false"><span data-icon="megaphone"></span></button>
+            <button id="btn-workspace" class="mode-btn icon-btn hidden" title="Workspace" aria-label="Workspace"><span data-icon="folder-open"></span></button>
           </div>
-          <div id="macro-group" class="mode-switcher">
-            <button id="btn-macro-picker" class="mode-btn" title="Macros" aria-pressed="false">🎬</button>
-            <button id="btn-macro-list" class="mode-btn hidden" title="Select a macro" disabled>📋</button>
-            <button id="btn-macro-next" class="mode-btn hidden" title="Next step — requires a selected macro" disabled>➤</button>
-            <button id="btn-macro-create" class="mode-btn hidden" title="Create new macro">＋</button>
+          <!-- Cluster B: macros -->
+          <div id="macro-group" class="toolbar-group toolbar-divider">
+            <button id="btn-macro-picker" class="mode-btn icon-btn" title="Macros" aria-label="Macros" aria-pressed="false"><span data-icon="clapperboard"></span></button>
+            <button id="btn-macro-list" class="mode-btn icon-btn hidden" title="Select a macro" aria-label="Select a macro" disabled><span data-icon="list-checks"></span></button>
+            <button id="btn-macro-next" class="mode-btn icon-btn hidden" title="Next step — requires a selected macro" aria-label="Next step" disabled><span data-icon="chevron-right"></span></button>
+            <button id="btn-macro-create" class="mode-btn icon-btn hidden" title="Create new macro" aria-label="Create new macro"><span data-icon="plus"></span></button>
           </div>
-          <div id="summary-group" class="mode-switcher">
-            <button id="btn-summary-toggle" class="mode-btn" title="Summary & compression" aria-pressed="false">🗜</button>
-            <button id="btn-summary-settings" class="mode-btn hidden" title="Summary settings">⚙</button>
-            <button id="btn-summary-inspect" class="mode-btn hidden" title="Inspect summary + compression">🔍</button>
-            <button id="btn-summary-regenerate" class="mode-btn hidden" title="Regenerate now">↻</button>
+          <!-- Cluster C: summary / compression -->
+          <div id="summary-group" class="toolbar-group toolbar-divider">
+            <button id="btn-summary-toggle" class="mode-btn icon-btn" title="Summary & compression" aria-label="Summary & compression" aria-pressed="false"><span data-icon="archive"></span></button>
+            <button id="btn-summary-settings" class="mode-btn icon-btn hidden" title="Summary settings" aria-label="Summary settings"><span data-icon="settings"></span></button>
+            <button id="btn-summary-inspect" class="mode-btn icon-btn hidden" title="Inspect summary + compression" aria-label="Inspect summary"><span data-icon="search"></span></button>
+            <button id="btn-summary-regenerate" class="mode-btn icon-btn hidden" title="Regenerate now" aria-label="Regenerate now"><span data-icon="refresh-cw"></span></button>
           </div>
         </div>
       </div>
@@ -424,16 +449,16 @@
         <div id="room-mode-info" class="text-xs text-text-muted"></div>
       </div>
 
-      <!-- Room members (chip row + add button, shown only when a room is selected) -->
-      <div id="room-members" class="px-3 py-1.5 border-b bg-surface flex flex-wrap gap-1 items-center hidden"></div>
-
       <!-- Agent inspector area (inline, replaces chat when viewing an agent) -->
       <div id="agent-area" class="flex-1 overflow-y-auto p-4 hidden"></div>
 
-      <!-- Chat area (messages + pinned + input) -->
+      <!-- Chat area (messages + pinned + chip row + input) -->
       <div id="chat-area" class="flex-1 flex flex-col min-h-0 overflow-hidden hidden">
         <div id="pinned-messages" class="border-b bg-warning-bg max-h-32 overflow-y-auto hidden"></div>
         <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
+        <!-- Room members (chip row) sits just above the input — agent
+             chips are most useful while composing a message. -->
+        <div id="room-members" class="px-3 py-1.5 border-t bg-surface flex flex-wrap gap-1 items-center hidden"></div>
         <form id="chat-form" class="p-3 border-t bg-surface flex gap-2">
           <input id="chat-input" type="text" placeholder="Type a message..."
                  class="input flex-1"
@@ -442,24 +467,8 @@
         </form>
       </div>
 
-      <!-- Workspace bar (clickable toggle) -->
-      <div id="workspace-bar" class="h-7 bg-surface-strong border-t flex items-center justify-center cursor-pointer hover:bg-border select-none hidden">
-        <span id="workspace-label" class="text-xs text-text-subtle font-medium">▲ Workspace</span>
-      </div>
-      <!-- Workspace pane (resizable) -->
-      <div id="workspace-pane" class="border-t overflow-y-auto hidden">
-        <div id="workspace-content" class="p-3 space-y-2"></div>
-        <div id="workspace-add-row" class="px-3 pb-2 flex gap-2 hidden">
-          <select id="artifact-type-select" class="text-xs border rounded px-1 py-1 bg-surface">
-            <option value="task_list">Task List</option>
-            <option value="document">Document</option>
-            <option value="poll">Poll</option>
-            <option value="mermaid">Mermaid</option>
-          </select>
-          <input id="artifact-input" type="text" placeholder="Title..." class="flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent-ring">
-          <button id="btn-artifact-submit" type="button" class="text-xs text-accent hover:text-accent font-medium">Add</button>
-        </div>
-      </div>
+      <!-- Workspace lives as a modal opened from #btn-workspace in the room toolbar. -->
+
     </section>
   </main>
 
