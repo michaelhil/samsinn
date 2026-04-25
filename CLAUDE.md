@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Version is sourced from package.json — never hardcode
+
+`package.json` `version` is the single source of truth. Every runtime
+reference resolves it dynamically:
+
+- **Boot log** + **MCP server name** — [`src/bootstrap.ts:58`](src/bootstrap.ts:58)
+  reads `package.json` once and passes the version to `createMCPServer`.
+- **`/api/system/info`** — [`src/api/routes/system.ts`](src/api/routes/system.ts)
+  reads + caches `package.json` on first request.
+- **UI sidebar footer** ([`src/ui/modules/app.ts:793`](src/ui/modules/app.ts:793))
+  and **bug-report modal context line** ([`src/ui/modules/bug-modal.ts:20`](src/ui/modules/bug-modal.ts:20))
+  fetch from `/api/system/info`.
+
+When bumping the version, **only edit `package.json`** + the README's
+top-line `> v0.X.Y` reference + the README changelog row + the git tag.
+Do NOT add a hardcoded version anywhere in `src/`.
+
+A long-running dev server caches the version at first `/api/system/info`
+hit; restart the server after a bump to see it reflected in the UI.
+
 ## Workflow: stay on master
 
 **No branches. No worktrees. Work directly on `master` and push directly to `master`.**

@@ -450,7 +450,10 @@
             <span id="room-name" class="truncate"></span>
             <span data-icon="chevron-down" data-icon-size="14"></span>
           </button>
-          <div id="room-switcher-popover" class="hidden absolute left-0 top-full mt-1 z-30 bg-surface border rounded shadow-lg py-1 text-sm min-w-[220px] max-h-[60vh] overflow-y-auto"></div>
+          <!-- Anchored to the room-switcher's bottom-left. top is set inline
+               (rather than via Tailwind top-full) because the build doesn't
+               always pick up that utility from inside this scope. -->
+          <div id="room-switcher-popover" class="hidden absolute z-30 bg-surface border rounded shadow-lg py-1 text-sm overflow-y-auto" style="left: 0; top: 100%; margin-top: 4px; min-width: 220px; max-height: 60vh;"></div>
           <!-- Running macro chip (hidden unless a run is active) -->
           <span id="macro-chip" class="macro-chip hidden">
             <span>▶</span>
