@@ -15,6 +15,7 @@ import { authEnabled, isValidSession, sessionFromRequest } from './auth.ts'
 import { handleAPI } from './http-routes.ts'
 import { handleWSMessage, type WSData } from './ws-handler.ts'
 import {
+  INSTANCE_COOKIE,
   buildInstanceCookie, resolveInstanceId, generateInstanceId,
   getJoinFromQuery,
 } from './instance-cookie.ts'
@@ -219,7 +220,15 @@ export const createServer = (config: ServerConfig) => {
         config.instances,
       )
       if (apiResponse) {
-        if (setCookieValue) apiResponse.headers.append('Set-Cookie', setCookieValue)
+        // Only append the cookieless-fallback Set-Cookie if the route didn't
+        // already set its own samsinn_instance cookie (e.g. /switch). Otherwise
+        // the browser would honor whichever appears last, masking the route's
+        // intent.
+        if (setCookieValue) {
+          const existing = apiResponse.headers.getSetCookie?.() ?? []
+          const alreadySet = existing.some(c => c.startsWith(`${INSTANCE_COOKIE}=`))
+          if (!alreadySet) apiResponse.headers.append('Set-Cookie', setCookieValue)
+        }
         return apiResponse
       }
 
