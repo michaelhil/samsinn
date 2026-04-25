@@ -555,18 +555,18 @@
   <!-- Instances Modal — list / switch / create / delete sandboxes -->
   <dialog id="instances-modal" class="rounded-lg shadow-xl p-0 w-[640px] max-w-[95vw] bg-surface text-text">
     <div class="flex flex-col" style="max-height: 80vh;">
-      <div class="px-4 py-3 border-b flex items-center justify-between">
-        <h3 class="font-medium text-text-strong">Instances (sandboxes)</h3>
-        <button type="button" id="instances-close" class="text-text-subtle hover:text-text" aria-label="Close">×</button>
+      <div class="px-4 py-3 border-b flex items-center gap-2 justify-between">
+        <h3 class="font-medium text-text-strong truncate">Instances</h3>
+        <div id="instances-header-actions" class="flex items-center gap-2 shrink-0">
+          <!-- Populated by instances-modal.ts based on browse / bulk mode -->
+        </div>
+        <button type="button" id="instances-close" class="text-text-subtle hover:text-text shrink-0" aria-label="Close">×</button>
       </div>
       <div class="px-4 py-2 text-xs text-text-subtle border-b">
         Each instance is an isolated sandbox: its own rooms, agents, messages, and snapshot. The current instance is bound to your browser by a cookie.
       </div>
       <div id="instances-list" class="flex-1 overflow-y-auto px-2 py-2 text-sm">
         <div class="text-text-subtle italic p-3">Loading…</div>
-      </div>
-      <div class="px-4 py-3 border-t flex items-center justify-end gap-2">
-        <button type="button" id="instances-new" class="px-3 py-1.5 text-sm bg-success text-white rounded">+ New instance</button>
       </div>
     </div>
   </dialog>
