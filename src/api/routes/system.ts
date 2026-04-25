@@ -95,7 +95,7 @@ export const systemRoutes: RouteEntry[] = [
   {
     // Per-instance reset — broadcasts a 10-second countdown to that
     // instance's clients only. Cancellable via /reset/cancel during the
-    // window. Single-flight per instance; 5-min cooldown per instance.
+    // window. Single-flight per instance.
     method: 'POST',
     pattern: /^\/api\/system\/reset$/,
     handler: async (req, _match, ctx) => {
@@ -105,12 +105,6 @@ export const systemRoutes: RouteEntry[] = [
       if (!id) return errorResponse('no instance cookie', 400)
 
       if (resetTimers.has(id)) return errorResponse('reset already in progress', 409)
-      const sinceLast = Date.now() - (lastResetAt.get(id) ?? 0)
-      if (sinceLast < RESET_COOLDOWN_MS) {
-        const remaining = Math.ceil((RESET_COOLDOWN_MS - sinceLast) / 1000)
-        return errorResponse(`reset cooldown — try again in ${remaining}s`, 429)
-      }
-      lastResetAt.set(id, Date.now())
       const commitsAtMs = Date.now() + RESET_COUNTDOWN_MS
 
       const sendToInstance = (msg: import('../../core/types/ws-protocol.ts').WSOutbound): void => {
@@ -123,7 +117,6 @@ export const systemRoutes: RouteEntry[] = [
         if (!result.ok) {
           sendToInstance({ type: 'reset_failed', reason: result.reason })
           resetTimers.delete(id)
-          lastResetAt.delete(id)
           return
         }
         // The instance directory was moved to .trash. The browser keeps
@@ -143,7 +136,7 @@ export const systemRoutes: RouteEntry[] = [
   {
     method: 'POST',
     pattern: /^\/api\/system\/reset\/cancel$/,
-    handler: async (req, _match, _ctx) => {
+    handler: async (req, _match, ctx) => {
       const { getInstanceId } = await import('../instance-cookie.ts')
       const id = getInstanceId(req)
       if (!id) return errorResponse('no instance cookie', 400)
@@ -151,8 +144,6 @@ export const systemRoutes: RouteEntry[] = [
       if (!timer) return errorResponse('no reset in progress', 404)
       clearTimeout(timer)
       resetTimers.delete(id)
-      lastResetAt.delete(id)   // refund the cooldown
-      const ctx = _ctx
       const sendToInstance = (msg: import('../../core/types/ws-protocol.ts').WSOutbound): void => {
         if (ctx.broadcastToInstance) ctx.broadcastToInstance(id, msg)
         else ctx.broadcast(msg)
@@ -165,6 +156,4 @@ export const systemRoutes: RouteEntry[] = [
 
 // --- Reset state — per-instance, keyed by cookie's instance id ---
 const resetTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const lastResetAt = new Map<string, number>()
-const RESET_COOLDOWN_MS = 5 * 60 * 1000
 const RESET_COUNTDOWN_MS = 10 * 1000

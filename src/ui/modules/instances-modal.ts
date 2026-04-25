@@ -45,46 +45,35 @@ const fetchList = async (): Promise<{ instances: InstanceRow[]; currentId: strin
 
 const confirmDelete = (id: string): Promise<boolean> =>
   new Promise(resolve => {
-    // Use a <dialog> with showModal() so this stacks on the browser's top
-    // layer above the parent Instances <dialog>. A z-indexed div sits below
-    // any open native modal regardless of z-index.
+    // <dialog> + showModal() so this stacks on the top layer above the
+    // parent Instances dialog.
     const dlg = document.createElement('dialog')
-    dlg.className = 'rounded-lg shadow-xl p-0 bg-surface text-text'
+    dlg.className = 'rounded-lg shadow-xl bg-surface text-text'
     dlg.style.cssText = 'max-width:440px;width:90%;padding:20px;border:none'
     dlg.innerHTML = `
       <h2 style="margin:0 0 8px;font-size:16px;font-weight:600;color:var(--text-strong)">⚠ Delete instance?</h2>
-      <p style="margin:0 0 12px;font-size:13px;line-height:1.5;color:var(--text)">
-        Wipes this sandbox's snapshot and per-instance data. Same blast radius as Reset, but the instance is removed from the list rather than re-created empty under the same id. Type the last 6 characters of the id to confirm:
-        <code style="display:block;margin-top:6px;font-size:12px;color:var(--text-strong)">…${id.slice(-6)}</code>
+      <p style="margin:0 0 16px;font-size:13px;line-height:1.5;color:var(--text)">
+        Wipes this sandbox's snapshot and per-instance data.
+        <code style="display:block;margin-top:6px;font-size:12px;color:var(--text-strong);font-family:ui-monospace,monospace">${id}</code>
       </p>
-      <input type="text" id="del-confirm" autocomplete="off" placeholder="last 6 chars" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:4px;font-family:ui-monospace,monospace;font-size:13px;margin-bottom:12px;background:var(--surface);color:var(--text)" />
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button type="button" id="del-cancel" style="padding:8px 14px;border:1px solid var(--border-strong);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer">Cancel</button>
-        <button type="button" id="del-ok" disabled style="padding:8px 14px;border:none;border-radius:4px;background:var(--danger);color:#fff;font-size:13px;font-weight:600;cursor:not-allowed;opacity:0.5">Delete</button>
+        <button type="button" id="del-ok" style="padding:8px 14px;border:none;border-radius:4px;background:var(--danger);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Delete</button>
       </div>
     `
     document.body.appendChild(dlg)
-    const input = dlg.querySelector<HTMLInputElement>('#del-confirm')!
     const okBtn = dlg.querySelector<HTMLButtonElement>('#del-ok')!
     const cancelBtn = dlg.querySelector<HTMLButtonElement>('#del-cancel')!
-    const expected = id.slice(-6)
     const close = (result: boolean) => {
       dlg.close()
       dlg.remove()
       resolve(result)
     }
-    input.oninput = () => {
-      const match = input.value.trim() === expected
-      okBtn.disabled = !match
-      okBtn.style.cursor = match ? 'pointer' : 'not-allowed'
-      okBtn.style.opacity = match ? '1' : '0.5'
-    }
     okBtn.onclick = () => close(true)
     cancelBtn.onclick = () => close(false)
-    // Esc key triggers <dialog>'s native cancel event.
     dlg.addEventListener('cancel', () => close(false))
     dlg.showModal()
-    setTimeout(() => input.focus(), 0)
+    cancelBtn.focus()
   })
 
 const renderList = async (listEl: HTMLElement): Promise<void> => {
