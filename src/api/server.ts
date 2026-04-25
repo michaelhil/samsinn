@@ -111,6 +111,19 @@ const serveStatic = async (pathname: string, uiPath: string, transpiler: Bun.Tra
   return null
 }
 
+// Security headers applied to every HTTP response. CSP intentionally
+// absent — that's set by Caddy in deploy/Caddyfile; duplicating it here
+// would diverge. These three are cheap defaults that close the worst
+// gaps if Bun is ever reached without the reverse proxy in front.
+const applySecurityHeaders = (res: Response): Response => {
+  res.headers.set('X-Content-Type-Options', 'nosniff')
+  res.headers.set('X-Frame-Options', 'DENY')
+  if (!res.headers.has('Referrer-Policy')) {
+    res.headers.set('Referrer-Policy', 'same-origin')
+  }
+  return res
+}
+
 // === Server Factory ===
 
 export const createServer = (config: ServerConfig) => {
@@ -128,6 +141,9 @@ export const createServer = (config: ServerConfig) => {
     async fetch(req, server) {
       const url = new URL(req.url)
       const pathname = url.pathname
+      // Local alias so the wrap is one short call per return site.
+      // WS upgrade returns undefined, so those paths skip wrapping.
+      const sec = applySecurityHeaders
 
       // === ?join=<id> redirect — set cookie + 303 to a clean URL ===
       // Strip the join param and preserve the rest, so a shared link with
@@ -137,13 +153,13 @@ export const createServer = (config: ServerConfig) => {
         const cleaned = new URL(url)
         cleaned.searchParams.delete('join')
         const target = cleaned.pathname + (cleaned.search || '')
-        return new Response(null, {
+        return sec(new Response(null, {
           status: 303,
           headers: {
             'Location': target,
             'Set-Cookie': buildInstanceCookie(joinId, req),
           },
-        })
+        }))
       }
 
       // === Resolve which instance this request is for ===
@@ -158,10 +174,10 @@ export const createServer = (config: ServerConfig) => {
       if (pathname === '/ws') {
         // Auth gate (deploy mode only). Cookie is set by /api/auth.
         if (authEnabled() && !isValidSession(sessionFromRequest(req))) {
-          return new Response('Unauthorized', { status: 401 })
+          return sec(new Response('Unauthorized', { status: 401 }))
         }
         const name = url.searchParams.get('name')
-        if (!name) return new Response('name query parameter required', { status: 400 })
+        if (!name) return sec(new Response('name query parameter required', { status: 400 }))
 
         const sessionToken = url.searchParams.get('session') ?? crypto.randomUUID()
 
@@ -171,10 +187,10 @@ export const createServer = (config: ServerConfig) => {
           // session belongs to a different instance.
           const sess = wsManager.sessions.get(sessionToken)!
           if (sess.instanceId !== instanceId) {
-            return new Response('Session token belongs to a different instance', { status: 403 })
+            return sec(new Response('Session token belongs to a different instance', { status: 403 }))
           }
           const upgraded = server.upgrade(req, { data: { sessionToken, instanceId, reconnect: true } })
-          return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
+          return upgraded ? undefined : sec(new Response('WebSocket upgrade failed', { status: 500 }))
         }
 
         // Resolve the per-instance system to scope reclaim + spawn.
@@ -196,7 +212,7 @@ export const createServer = (config: ServerConfig) => {
           }
           const useToken = reclaimedToken ?? sessionToken
           const upgraded = server.upgrade(req, { data: { sessionToken: useToken, instanceId, reconnect: true, name } })
-          return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
+          return upgraded ? undefined : sec(new Response('WebSocket upgrade failed', { status: 500 }))
         }
 
         // New connection — fresh agent. Collision check scoped to instance.
@@ -204,7 +220,7 @@ export const createServer = (config: ServerConfig) => {
         const assignedName = activeNames.includes(name) ? ensureUniqueName(name, activeNames) : name
 
         const upgraded = server.upgrade(req, { data: { sessionToken, instanceId, name: assignedName } })
-        return upgraded ? undefined : new Response('WebSocket upgrade failed', { status: 500 })
+        return upgraded ? undefined : sec(new Response('WebSocket upgrade failed', { status: 500 }))
       }
 
       // === API + static dispatch ===
@@ -229,7 +245,7 @@ export const createServer = (config: ServerConfig) => {
           const alreadySet = existing.some(c => c.startsWith(`${INSTANCE_COOKIE}=`))
           if (!alreadySet) apiResponse.headers.append('Set-Cookie', setCookieValue)
         }
-        return apiResponse
+        return sec(apiResponse)
       }
 
       const staticResponse = await serveStatic(pathname, uiPath, transpiler)
@@ -239,12 +255,12 @@ export const createServer = (config: ServerConfig) => {
           // any subsequent XHR / WS upgrade.
           const headers = new Headers(staticResponse.headers)
           headers.append('Set-Cookie', setCookieValue)
-          return new Response(staticResponse.body, { status: staticResponse.status, headers })
+          return sec(new Response(staticResponse.body, { status: staticResponse.status, headers }))
         }
-        return staticResponse
+        return sec(staticResponse)
       }
 
-      return new Response('Not found', { status: 404 })
+      return sec(new Response('Not found', { status: 404 }))
     },
 
     websocket: {

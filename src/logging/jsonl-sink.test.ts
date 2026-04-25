@@ -52,30 +52,34 @@ describe('createJsonlFileSink — round-trip', () => {
 })
 
 describe('createJsonlFileSink — rotation', () => {
-  test('rotates across multiple flushes when rotateAtBytes exceeded', async () => {
+  test('2-file ring: rotates active to .1, caps at most two files', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'samsinn-sink-'))
     try {
-      // Tiny threshold + flush between batches — rotation applies at batch
-      // boundaries, not mid-batch. In real use, the 1s flush interval +
-      // typical event rate achieves the same effect.
+      // Tiny threshold + flush between batches forces multiple rotations.
+      // The 2-file ring drops anything older than .1, so total events
+      // recovered from disk is a recent suffix of the writes, not all 20.
       const sink = createJsonlFileSink({ dir, sessionId: 'gamma', rotateAtBytes: 200 })
       for (let i = 0; i < 20; i++) {
         sink.write(mkEvent('gamma', 'test.event', i))
-        if (i % 5 === 4) await sink.flush()  // batch every 5 events
+        if (i % 5 === 4) await sink.flush()
       }
       await sink.close()
 
-      const files = new Set((await readdir(dir)).filter(f => f.startsWith('gamma')))
-      expect(files.size).toBeGreaterThan(1)
-      expect(files.has('gamma.jsonl')).toBe(true)
-      expect([...files].some(f => /^gamma\.\d+\.jsonl$/.test(f))).toBe(true)
+      const files = (await readdir(dir)).filter(f => f.startsWith('gamma'))
+      // Active file always present; rolled file present after first rotation.
+      expect(files.includes('gamma.jsonl')).toBe(true)
+      expect(files.includes('gamma.1.jsonl')).toBe(true)
+      // No higher rotation indices accumulate.
+      expect(files.every(f => f === 'gamma.jsonl' || f === 'gamma.1.jsonl')).toBe(true)
 
+      // Recovered events are a non-empty recent subset.
       let total = 0
       for (const f of files) {
         const lines = (await readFile(join(dir, f), 'utf-8')).trim().split('\n').filter(Boolean)
         total += lines.length
       }
-      expect(total).toBe(20)
+      expect(total).toBeGreaterThan(0)
+      expect(total).toBeLessThanOrEqual(20)
     } finally {
       await rm(dir, { recursive: true })
     }

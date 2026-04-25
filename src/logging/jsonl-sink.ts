@@ -16,24 +16,34 @@
 // - close() drains the queue before returning.
 // ============================================================================
 
-import { appendFile, mkdir, stat } from 'node:fs/promises'
+import { appendFile, mkdir, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { LogEvent, LogSink, LogSinkStats } from './types.ts'
 
 export interface JsonlFileSinkOptions {
   readonly dir: string
   readonly sessionId: string
-  readonly rotateAtBytes?: number   // default 100 MB
+  readonly rotateAtBytes?: number   // default from SAMSINN_LOG_MAX_BYTES or 50 MB
   readonly flushIntervalMs?: number // default 1000
   readonly queueCap?: number        // default 10,000
 }
 
-const DEFAULT_ROTATE_BYTES = 100 * 1024 * 1024
+// Per-file byte cap. Rotation maintains a 2-file ring: <base>.jsonl is
+// the active file; on overflow it is renamed to <base>.1.jsonl (overwriting
+// any prior .1) and a fresh <base>.jsonl is started. Per-instance footprint
+// is therefore bounded at 2 × rotateAtBytes — important on multi-tenant
+// deploys where N instances each have their own log directory.
+const rotateBytesFromEnv = (): number => {
+  const v = process.env.SAMSINN_LOG_MAX_BYTES
+  if (!v) return 50 * 1024 * 1024
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : 50 * 1024 * 1024
+}
 const DEFAULT_FLUSH_INTERVAL_MS = 1000
 const DEFAULT_QUEUE_CAP = 10_000
 
 export const createJsonlFileSink = (options: JsonlFileSinkOptions): LogSink => {
-  const rotateAtBytes = options.rotateAtBytes ?? DEFAULT_ROTATE_BYTES
+  const rotateAtBytes = options.rotateAtBytes ?? rotateBytesFromEnv()
   const flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
   const queueCap = options.queueCap ?? DEFAULT_QUEUE_CAP
 
@@ -43,18 +53,13 @@ export const createJsonlFileSink = (options: JsonlFileSinkOptions): LogSink => {
   let droppedCount = 0
   let pendingDropNotice = 0  // drops since last successful write — emitted as synthetic log.dropped
 
-  // Rotation state. currentFilePath tracks the active file; currentFileBytes
-  // is the locally-tracked byte count (we own the file; no external writers).
-  let rotationIndex = 0
+  // Rotation state. currentFilePath is always <base>.jsonl (the active file).
+  // On rotation it's renamed to <base>.1.jsonl (overwriting any prior .1).
   let currentFileBytes = 0
   let closed = false
 
-  const pathFor = (index: number): string =>
-    index === 0
-      ? join(options.dir, `${options.sessionId}.jsonl`)
-      : join(options.dir, `${options.sessionId}.${index}.jsonl`)
-
-  let currentFilePath = pathFor(0)
+  const currentFilePath = join(options.dir, `${options.sessionId}.jsonl`)
+  const rolledFilePath = join(options.dir, `${options.sessionId}.1.jsonl`)
 
   // On construction, seed currentFileBytes from any existing file so we
   // don't over-append past rotation. Fire-and-forget; worst case we rotate
@@ -116,9 +121,10 @@ export const createJsonlFileSink = (options: JsonlFileSinkOptions): LogSink => {
       await ensureDir()
 
       // Rotate first if this batch would push past the threshold.
+      // 2-file ring: rm any prior .1, mv current → .1, start fresh active.
       if (currentFileBytes > 0 && currentFileBytes + batchBytes > rotateAtBytes) {
-        rotationIndex++
-        currentFilePath = pathFor(rotationIndex)
+        try { await rm(rolledFilePath, { force: true }) } catch { /* missing is fine */ }
+        try { await rename(currentFilePath, rolledFilePath) } catch { /* if missing, fall through */ }
         currentFileBytes = 0
       }
 
