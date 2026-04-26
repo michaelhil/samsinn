@@ -12,7 +12,9 @@
     "build:css": "bunx @tailwindcss/cli -i src/ui/input.css -o src/ui/dist.css --minify",
     "dev:server": "bun --watch src/main.ts",
     "dev:css": "bunx @tailwindcss/cli -i src/ui/input.css -o src/ui/dist.css --watch",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.ui.json",
+    "check:server": "tsc --noEmit",
+    "check:ui": "tsc --noEmit -p tsconfig.ui.json",
     "test": "bun test",
     "test:unit": "bun test -t '^(?!.*Ollama)'",
     "headless": "bun run src/main.ts --headless"

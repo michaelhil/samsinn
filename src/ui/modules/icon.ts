@@ -134,12 +134,18 @@ export const hydrateIconPlaceholders = (root: ParentNode = document): void => {
   for (const el of nodes) {
     const name = el.getAttribute('data-icon') as IconName | null
     if (!name || !(name in PATHS)) continue
-    const opts: IconOptions = {}
-    const size = el.getAttribute('data-icon-size'); if (size) opts.size = Number(size)
-    const stroke = el.getAttribute('data-icon-stroke'); if (stroke) opts.stroke = Number(stroke)
-    const fill = el.getAttribute('data-icon-fill'); if (fill) opts.fill = fill
-    const style = el.getAttribute('data-icon-style'); if (style) opts.style = style
-    const cls = el.getAttribute('data-icon-class'); if (cls) opts.className = cls
+    const size = el.getAttribute('data-icon-size')
+    const stroke = el.getAttribute('data-icon-stroke')
+    const fill = el.getAttribute('data-icon-fill')
+    const style = el.getAttribute('data-icon-style')
+    const cls = el.getAttribute('data-icon-class')
+    const opts: IconOptions = {
+      ...(size ? { size: Number(size) } : {}),
+      ...(stroke ? { stroke: Number(stroke) } : {}),
+      ...(fill ? { fill } : {}),
+      ...(style ? { style } : {}),
+      ...(cls ? { className: cls } : {}),
+    }
     const svg = icon(name, opts)
     // Preserve the placeholder element itself (theme toggle uses .theme-icon-sun
     // to control visibility). Replace only its contents.

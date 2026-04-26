@@ -488,7 +488,7 @@ void import('./sidebar-resize.ts').then(m => m.initSidebarResize())
 
 // --- Ollama health (metrics now polled by ollama-dashboard.ts directly via REST) ---
 $ollamaHealth.listen((health) => {
-  if (health) updateOllamaHealthUI(health, ollamaStatusDot)
+  if (health) updateOllamaHealthUI(health as unknown as Record<string, unknown>, ollamaStatusDot)
 })
 
 // ============================================================================

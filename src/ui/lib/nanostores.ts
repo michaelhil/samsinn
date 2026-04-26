@@ -148,6 +148,8 @@ const onMount = <T>(
   events[UNMOUNT] = events[UNMOUNT] || []
 
   const originListen = $store.listen.bind($store)
+  // Intentional monkey-patch: wraps the original listen to add lifecycle init.
+  // @ts-expect-error - reassigning a typed-readonly method on the atom.
   $store.listen = (...args: [Listener<T>]): Unsubscribe => {
     if (!$store.lc && !$store.active) {
       $store.active = true
@@ -196,6 +198,8 @@ const computedStore = <T, D extends ReadableAtom<unknown>[]>(
   }
 
   const originalGet = $computed.get.bind($computed)
+  // Intentional monkey-patch: lazily refresh on get.
+  // @ts-expect-error - reassigning a typed-readonly method on the computed atom.
   $computed.get = (): T => {
     set()
     return originalGet()

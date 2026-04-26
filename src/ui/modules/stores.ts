@@ -237,7 +237,10 @@ export const $activeScriptByRoom = map<Record<string, ActiveScript>>({})
 
 // === Ollama dashboard ===
 
-export const $ollamaHealth = atom<Record<string, unknown> | null>(null)
+// Typed against the live WS payload. Renderer (updateOllamaHealthUI) accepts
+// the same shape so no cast at the boundary.
+import type { OllamaHealth } from '../../core/types/llm.ts'
+export const $ollamaHealth = atom<OllamaHealth | null>(null)
 
 // === Provider routing ===
 // The most recent provider routing event (bound / all_failed / stream_failed).

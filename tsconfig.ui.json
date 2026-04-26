@@ -1,0 +1,21 @@
+{
+  "// purpose": "Lightweight typecheck for the UI tree. The main tsconfig.json excludes src/ui/**, because the UI is transpiled at runtime by Bun and uses several patterns (NodeListOf iteration, atom factory wrappers) that the strict-mode root config rejects. This permissive config catches the high-value class of bug — missing imports / removed exports / wrong-shape destructures — that would otherwise crash the page at module load with no compile-time signal. Run via `bun run check:ui` (also bundled into `bun run check`).",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "allowJs": false,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["src/ui/**/*.ts"],
+  "exclude": ["src/ui/**/*.test.ts"]
+}

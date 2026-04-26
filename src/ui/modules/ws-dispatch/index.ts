@@ -73,14 +73,12 @@ const handlers: Handlers = {
     }
     $myAgentId.set(msg.agentId)
 
-    // Populate rooms
-    const roomMap: Record<string, RoomProfile> = {}
-    for (const r of msg.rooms) roomMap[r.id] = toUIRoomProfile(r)
+    // Populate rooms (UI-shaped via toUIRoomProfile; type inferred)
+    const roomMap = Object.fromEntries(msg.rooms.map(r => [r.id, toUIRoomProfile(r)]))
     $rooms.set(roomMap)
 
-    // Populate agents
-    const agentMap: Record<string, AgentEntry> = {}
-    for (const a of msg.agents) agentMap[a.id] = toAgentEntry(a)
+    // Populate agents (UI-shaped via toAgentEntry; type inferred)
+    const agentMap = Object.fromEntries(msg.agents.map(a => [a.id, toAgentEntry(a)]))
     $agents.set(agentMap)
 
     // Room states: paused, members, muted
