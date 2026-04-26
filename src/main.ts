@@ -31,6 +31,7 @@ import type { ProviderSetupResult } from './llm/providers-setup.ts'
 import type { ProviderConfig } from './llm/providers-config.ts'
 import type { ProviderKeys } from './llm/provider-keys.ts'
 import { createSharedRuntime, type SharedRuntime } from './core/shared-runtime.ts'
+import type { LimitMetrics } from './core/limit-metrics.ts'
 import type { ProviderGateway } from './llm/provider-gateway.ts'
 import { createToolRegistry } from './core/tool-registry.ts'
 import { spawnAIAgent, spawnHumanAgent, buildToolSupport, type SpawnOptions } from './agents/spawn.ts'
@@ -155,6 +156,11 @@ export interface System {
   // bootstrap and by the runtime-reconfigure path (system.logging).
   readonly addEventObserver: (observer: LogEventObserver) => () => void
   readonly logging: LoggingHandle
+
+  // --- Process-global limit/cap counters (held on SharedRuntime) ---
+  // Same instance across every System in this process; surfaced via
+  // GET /api/system/limits.
+  readonly limitMetrics: LimitMetrics
 }
 
 // --- Logging handle — runtime on/off + location/session/kind control ---
@@ -764,6 +770,7 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     setOnSummaryConfigChanged: summaryConfigChanged.set,
     addEventObserver: (observer) => addEventObserver(observer, loggingState.sessionRef),
     logging,
+    limitMetrics: shared.limitMetrics,
   }
   systemRef.current = system
   return system

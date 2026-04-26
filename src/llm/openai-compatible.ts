@@ -14,6 +14,7 @@
 
 import type { LLMProvider, ChatRequest, ChatResponse, StreamChunk } from '../core/types/llm.ts'
 import type { NativeToolCall } from '../core/types/tool.ts'
+import type { LimitMetrics } from '../core/limit-metrics.ts'
 import { createCloudProviderError, parseRetryAfterMs } from './errors.ts'
 
 const DEFAULT_CHAT_TIMEOUT_MS = 300_000
@@ -42,6 +43,9 @@ export interface OpenAICompatConfig {
   readonly chatTimeoutMs?: number
   readonly modelsTimeoutMs?: number
   readonly streamIdleTimeoutMs?: number
+  // Optional process-global counters; when present, SSE-buffer overflow is
+  // tracked. Tests omit.
+  readonly limitMetrics?: LimitMetrics
 }
 
 // === OpenAI wire types ===
@@ -468,6 +472,7 @@ export const createOpenAICompatibleProvider = (config: OpenAICompatConfig): LLMP
         // Bound the unframed buffer. Treat as a recoverable provider issue
         // (fallbackable) so the router can try the next provider.
         if (buffer.length > MAX_SSE_BUFFER_BYTES) {
+          config.limitMetrics?.inc('sseBufferExceeded')
           throw createCloudProviderError({
             code: 'provider_down',
             provider: config.name,

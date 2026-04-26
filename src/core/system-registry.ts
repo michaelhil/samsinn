@@ -254,6 +254,7 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
           break
         } catch (err) {
           lastErr = err
+          opts.shared.limitMetrics.inc('evictionFlushRetries')
           const reason = err instanceof Error ? err.message : String(err)
           console.error(`[registry] evict ${id} flush attempt ${attempt + 1}/${backoffMs.length} failed: ${reason}`)
           if (attempt < backoffMs.length - 1) {
@@ -262,6 +263,7 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
         }
       }
       if (!flushed) {
+        opts.shared.limitMetrics.inc('evictionForceEvicts')
         const reason = lastErr instanceof Error ? lastErr.message : String(lastErr)
         console.error(`[registry] evict ${id}: flush exhausted retries — FORCING EVICTION; recent state may be lost. last error: ${reason}`)
       }

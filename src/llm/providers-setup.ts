@@ -18,6 +18,7 @@ import { isCloudProviderError } from './errors.ts'
 import { PROVIDER_PROFILES, type ProviderConfig, type CloudProviderName } from './providers-config.ts'
 import { getContextWindow } from './model-context.ts'
 import type { ProviderKeys } from './provider-keys.ts'
+import type { LimitMetrics } from '../core/limit-metrics.ts'
 
 export interface ProviderSetupResult {
   readonly router: ProviderRouter
@@ -32,6 +33,9 @@ export interface BuildProvidersOptions {
   // changes take effect without a restart. When absent, we fall back to a
   // static snapshot captured from `config.cloud` (test paths).
   readonly providerKeys?: ProviderKeys
+  // Optional process-global counters; threaded into each cloud provider so
+  // SSE-buffer overflow (and any future per-provider cap hits) is observable.
+  readonly limitMetrics?: LimitMetrics
 }
 
 export const buildProvidersFromConfig = (
@@ -75,6 +79,7 @@ export const buildProvidersFromConfig = (
       baseUrl: PROVIDER_PROFILES[name].baseUrl,
       getApiKey,
       ...(authHeaders ? { authHeaders } : {}),
+      ...(options.limitMetrics ? { limitMetrics: options.limitMetrics } : {}),
     })
     gateways[name] = createProviderGateway(
       provider,

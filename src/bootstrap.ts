@@ -11,6 +11,7 @@
 // ============================================================================
 
 import { createSharedRuntime } from './core/shared-runtime.ts'
+import { createLimitMetrics } from './core/limit-metrics.ts'
 import { createSystemRegistry } from './core/system-registry.ts'
 import { startJanitor } from './core/instance-cleanup.ts'
 import { DEFAULTS } from './core/types/constants.ts'
@@ -30,6 +31,7 @@ import { createToolRegistry } from './core/tool-registry.ts'
 import { generateInstanceId } from './api/instance-cookie.ts'
 import { wireSystemEvents } from './api/wire-system-events.ts'
 import { createWSManager } from './api/ws-handler.ts'
+import { initSharedLimiter } from './api/routes/instances.ts'
 import type { System } from './main.ts'
 import type { Tool } from './core/types/tool.ts'
 
@@ -52,8 +54,14 @@ export const bootstrap = async (): Promise<void> => {
   const fileStore = mergeWithEnv(storeData)
 
   const providerConfig = parseProviderConfig({ fileStore })
-  const providerSetup = buildProvidersFromConfig(providerConfig)
-  const shared = createSharedRuntime({ providerConfig, providerSetup })
+  // Build the metrics handle first so the same instance flows into both
+  // the cloud-provider adapters (SSE-overflow tracking) and SharedRuntime.
+  const limitMetrics = createLimitMetrics()
+  const providerSetup = buildProvidersFromConfig(providerConfig, { limitMetrics })
+  const shared = createSharedRuntime({ providerConfig, providerSetup, limitMetrics })
+  // Wire the shared rate-limiter with the global metrics handle so LRU
+  // evictions are counted. Idempotent — safe if called more than once.
+  initSharedLimiter(shared.limitMetrics)
 
   const pkg = await Bun.file(`${import.meta.dir}/../package.json`).json() as { version: string }
   console.log(`Samsinn v${pkg.version}${headless ? ' (headless)' : ''}`)
@@ -237,6 +245,7 @@ export const bootstrap = async (): Promise<void> => {
   wsManager = createWSManager({
     getSystem: (id) => registry.tryGetLive(id),
     getOllama: () => bootSystem.ollama,
+    limitMetrics: shared.limitMetrics,
   })
 
   // Now that wsManager exists, re-wire the boot system's events (the

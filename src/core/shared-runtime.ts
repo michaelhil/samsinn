@@ -30,6 +30,7 @@ import { parseProviderConfig } from '../llm/providers-config.ts'
 import { buildProvidersFromConfig } from '../llm/providers-setup.ts'
 import { createProviderKeys } from '../llm/provider-keys.ts'
 import { mergeWithEnv } from '../llm/providers-store.ts'
+import { createLimitMetrics, type LimitMetrics } from './limit-metrics.ts'
 
 export interface SharedRuntime {
   readonly providerConfig: ProviderConfig
@@ -45,6 +46,9 @@ export interface SharedRuntime {
   // router. The dispatcher is set once by the SystemRegistry, which has
   // the agentId → instanceId reverse index. Default: noop.
   setProviderEventDispatcher: (fn: (event: ProviderRoutingEvent) => void) => void
+  // Process-global counters for cap/limit hits. Read-only API; the only
+  // mutator is the inc() method on the metrics object itself.
+  readonly limitMetrics: LimitMetrics
 }
 
 export interface CreateSharedRuntimeOptions {
@@ -52,6 +56,10 @@ export interface CreateSharedRuntimeOptions {
   // For tests that want to inject a pre-built setup (matches the
   // previous CreateSystemOptions.providerSetup escape hatch).
   readonly providerSetup?: ProviderSetupResult
+  // Optional pre-built metrics handle. Bootstrap supplies one so the same
+  // instance can be passed to buildProvidersFromConfig before SharedRuntime
+  // exists. Tests/headless paths omit and we lazy-create.
+  readonly limitMetrics?: LimitMetrics
 }
 
 export const createSharedRuntime = (
@@ -83,11 +91,13 @@ export const createSharedRuntime = (
   })
 
   const mcpTools: Tool[] = []
+  const limitMetrics = opts.limitMetrics ?? createLimitMetrics()
   return {
     providerConfig,
     providerKeys,
     providerSetup,
     mcpTools,
     setProviderEventDispatcher: (fn) => { dispatcher = fn },
+    limitMetrics,
   }
 }

@@ -269,7 +269,7 @@ export const createServer = (config: ServerConfig) => {
           const session = wsManager.sessions.get(ws.data.sessionToken)
           if (!session) return
           const newTransport = (msg: Message) => {
-            ws.send(JSON.stringify({ type: 'message', message: msg } satisfies WSOutbound))
+            wsManager.safeSend(ws, JSON.stringify({ type: 'message', message: msg } satisfies WSOutbound))
           }
           session.agent.setTransport(newTransport)
           // Reactivate if was inactive (name-based reclaim)
@@ -282,7 +282,7 @@ export const createServer = (config: ServerConfig) => {
           }
           session.lastActivity = Date.now()
           wsManager.wsConnections.set(ws.data.sessionToken, ws)
-          ws.send(JSON.stringify(wsManager.buildSnapshot(session.instanceId, session.agent.id)))
+          wsManager.safeSend(ws, JSON.stringify(wsManager.buildSnapshot(session.instanceId, session.agent.id)))
           return
         }
 
@@ -290,7 +290,7 @@ export const createServer = (config: ServerConfig) => {
         const agent = await targetSystem.spawnHumanAgent(
           { name: ws.data.name! },
           (msg: Message) => {
-            ws.send(JSON.stringify({ type: 'message', message: msg } satisfies WSOutbound))
+            wsManager.safeSend(ws, JSON.stringify({ type: 'message', message: msg } satisfies WSOutbound))
           },
         )
 
@@ -298,7 +298,7 @@ export const createServer = (config: ServerConfig) => {
         wsManager.sessions.set(ws.data.sessionToken, session)
         wsManager.wsConnections.set(ws.data.sessionToken, ws)
 
-        ws.send(JSON.stringify(wsManager.buildSnapshot(ws.data.instanceId, agent.id, ws.data.sessionToken)))
+        wsManager.safeSend(ws, JSON.stringify(wsManager.buildSnapshot(ws.data.instanceId, agent.id, ws.data.sessionToken)))
       },
 
       async message(ws, raw) {

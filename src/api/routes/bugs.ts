@@ -21,7 +21,7 @@
 
 import { json, errorResponse, parseBody } from './helpers.ts'
 import type { RouteEntry } from './types.ts'
-import { createSharedLimiter } from './instances.ts'
+import { getSharedLimiter } from './instances.ts'
 
 const REPO = process.env.SAMSINN_GH_REPO ?? 'michaelhil/samsinn'
 const TOKEN = process.env.SAMSINN_GH_TOKEN ?? ''
@@ -56,7 +56,7 @@ export const bugRoutes: RouteEntry[] = [
     handler: async (req, _match, ctx) => {
       if (!TOKEN) return errorResponse('bug reporting not configured', 503)
 
-      const limit = createSharedLimiter.check(ctx.remoteAddress)
+      const limit = getSharedLimiter().check(ctx.remoteAddress)
       if (!limit.ok) {
         const retryS = Math.ceil(limit.retryAfterMs / 1000)
         return new Response(

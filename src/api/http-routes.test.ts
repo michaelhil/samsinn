@@ -7,6 +7,7 @@ import { handleAPI } from './http-routes.ts'
 import { createHouse } from '../core/house.ts'
 import { createTeam } from '../agents/team.ts'
 import { createToolRegistry } from '../core/tool-registry.ts'
+import { createLimitMetrics } from '../core/limit-metrics.ts'
 import { createTaskListArtifactType } from '../core/artifact-types/task-list.ts'
 import type { DeliverFn } from '../core/types/messaging.ts'
 import type { WSOutbound } from '../core/types/ws-protocol.ts'
@@ -62,6 +63,7 @@ const makeSystem = (): System => {
     setOnProviderAllFailed: () => {},
     setOnProviderStreamFailed: () => {},
     dispatchProviderEvent: () => {},
+    limitMetrics: createLimitMetrics(),
   } as unknown as System
 }
 
@@ -392,5 +394,31 @@ describe('HTTP Routes — auth gate (deploy mode)', () => {
     const res = await call(system, req('POST', '/api/instances'), '/api/instances')
     expect(res?.status).toBe(401)
     restoreToken()
+  })
+
+  test('GET /api/system/limits without cookie → 401 (auth-gated, NOT exempt)', async () => {
+    const res = await call(system, req('GET', '/api/system/limits'), '/api/system/limits')
+    expect(res?.status).toBe(401)
+    restoreToken()
+  })
+})
+
+describe('GET /api/system/limits (no auth)', () => {
+  test('returns metrics + configured snapshot, reflects inc()', async () => {
+    const system = makeSystem()
+    // bump a counter via the system's metrics handle
+    system.limitMetrics.inc('rateLimitEvicted', 3)
+    system.limitMetrics.inc('sseBufferExceeded')
+    const res = await call(system, req('GET', '/api/system/limits'), '/api/system/limits')
+    expect(res?.status).toBe(200)
+    const data = await res!.json() as {
+      metrics: Record<string, number>
+      configured: Record<string, unknown>
+    }
+    expect(data.metrics.rateLimitEvicted).toBe(3)
+    expect(data.metrics.sseBufferExceeded).toBe(1)
+    expect(data.metrics.wsBackpressureDropped).toBe(0)
+    expect(data.configured.maxWsBufferedBytes).toBe(8 * 1024 * 1024)
+    expect(data.configured.maxRateLimitKeys).toBe(4096)
   })
 })

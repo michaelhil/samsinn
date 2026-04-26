@@ -93,10 +93,18 @@ const makeSystem = (): System => {
 // Captures all messages sent to a WS connection
 const makeWS = () => {
   const sent: string[] = []
-  const ws = { send: (data: string) => { sent.push(data) } }
+  let bufferedAmount = 0
+  let closeArgs: { code: number; reason?: string } | null = null
+  const ws = {
+    send: (data: string) => { sent.push(data) },
+    getBufferedAmount: () => bufferedAmount,
+    close: (code: number, reason?: string) => { closeArgs = { code, ...(reason ? { reason } : {}) } },
+  }
   const messages = () => sent.map(s => JSON.parse(s) as Record<string, unknown>)
   const errors = () => messages().filter(m => m.type === 'error')
-  return { ws, messages, errors }
+  const setBuffered = (n: number) => { bufferedAmount = n }
+  const closed = () => closeArgs
+  return { ws, messages, errors, setBuffered, closed }
 }
 
 const dispatch = (ws: { send: (d: string) => void }, session: ClientSession, system: System, wsManager: WSManager, payload: unknown) =>
@@ -311,5 +319,40 @@ describe('WS Handler', () => {
     // Duplicate names are allowed (createRoomSafe returns sanitised name) — no error expected
     expect(errors()).toHaveLength(0)
     expect(addCalled).toBe(true)
+  })
+})
+
+describe('WSManager.safeSend backpressure', () => {
+  test('drops slow consumer when buffer exceeds 8 MB and increments metric', () => {
+    const { createLimitMetrics } = require('../core/limit-metrics.ts') as typeof import('../core/limit-metrics.ts')
+    const limitMetrics = createLimitMetrics()
+    const wsManager = createWSManager({
+      getSystem: () => undefined,
+      getOllama: () => undefined,
+      limitMetrics,
+    })
+    const { ws, messages, setBuffered, closed } = makeWS()
+    setBuffered(9 * 1024 * 1024)  // over the 8 MB cap
+    const accepted = wsManager.safeSend(ws, 'payload')
+    expect(accepted).toBe(false)
+    expect(messages()).toHaveLength(0)
+    expect(closed()).toEqual({ code: 1009, reason: 'slow consumer' })
+    expect(limitMetrics.snapshot().wsBackpressureDropped).toBe(1)
+  })
+
+  test('sends normally when buffer is under cap', () => {
+    const wsManager = createWSManager({ getSystem: () => undefined, getOllama: () => undefined })
+    const { ws, setBuffered, closed } = makeWS()
+    setBuffered(1024)
+    let received = ''
+    const proxyWs = {
+      send: (d: string) => { received = d },
+      getBufferedAmount: ws.getBufferedAmount,
+      close: ws.close,
+    }
+    const accepted = wsManager.safeSend(proxyWs, 'hello')
+    expect(accepted).toBe(true)
+    expect(received).toBe('hello')
+    expect(closed()).toBeNull()
   })
 })

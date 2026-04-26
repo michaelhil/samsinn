@@ -16,7 +16,8 @@
 import { json, errorResponse } from './helpers.ts'
 import type { RouteEntry } from './types.ts'
 import { getInstanceId } from '../instance-cookie.ts'
-import { createRateLimiter } from '../rate-limit.ts'
+import { createRateLimiter, type RateLimiter } from '../rate-limit.ts'
+import type { LimitMetrics } from '../../core/limit-metrics.ts'
 
 const REQUIRED = (msg = 'instances admin not wired') => errorResponse(msg, 501)
 
@@ -26,13 +27,21 @@ const REQUIRED = (msg = 'instances admin not wired') => errorResponse(msg, 501)
 // creates maybe one instance per minute, never five. Cookie-keyed limits
 // would be useless: cookieless callers get a fresh id every request.
 //
-// Re-exported for /api/bugs which shares the same limiter (the answer to
-// "should bug submission have its own limit?" was "share the instances
-// one"). One limiter map, two consumers.
-export const createSharedLimiter = createRateLimiter({
-  windowMs: Number(process.env.SAMSINN_CREATE_RATE_WINDOW_MS) || 60_000,
-  max: Number(process.env.SAMSINN_CREATE_RATE_LIMIT) || 5,
-})
+// Lazily constructed so bootstrap can pass a LimitMetrics handle for LRU
+// eviction tracking. Shared with /api/bugs (one map, two consumers).
+let sharedLimiter: RateLimiter | null = null
+export const initSharedLimiter = (limitMetrics?: LimitMetrics): RateLimiter => {
+  if (sharedLimiter) return sharedLimiter
+  sharedLimiter = createRateLimiter({
+    windowMs: Number(process.env.SAMSINN_CREATE_RATE_WINDOW_MS) || 60_000,
+    max: Number(process.env.SAMSINN_CREATE_RATE_LIMIT) || 5,
+    ...(limitMetrics ? { limitMetrics } : {}),
+  })
+  return sharedLimiter
+}
+// Accessor used by routes. Returns the bootstrap-wired instance if one was
+// initialized, otherwise lazy-creates a metrics-less default for tests.
+export const getSharedLimiter = (): RateLimiter => initSharedLimiter()
 
 export const instanceRoutes: RouteEntry[] = [
   {
@@ -64,7 +73,7 @@ export const instanceRoutes: RouteEntry[] = [
     pattern: /^\/api\/instances$/,
     handler: async (_req, _match, ctx) => {
       if (!ctx.instances) return REQUIRED()
-      const limit = createSharedLimiter.check(ctx.remoteAddress)
+      const limit = getSharedLimiter().check(ctx.remoteAddress)
       if (!limit.ok) {
         const retryS = Math.ceil(limit.retryAfterMs / 1000)
         return new Response(

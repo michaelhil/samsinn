@@ -80,6 +80,25 @@ export const systemRoutes: RouteEntry[] = [
     },
   },
   {
+    // Process-global cap/limit observability snapshot. Read by ops/admin
+    // panels. Auth-gated (NOT exempt; only /api/system/info and /api/auth
+    // bypass the gate). Returns counters + the configured cap values for
+    // context.
+    method: 'GET',
+    pattern: /^\/api\/system\/limits$/,
+    handler: async (_req, _match, ctx) => json({
+      metrics: ctx.system.limitMetrics.snapshot(),
+      configured: {
+        maxWsBufferedBytes: 8 * 1024 * 1024,
+        maxRateLimitKeys: 4096,
+        maxSseBufferBytes: 10 * 1024 * 1024,
+        maxScriptSourceBytes: 256 * 1024,
+        maxConsecutiveWhisperFailures: 5,
+        evictionFlushBackoffMs: [5_000, 15_000, 60_000],
+      },
+    }),
+  },
+  {
     method: 'POST',
     pattern: /^\/api\/system\/shutdown$/,
     handler: async (_req, _match, _ctx) => {

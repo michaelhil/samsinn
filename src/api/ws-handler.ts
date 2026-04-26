@@ -21,8 +21,28 @@ import { handleAgentCommand } from './ws-commands/agent-commands.ts'
 import { handleArtifactCommand } from './ws-commands/artifact-commands.ts'
 import { handleMessageCommand } from './ws-commands/message-commands.ts'
 import { sendError } from './ws-commands/types.ts'
+import type { LimitMetrics } from '../core/limit-metrics.ts'
+
+// === Constants ===
+
+// Cap on per-connection queued bytes. Bun's ServerWebSocket exposes
+// getBufferedAmount(); a slow consumer that lets this grow eats process
+// memory. 8 MB is well above any plausible per-message size (snapshots a
+// few hundred KB, deltas a few KB) and below "noticeably degraded".
+// On overflow we close the socket (1009 = "message too big"); the client
+// reconnects fresh, server state is authoritative so no data lost.
+const MAX_WS_BUFFERED_BYTES = 8 * 1024 * 1024
 
 // === Types ===
+
+// Stored ws value. ServerWebSocket from Bun has both methods natively;
+// the wider type lets callers apply backpressure + clean disconnect
+// without reaching past WSManager. Tests inject objects that conform.
+export interface WSConnection {
+  send: (data: string) => void
+  getBufferedAmount: () => number
+  close: (code: number, reason?: string) => void
+}
 
 export interface ClientSession {
   readonly agent: HumanAgent
@@ -41,7 +61,11 @@ export interface WSData {
 
 export interface WSManager {
   readonly sessions: Map<string, ClientSession>
-  readonly wsConnections: Map<string, { send: (data: string) => void }>
+  readonly wsConnections: Map<string, WSConnection>
+  // Send to a single ws with backpressure protection. Used by the
+  // per-agent transport closures in server.ts. Returns true if the bytes
+  // were enqueued, false if the consumer was dropped for being too slow.
+  readonly safeSend: (ws: WSConnection, data: string) => boolean
   // Global broadcast — used for shared state (Ollama health, reset, etc.)
   // that applies regardless of which instance a client belongs to.
   readonly broadcast: (msg: WSOutbound) => void
@@ -64,18 +88,35 @@ export interface WSManager {
 export interface WSManagerDeps {
   readonly getSystem: (instanceId: string) => System | undefined
   readonly getOllama: () => System['ollama']
+  // Optional — when present, backpressure drops are counted. Tests omit.
+  readonly limitMetrics?: LimitMetrics
 }
 
 export const createWSManager = (deps: WSManagerDeps): WSManager => {
-  const { getSystem, getOllama } = deps
+  const { getSystem, getOllama, limitMetrics } = deps
   const sessions = new Map<string, ClientSession>()
-  const wsConnections = new Map<string, { send: (data: string) => void }>()
+  const wsConnections = new Map<string, WSConnection>()
   const stateUnsubs = new Map<string, () => void>()
+
+  // Single backpressure-checking send. If the kernel send buffer holds more
+  // than MAX_WS_BUFFERED_BYTES the consumer is too slow — close the socket
+  // (1009) and let the client reconnect. Server state is authoritative;
+  // the next snapshot brings them back to current.
+  const safeSend = (ws: WSConnection, data: string): boolean => {
+    let buffered = 0
+    try { buffered = ws.getBufferedAmount() } catch { /* mock without method */ }
+    if (buffered > MAX_WS_BUFFERED_BYTES) {
+      limitMetrics?.inc('wsBackpressureDropped')
+      try { ws.close(1009, 'slow consumer') } catch { /* already closed */ }
+      return false
+    }
+    try { ws.send(data); return true } catch { return false }
+  }
 
   const broadcast = (msg: WSOutbound): void => {
     const data = JSON.stringify(msg)
     for (const ws of wsConnections.values()) {
-      try { ws.send(data) } catch { /* client gone */ }
+      safeSend(ws, data)
     }
   }
 
@@ -87,7 +128,7 @@ export const createWSManager = (deps: WSManagerDeps): WSManager => {
       if (session.instanceId !== instanceId) continue
       const ws = wsConnections.get(token)
       if (!ws) continue
-      try { ws.send(data) } catch { /* client gone */ }
+      safeSend(ws, data)
     }
   }
 
@@ -113,7 +154,7 @@ export const createWSManager = (deps: WSManagerDeps): WSManager => {
         for (const [token, session] of sessions) {
           if (session.agent.id === agentId) {
             const ws = wsConnections.get(token)
-            if (ws) try { ws.send(data) } catch { /* client gone */ }
+            if (ws) safeSend(ws, data)
           }
         }
       }
@@ -188,7 +229,7 @@ export const createWSManager = (deps: WSManagerDeps): WSManager => {
     }
   }
 
-  return { sessions, wsConnections, broadcast, broadcastToInstance, subscribeAgentState, unsubscribeAgentState, subscribeOllamaMetrics, unsubscribeOllamaMetrics, buildSnapshot }
+  return { sessions, wsConnections, safeSend, broadcast, broadcastToInstance, subscribeAgentState, unsubscribeAgentState, subscribeOllamaMetrics, unsubscribeOllamaMetrics, buildSnapshot }
 }
 
 // === Command dispatch order — first handler that returns true wins ===
