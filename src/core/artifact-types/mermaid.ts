@@ -19,6 +19,9 @@ export const mermaidArtifactType: ArtifactTypeDefinition = {
     required: ['source'],
   },
 
+  validateBody: (body: unknown): boolean =>
+    !!body && typeof body === 'object' && typeof (body as { source?: unknown }).source === 'string',
+
   onUpdate: (artifact: Artifact, updates: ArtifactUpdateConfig): ArtifactUpdateResult | void => {
     if (!updates.body) return
     if (typeof updates.body.source === 'string') {

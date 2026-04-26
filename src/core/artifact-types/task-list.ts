@@ -56,6 +56,18 @@ export const createTaskListArtifactType = (store: ArtifactStore): ArtifactTypeDe
     required: ['tasks'],
   },
 
+  validateBody: (body: unknown): boolean => {
+    if (!body || typeof body !== 'object') return false
+    const tasks = (body as { tasks?: unknown }).tasks
+    if (!Array.isArray(tasks)) return false
+    for (const t of tasks) {
+      if (!t || typeof t !== 'object') return false
+      const r = t as Record<string, unknown>
+      if (typeof r.id !== 'string' || typeof r.content !== 'string' || typeof r.status !== 'string') return false
+    }
+    return true
+  },
+
   onUpdate: (artifact: Artifact, updates: ArtifactUpdateConfig): ArtifactUpdateResult | void => {
     const body = updates.body
     if (!body) return

@@ -167,7 +167,11 @@ export const loadSnapshot = async (path: string): Promise<SystemSnapshot | null>
     const raw = JSON.parse(text) as Record<string, unknown>
 
     if (!isValidSnapshot(raw)) {
-      console.warn(`Snapshot at "${path}" is incompatible (expected v${SNAPSHOT_VERSION}). Ignoring — delete the snapshot file to reset.`)
+      // Louder than warn — this means user state from a previous version is
+      // about to be invisible. Operator must decide whether to delete the
+      // file (clean break) or downgrade. Bumping to error so it surfaces
+      // in log scrapes and admin tooling.
+      console.error(`Snapshot at "${path}" is incompatible (got v${raw.version}, expected v${SNAPSHOT_VERSION}). Ignoring — delete the snapshot file to reset.`)
       return null
     }
 
@@ -187,6 +191,9 @@ interface RestorableSystem {
     readonly setResponseFormat: (format: string) => void
     readonly artifacts: {
       readonly restore: (artifacts: ReadonlyArray<Artifact>) => void
+    }
+    readonly artifactTypes?: {
+      readonly get: (type: string) => { readonly validateBody?: (body: unknown) => boolean } | undefined
     }
     readonly restoreBookmarks: (entries: ReadonlyArray<Bookmark>) => void
   }
@@ -236,8 +243,21 @@ export const restoreFromSnapshot = async (
     }
   }
 
-  // 4. Restore artifacts
-  system.house.artifacts.restore(snapshot.artifacts ?? [])
+  // 4. Restore artifacts. Drop any whose body fails the type-defined
+  // validateBody guard — a single corrupt entry shouldn't crash later
+  // rendering or break the whole rehydrate.
+  const incoming = snapshot.artifacts ?? []
+  const types = system.house.artifactTypes
+  const valid: Artifact[] = []
+  for (const a of incoming) {
+    const def = types?.get(a.type)
+    if (def?.validateBody && !def.validateBody(a.body)) {
+      console.error(`[snapshot] dropping artifact ${a.id} (${a.type}) "${a.title}": body failed validateBody`)
+      continue
+    }
+    valid.push(a)
+  }
+  system.house.artifacts.restore(valid)
 
   // 4b. Restore bookmarks (system-wide)
   system.house.restoreBookmarks(snapshot.bookmarks ?? [])

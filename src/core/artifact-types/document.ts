@@ -79,6 +79,18 @@ export const documentArtifactType: ArtifactTypeDefinition = {
     required: ['blocks'],
   },
 
+  validateBody: (body: unknown): boolean => {
+    if (!body || typeof body !== 'object') return false
+    const blocks = (body as { blocks?: unknown }).blocks
+    if (!Array.isArray(blocks)) return false
+    for (const b of blocks) {
+      if (!b || typeof b !== 'object') return false
+      const r = b as Record<string, unknown>
+      if (typeof r.id !== 'string' || typeof r.type !== 'string' || typeof r.content !== 'string') return false
+    }
+    return true
+  },
+
   onUpdate: (artifact: Artifact, updates: ArtifactUpdateConfig): ArtifactUpdateResult | void => {
     const body = updates.body
     if (!body) return

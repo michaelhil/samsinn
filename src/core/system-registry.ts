@@ -235,18 +235,42 @@ export const createSystemRegistry = (opts: SystemRegistryOptions): SystemRegistr
     }
 
     const evictionPromise = (async (): Promise<void> => {
-      try {
-        await drainAgents(entry.system)
-        await entry.autoSaver.flush()
-      } catch (err) {
-        console.error(`[registry] evict ${id} flush failed: ${err instanceof Error ? err.message : String(err)}`)
-      } finally {
-        try { opts.onSystemEvicted?.(entry.system, id) } catch (err) {
-          console.error(`[registry] evict ${id} hook threw: ${err instanceof Error ? err.message : String(err)}`)
+      await drainAgents(entry.system).catch(err => {
+        console.error(`[registry] evict ${id} drain failed (continuing): ${err instanceof Error ? err.message : String(err)}`)
+      })
+
+      // Bounded-retry flush. Originally this was a single try/catch that
+      // dropped the entry from memory regardless — meaning a failed save
+      // (disk full, perm flip) silently lost recent state on next load.
+      // Retry with backoff; only force-evict (with ERROR log noting the
+      // data-loss risk) if every attempt fails.
+      const backoffMs = [5_000, 15_000, 60_000]
+      let lastErr: unknown = null
+      let flushed = false
+      for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+        try {
+          await entry.autoSaver.flush()
+          flushed = true
+          break
+        } catch (err) {
+          lastErr = err
+          const reason = err instanceof Error ? err.message : String(err)
+          console.error(`[registry] evict ${id} flush attempt ${attempt + 1}/${backoffMs.length} failed: ${reason}`)
+          if (attempt < backoffMs.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, backoffMs[attempt]))
+          }
         }
-        entry.autoSaver.dispose()
-        map.delete(id)
       }
+      if (!flushed) {
+        const reason = lastErr instanceof Error ? lastErr.message : String(lastErr)
+        console.error(`[registry] evict ${id}: flush exhausted retries — FORCING EVICTION; recent state may be lost. last error: ${reason}`)
+      }
+
+      try { opts.onSystemEvicted?.(entry.system, id) } catch (err) {
+        console.error(`[registry] evict ${id} hook threw: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      entry.autoSaver.dispose()
+      map.delete(id)
     })()
 
     entry.state = 'evicting'

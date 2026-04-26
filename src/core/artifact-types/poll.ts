@@ -43,6 +43,21 @@ export const pollArtifactType: ArtifactTypeDefinition = {
     required: ['question', 'options', 'allowMultiple'],
   },
 
+  validateBody: (body: unknown): boolean => {
+    if (!body || typeof body !== 'object') return false
+    const r = body as Record<string, unknown>
+    if (typeof r.question !== 'string') return false
+    if (!Array.isArray(r.options)) return false
+    for (const o of r.options) {
+      if (!o || typeof o !== 'object') return false
+      const oo = o as Record<string, unknown>
+      if (typeof oo.id !== 'string' || typeof oo.text !== 'string') return false
+    }
+    if (typeof r.allowMultiple !== 'boolean') return false
+    if (r.votes !== undefined && (typeof r.votes !== 'object' || r.votes === null)) return false
+    return true
+  },
+
   onCreate: (artifact: Artifact): void => {
     // Ensure votes map is initialized for all options
     const body = artifact.body as unknown as PollBody

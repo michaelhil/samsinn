@@ -120,6 +120,11 @@ export interface ArtifactTypeDefinition {
   // Controls when a system message is posted to scoped rooms on change
   // Include 'updated' to opt into blackboard update notifications
   readonly postSystemMessageOn?: ReadonlyArray<'added' | 'updated' | 'removed' | 'resolved'>
+  // Optional runtime check of a body's shape on snapshot load. Returning
+  // false drops the artifact (with an error log) so a single corrupt body
+  // can't crash the rehydrate path or kill scope-wide rendering. Built-in
+  // types implement this; plugins are encouraged to.
+  readonly validateBody?: (body: unknown) => boolean
 }
 
 export interface ArtifactTypeRegistry {
