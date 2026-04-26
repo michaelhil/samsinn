@@ -43,7 +43,11 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
 
   const div = document.createElement('div')
   div.setAttribute('data-msg-id', msg.id)
-  const isSystem = msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.senderId === 'system'
+  // Stage cards (script engine setup messages) are sent with senderId='system'
+  // but senderName='Stage'. They are scene-boundary markers we want visible,
+  // not the muted system-line treatment.
+  const isStageCard = msg.senderId === 'system' && msg.senderName === 'Stage' && msg.type === 'chat'
+  const isSystem = !isStageCard && (msg.type === 'system' || msg.type === 'join' || msg.type === 'leave' || msg.senderId === 'system')
   const isPass = msg.type === 'pass'
   const isMute = msg.type === 'mute'
   const isSelf = msg.senderId === myAgentId
