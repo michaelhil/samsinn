@@ -100,6 +100,18 @@ export const systemRoutes: RouteEntry[] = [
     }),
   },
   {
+    // Per-instance broadcast wiring + health snapshot. Operator visibility
+    // for the silent-skip class of bug fixed in 5d73a8e: a live instance
+    // with zero broadcasts under traffic means the wiring chain is broken.
+    // Read-only; safe to poll.
+    method: 'GET',
+    pattern: /^\/api\/system\/diagnostics$/,
+    handler: async (_req, _match, ctx) => {
+      if (!ctx.diagnostics) return errorResponse('diagnostics not wired', 500)
+      return json(ctx.diagnostics.snapshot())
+    },
+  },
+  {
     method: 'POST',
     pattern: /^\/api\/system\/shutdown$/,
     handler: async (_req, _match, _ctx) => {

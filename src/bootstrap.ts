@@ -448,6 +448,26 @@ export const bootstrap = async (): Promise<void> => {
     buildSwitchCookie: (id: string, req: Request) => buildInstanceCookie(id, req),
   }
 
+  // === Diagnostics capability ===
+  // Read-only health snapshot. Walks the registry + wsManager state to
+  // expose per-instance broadcast wiring + last-broadcast timestamps. The
+  // signal that catches the silent-skip class of bug we just fixed: an
+  // active instance with zero broadcasts under live traffic is wrong.
+  const diagnostics = {
+    snapshot: () => ({
+      instances: registry.list().map(meta => {
+        const sys = registry.tryGetLive(meta.id)
+        return {
+          id: meta.id,
+          wired: wsManager.isWired(meta.id),
+          agentCount: sys ? sys.team.listByKind('ai').length : 0,
+          lastBroadcastAt: wsManager.lastBroadcastAt(meta.id),
+        }
+      }),
+      wsSessions: wsManager.sessionCount(),
+    }),
+  }
+
   // === HTTP + WS server ===
   const { createServer } = await import('./api/server.ts')
   createServer({
@@ -456,6 +476,7 @@ export const bootstrap = async (): Promise<void> => {
     port: parseInt(process.env.PORT ?? String(DEFAULTS.port), 10),
     resetInstance,
     instances: instancesAdmin,
+    diagnostics,
   })
 
   // === Graceful shutdown ===

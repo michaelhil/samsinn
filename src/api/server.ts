@@ -45,6 +45,8 @@ interface ServerConfig {
   readonly resetInstance: (req: Request) => Promise<import('./routes/types.ts').ResetInstanceResult>
   // Instances admin (list / create / switch / delete) wired by bootstrap.
   readonly instances: import('./routes/types.ts').InstanceAdmin
+  // Read-only diagnostics snapshot (per-instance broadcast wiring health).
+  readonly diagnostics: import('./routes/types.ts').DiagnosticsCapability
 }
 
 // === Static file serving (path traversal protected) ===
@@ -256,6 +258,7 @@ export const createServer = (config: ServerConfig) => {
         config.resetInstance,
         wsManager.broadcastToInstance,
         config.instances,
+        config.diagnostics,
       )
       if (apiResponse) {
         // Only append the cookieless-fallback Set-Cookie if the route didn't

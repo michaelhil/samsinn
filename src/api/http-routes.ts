@@ -69,10 +69,11 @@ export const handleAPI = async (
   resetInstance?: RouteContext['resetInstance'],
   broadcastToInstance?: RouteContext['broadcastToInstance'],
   instances?: RouteContext['instances'],
+  diagnostics?: RouteContext['diagnostics'],
 ): Promise<Response | null> => {
   const ctx: RouteContext = {
     system, instanceId, broadcast, subscribeAgentState, unsubscribeAgentState,
-    remoteAddress, resetInstance, broadcastToInstance, instances,
+    remoteAddress, resetInstance, broadcastToInstance, instances, diagnostics,
   }
 
   // Auth gate. Scoped to /api/* so static paths (/, /index.html, /dist.css,

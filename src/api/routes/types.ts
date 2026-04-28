@@ -24,6 +24,22 @@ export interface InstanceAdmin {
   readonly buildSwitchCookie: (id: string, req: Request) => string
 }
 
+// Read-only health snapshot used by /api/system/diagnostics. Walks the
+// registry + wsManager to surface per-instance broadcast wiring state.
+// Catches the silent-skip class of bug fixed in 5d73a8e: zero-broadcast
+// instances under live traffic mean the wiring chain is broken somewhere.
+export interface DiagnosticsCapability {
+  readonly snapshot: () => {
+    readonly instances: ReadonlyArray<{
+      readonly id: string
+      readonly wired: boolean
+      readonly agentCount: number
+      readonly lastBroadcastAt: number | null
+    }>
+    readonly wsSessions: number
+  }
+}
+
 export interface RouteContext {
   readonly system: System
   // Instance bound to this request via the cookie (resolved before dispatch).
@@ -39,6 +55,8 @@ export interface RouteContext {
   readonly resetInstance?: (req: Request) => Promise<ResetInstanceResult>
   // Instances admin (list / create / switch / delete). Wired in bootstrap.
   readonly instances?: InstanceAdmin
+  // Read-only health/wiring snapshot. Wired in bootstrap.
+  readonly diagnostics?: DiagnosticsCapability
 }
 
 export interface RouteEntry {

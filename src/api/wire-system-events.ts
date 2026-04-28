@@ -31,6 +31,10 @@ export const wireSystemEvents = (
   autoSaver: AutoSaver,
   instanceId: string,
 ): void => {
+  // Tag this instance as wired in the wsManager — the diagnostics endpoint
+  // reads this to surface "instance X has its broadcast slots wired" so a
+  // future regression of the silent-skip class doesn't go unnoticed.
+  wsManager.markWired(instanceId)
   const sched = (): void => autoSaver.scheduleSave()
   const broadcast = (msg: Parameters<WSManager['broadcast']>[0]): void => {
     wsManager.broadcastToInstance(instanceId, msg)

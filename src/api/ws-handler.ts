@@ -92,6 +92,16 @@ export interface WSManager {
   // inactive human in team.listAgents()) until the instance is evicted.
   // Returns the number of sessions dropped.
   readonly sweepStaleSessions: (now?: number) => number
+  // Diagnostic surface — exposed via /api/system/diagnostics. Read-only.
+  // markWired(id) is called by wireSystemEvents on first call per instance
+  // so the diagnostics endpoint can report which instances actually had
+  // their broadcast slots wired. lastBroadcastAt is the timestamp of the
+  // most recent broadcastToInstance call for that id (regardless of how
+  // many sessions received it).
+  readonly markWired: (instanceId: string) => void
+  readonly isWired: (instanceId: string) => boolean
+  readonly lastBroadcastAt: (instanceId: string) => number | null
+  readonly sessionCount: () => number
 }
 
 // Resolver: given an instanceId, return the live System if currently in
@@ -133,9 +143,16 @@ export const createWSManager = (deps: WSManagerDeps): WSManager => {
     }
   }
 
+  // Diagnostic state — populated by wireSystemEvents (markWired) and
+  // every broadcastToInstance call (lastBroadcastByInstance). Surfaced
+  // via /api/system/diagnostics. No effect on hot-path latency.
+  const wiredInstances = new Set<string>()
+  const lastBroadcastByInstance = new Map<string, number>()
+
   // Per-instance broadcast — filters wsConnections by session.instanceId
   // so events fired in one tenant don't reach another tenant's clients.
   const broadcastToInstance = (instanceId: string, msg: WSOutbound): void => {
+    lastBroadcastByInstance.set(instanceId, Date.now())
     const data = JSON.stringify(msg)
     for (const [token, session] of sessions) {
       if (session.instanceId !== instanceId) continue
@@ -226,7 +243,15 @@ export const createWSManager = (deps: WSManagerDeps): WSManager => {
     return dropped
   }
 
-  return { sessions, wsConnections, safeSend, broadcast, broadcastToInstance, subscribeAgentState, unsubscribeAgentState, buildSnapshot, sweepStaleSessions }
+  return {
+    sessions, wsConnections, safeSend, broadcast, broadcastToInstance,
+    subscribeAgentState, unsubscribeAgentState, buildSnapshot, sweepStaleSessions,
+    // --- Diagnostics ---
+    markWired: (id: string) => { wiredInstances.add(id) },
+    isWired: (id: string) => wiredInstances.has(id),
+    lastBroadcastAt: (id: string) => lastBroadcastByInstance.get(id) ?? null,
+    sessionCount: () => sessions.size,
+  }
 }
 
 // === Command dispatch order — first handler that returns true wins ===
