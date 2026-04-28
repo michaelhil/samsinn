@@ -47,13 +47,25 @@ const parseSources = (raw: string | undefined): ReadonlyArray<string> => {
   return parts.length > 0 ? parts : fallback
 }
 
+// Tokens: registry calls list public repos under arbitrary orgs/users, so
+// the right credential is a token with broad public read — NOT the bug-
+// reporting PAT which is fine-grained to a single repo and 403s on every
+// other endpoint.
+//
+// Order:
+//   1. SAMSINN_PACK_REGISTRY_TOKEN — explicit, intended for this purpose
+//   2. unauthenticated — 60 req/hr per IP, fine for a 5-min-cached registry
+//
+// SAMSINN_GH_TOKEN is intentionally NOT used here — see commit log for
+// the symptom (org listing 403'd because the fine-grained scope denied
+// every endpoint outside michaelhil/samsinn).
 const ghHeaders = (): Record<string, string> => {
   const h: Record<string, string> = {
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'samsinn-pack-registry',
   }
-  const token = process.env.SAMSINN_GH_TOKEN
+  const token = process.env.SAMSINN_PACK_REGISTRY_TOKEN
   if (token) h['Authorization'] = `Bearer ${token}`
   return h
 }
