@@ -1,0 +1,78 @@
+# ============================================================================
+# Deploy — push-to-master automation.
+#
+# Runs after CI's `check` job succeeds on master. SSHes to the Hetzner box
+# using a deploy-only SSH key, pulls, restarts samsinn, then runs the smoke
+# script as a gate. If the smoke check exits non-zero the workflow reports
+# red and you get an email — same signal as a broken CI.
+#
+# Required GitHub Actions secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY  — private key (paired with the public key authorised on
+#                     the box's /root/.ssh/authorized_keys)
+#   DEPLOY_HOST     — IP or hostname of the Hetzner box (e.g. 178.104.229.113)
+#   DEPLOY_TOKEN    — SAMSINN_TOKEN, used by smoke-streaming.ts to auth
+#
+# Manual trigger: GitHub Actions tab → Deploy → Run workflow. Useful when
+# you want to redeploy the latest master without making a no-op commit.
+#
+# Bypassing auto-deploy: prefix a commit message with "[skip deploy]" or
+# simply delete this file. The local fallback `bun run scripts/deploy.ts`
+# remains available either way.
+# ============================================================================
+
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:    # manual run from the Actions UI
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # let an in-flight deploy finish; queue new ones
+
+jobs:
+  deploy:
+    # Skip if pushed via [skip deploy], or if the triggering CI run failed.
+    if: |
+      !contains(github.event.head_commit.message, '[skip deploy]') &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: SSH key + known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Pull + restart on host
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} '
+            set -e
+            cd /opt/samsinn
+            sudo -u samsinn git pull --ff-only
+            systemctl restart samsinn
+            # Wait for the service to be active before the smoke check.
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if [ "$(systemctl is-active samsinn)" = "active" ]; then break; fi
+              sleep 1
+            done
+            systemctl is-active samsinn
+          '
+
+      - name: Smoke test (broadcast wiring)
+        env:
+          SAMSINN_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} "
+            set -a; source /etc/samsinn/env; set +a
+            cd /opt/samsinn
+            bun run scripts/smoke-streaming.ts
+          "

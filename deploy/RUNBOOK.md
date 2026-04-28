@@ -286,6 +286,14 @@ makes this safe from email/Slack links.
   `/var/lib/samsinn/instances/.trash/<id>-<ts>` after 7 days
   (`SAMSINN_TRASH_TTL_MS`). For ad-hoc cleanup:
   `rm -rf /var/lib/samsinn/instances/.trash/*`.
+- **Auto-deploy:** every push to `master` triggers
+  `.github/workflows/deploy.yml` which SSHes to this box, pulls,
+  restarts, and runs the smoke script as a gate. Required GitHub
+  Actions secrets: `DEPLOY_SSH_KEY` (private key), `DEPLOY_HOST`
+  (the IP), `DEPLOY_TOKEN` (`SAMSINN_TOKEN`). Bypass per-commit with
+  a `[skip deploy]` trailer in the commit message; bypass entirely
+  by deleting the workflow file. Manual fallback: `bun run deploy`
+  from your laptop (uses your normal SSH key, same steps).
 
 ---
 
