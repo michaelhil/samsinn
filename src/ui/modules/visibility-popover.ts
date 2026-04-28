@@ -16,6 +16,10 @@
 // ============================================================================
 
 import { hydrateIconPlaceholders } from './icon.ts'
+import {
+  ALL_PIECES, pieceLabels, readPrefs, togglePiece,
+  type MessageHeaderPiece,
+} from './message-header-prefs.ts'
 
 const STORAGE_KEY = 'samsinn:room-header-hidden-icons'
 const USER_HIDDEN_CLASS = 'user-hidden'
@@ -97,12 +101,20 @@ export const mountVisibilityPopover = (deps: VisibilityPopoverDeps): void => {
   const render = (): void => {
     popover.innerHTML = ''
     const entries = collect(roomHeader)
+
+    // Section header for the existing room-header icon list (rendered
+    // even when entries is empty — message-header section below is the
+    // unconditional content).
+    const headerLabel = document.createElement('div')
+    headerLabel.className = 'px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-text-subtle'
+    headerLabel.textContent = 'Room header icons'
+    popover.appendChild(headerLabel)
+
     if (entries.length === 0) {
       const empty = document.createElement('div')
-      empty.className = 'px-3 py-2 text-text-subtle italic'
-      empty.textContent = 'No icons to show'
+      empty.className = 'px-3 py-1 text-xs text-text-subtle italic'
+      empty.textContent = 'No room icons to show'
       popover.appendChild(empty)
-      return
     }
 
     for (const entry of entries) {
@@ -147,6 +159,45 @@ export const mountVisibilityPopover = (deps: VisibilityPopoverDeps): void => {
       const label = document.createElement('span')
       label.className = 'flex-1 text-sm text-text'
       label.textContent = entry.label
+      row.appendChild(label)
+
+      popover.appendChild(row)
+    }
+
+    // === Message-header section ===
+    // Per-user toggles for what shows in each chat-message header. Persists
+    // to localStorage and applies via body classes (CSS-only hide; existing
+    // rendered messages update instantly without re-render).
+    const sep = document.createElement('div')
+    sep.className = 'border-t border-border my-1'
+    popover.appendChild(sep)
+
+    const mhHeader = document.createElement('div')
+    mhHeader.className = 'px-3 pt-1 pb-1 text-[11px] uppercase tracking-wide text-text-subtle'
+    mhHeader.textContent = 'Message header'
+    popover.appendChild(mhHeader)
+
+    let mhPrefs = readPrefs()
+    for (const piece of ALL_PIECES) {
+      const row = document.createElement('div')
+      row.className = 'flex items-center gap-2 px-2 py-1 hover:bg-surface-muted'
+
+      const eyeBtn = document.createElement('button')
+      eyeBtn.type = 'button'
+      eyeBtn.className = 'icon-btn px-1 text-text-subtle hover:text-text'
+      const visible = mhPrefs[piece]
+      eyeBtn.title = visible ? `Hide ${pieceLabels[piece]}` : `Show ${pieceLabels[piece]}`
+      eyeBtn.setAttribute('aria-label', eyeBtn.title)
+      eyeBtn.innerHTML = `<span data-icon="${visible ? 'eye' : 'eye-off'}"></span>`
+      eyeBtn.onclick = () => {
+        mhPrefs = togglePiece(piece as MessageHeaderPiece)
+        render()  // refresh popover icons
+      }
+      row.appendChild(eyeBtn)
+
+      const label = document.createElement('span')
+      label.className = 'flex-1 text-sm text-text px-2'
+      label.textContent = pieceLabels[piece]
       row.appendChild(label)
 
       popover.appendChild(row)

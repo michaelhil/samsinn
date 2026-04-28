@@ -76,32 +76,32 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
     const sender = getAgent(msg.senderId)
     nameEl.textContent = sender?.name ?? msg.senderName ?? msg.senderId
 
+    header.appendChild(nameEl)
+
+    // Header field order: time, duration, context (compact %), model.
+    // Each piece carries `data-mh-piece="<name>"` so the visibility toggles
+    // in the room-header eye popover can hide it via CSS without re-render.
+    // See src/ui/modules/message-header-prefs.ts.
+
     const timeEl = document.createElement('span')
     timeEl.className = 'text-xs text-text-muted'
+    timeEl.dataset.mhPiece = 'time'
     // 24-hour HH:MM:SS — locale-invariant, no AM/PM.
     timeEl.textContent = new Date(msg.timestamp).toLocaleTimeString('en-GB', { hour12: false })
-
-    header.appendChild(nameEl)
     header.appendChild(timeEl)
-
-    if (msg.model) {
-      const modelEl = document.createElement('span')
-      modelEl.className = 'text-xs text-text-muted font-mono'
-      modelEl.textContent = msg.model
-      modelEl.title = msg.provider ? `Model (via ${msg.provider})` : 'Model used for this message'
-      header.appendChild(modelEl)
-    }
 
     if (msg.generationMs) {
       const genEl = document.createElement('span')
       genEl.className = 'text-xs text-accent'
+      genEl.dataset.mhPiece = 'duration'
       genEl.textContent = `${(msg.generationMs / 1000).toFixed(1)}s`
       header.appendChild(genEl)
     }
 
-    // Context usage badge: `prompt / max (pct%)` next to generation time.
-    // Shown only when we know at least prompt tokens. When contextMax is
-    // known, we colour the badge amber/red at 75/90% usage; unknown → grey.
+    // Context usage: shown as a compact `N%` (or `N.N%` for low values).
+    // Hover tooltip carries the full `prompt / max tok (provider)` detail.
+    // Tone reflects pressure: amber at 75%, red at 90%. Unknown context
+    // window → grey text + the raw token count in the tooltip.
     if (msg.promptTokens !== undefined) {
       const ctxEl = document.createElement('span')
       const ctx = msg.contextMax ?? 0
@@ -114,21 +114,57 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
         else tone = 'text-emerald-500'
       }
       ctxEl.className = `text-xs ${tone}`
+      ctxEl.dataset.mhPiece = 'context'
       if (ctx > 0) {
-        ctxEl.textContent = `${usage.toLocaleString()} / ${ctx.toLocaleString()} tok (${pct.toFixed(0)}%)`
-        ctxEl.title = `Prompt tokens used / model context window${msg.provider ? ` · via ${msg.provider}` : ''}`
+        const display = pct < 1 ? pct.toFixed(2) : pct < 10 ? pct.toFixed(1) : pct.toFixed(0)
+        ctxEl.textContent = `${display}%`
+        ctxEl.title = `${usage.toLocaleString()} / ${ctx.toLocaleString()} tok (${display}%)${msg.provider ? ` · via ${msg.provider}` : ''}`
       } else {
-        ctxEl.textContent = `${usage.toLocaleString()} tok`
-        ctxEl.title = `Prompt tokens (context window unknown)${msg.provider ? ` · via ${msg.provider}` : ''}`
+        ctxEl.textContent = '?%'
+        ctxEl.title = `${usage.toLocaleString()} tok (context window unknown)${msg.provider ? ` · via ${msg.provider}` : ''}`
       }
       header.appendChild(ctxEl)
     }
 
-    if (onDelete || onViewContext || onBookmark) {
+    if (msg.model) {
+      // Show only the part after the LAST colon — `gemini:gemini-2.5-pro`
+      // becomes `gemini-2.5-pro`. Models without a provider prefix render
+      // unchanged. Full `provider:model` lives in the tooltip.
+      const modelEl = document.createElement('span')
+      modelEl.className = 'text-xs text-text-muted font-mono'
+      modelEl.dataset.mhPiece = 'model'
+      const colonIdx = msg.model.lastIndexOf(':')
+      modelEl.textContent = colonIdx >= 0 ? msg.model.slice(colonIdx + 1) : msg.model
+      modelEl.title = msg.provider ? `${msg.model} (via ${msg.provider})` : msg.model
+      header.appendChild(modelEl)
+    }
+
+    {
       const spacer = document.createElement('span')
       spacer.className = 'ml-auto'
       header.appendChild(spacer)
       div.className += ' group'
+
+      // Copy-to-clipboard. Hover-only, available on every chat message
+      // regardless of which other actions are in scope. Uses navigator
+      // .clipboard when available; falls back silently on older contexts.
+      const copyBtn = document.createElement('button')
+      copyBtn.className = 'icon-btn text-text-subtle hover:text-text text-xs opacity-0 group-hover:opacity-100'
+      copyBtn.title = 'Copy message to clipboard'
+      copyBtn.setAttribute('aria-label', 'Copy message to clipboard')
+      copyBtn.appendChild(icon('copy', { size: 12 }))
+      copyBtn.onclick = async (e) => {
+        e.stopPropagation()
+        try {
+          await navigator.clipboard.writeText(msg.content)
+          // Brief check-mark feedback so the user sees the click registered.
+          copyBtn.replaceChildren(icon('check', { size: 12 }))
+          setTimeout(() => {
+            if (copyBtn.isConnected) copyBtn.replaceChildren(icon('copy', { size: 12 }))
+          }, 1200)
+        } catch { /* clipboard denied or unavailable — no-op */ }
+      }
+      header.appendChild(copyBtn)
 
       if (onViewContext && msg.generationMs) {
         const ctxBtn = document.createElement('button')

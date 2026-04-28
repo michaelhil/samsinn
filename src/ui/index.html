@@ -316,6 +316,13 @@
        .hidden so app-state toggles (e.g. summary-cluster expansion) don't
        accidentally resurrect a user-hidden button. */
     .user-hidden { display: none !important; }
+    /* Message-header field visibility toggles. body classes set by
+       message-header-prefs.ts; element selectors set by render-message.ts.
+       CSS-only hide means toggling re-flows existing messages instantly. */
+    body.mh-hide-time     [data-mh-piece="time"]     { display: none !important; }
+    body.mh-hide-duration [data-mh-piece="duration"] { display: none !important; }
+    body.mh-hide-context  [data-mh-piece="context"]  { display: none !important; }
+    body.mh-hide-model    [data-mh-piece="model"]    { display: none !important; }
     /* Symmetric padding so icon-only buttons read as centered. The 4 px
        flex gap on .toolbar-group handles in-cluster spacing; cluster-level
        dividers are drawn by .toolbar-divider. We deliberately do NOT put

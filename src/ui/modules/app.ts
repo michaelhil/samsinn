@@ -14,6 +14,7 @@ import { renderAgents } from './render-agents.ts'
 import { mountRoomMembers, consumeAutoAddRoom, registerPendingCreateAdd, clearAutoAddRoom } from './render-room-members.ts'
 import { mountRoomSwitcher } from './render-room-switcher.ts'
 import { mountVisibilityPopover } from './visibility-popover.ts'
+import { initMessageHeaderPrefs } from './message-header-prefs.ts'
 import { renderMessage } from './render-message.ts'
 import type {
   UIMessage,
@@ -308,6 +309,11 @@ mountRoomSwitcher({
   popover: document.getElementById('room-switcher-popover') as HTMLElement,
   openCreateRoomModal: () => roomModal.showModal(),
 })
+
+// Apply persisted message-header field-visibility prefs as body classes
+// BEFORE the first message renders. CSS rules in index.html hide
+// `[data-mh-piece="<name>"]` when `body.mh-hide-<name>` is set.
+initMessageHeaderPrefs()
 
 mountVisibilityPopover({
   button: document.getElementById('btn-icon-visibility') as HTMLButtonElement,
