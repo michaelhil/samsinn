@@ -176,13 +176,14 @@ export const bootstrap = async (): Promise<void> => {
     })
   }
 
-  // === WS manager — lifecycle owned here ===
-  // Built before the registry so onSystemCreated can call wireSystemEvents
-  // The wsManager is registry-aware: buildSnapshot and subscribeAgentState
-  // resolve the live System per instanceId rather than closing over a single
-  // boot system. State subscriptions broadcast scoped to the originating
-  // instance via broadcastToInstance.
-  let wsManager: ReturnType<typeof createWSManager> | undefined
+  // === SystemRegistry ===
+  // The onSystemCreated hook closes over `wsManager` (assigned right after
+  // createSystemRegistry returns, before any `registry.getOrLoad()` call).
+  // The hook always sees a defined value. In headless mode the wsManager is
+  // constructed but never accepts upgrades — no WS clients connect.
+  // Definite-assignment assertion (`!`) is fine: the assignment site below
+  // runs synchronously before any registry consumer code.
+  let wsManager!: ReturnType<typeof createWSManager>
 
   // === SystemRegistry ===
   const registry = createSystemRegistry({
@@ -208,22 +209,20 @@ export const bootstrap = async (): Promise<void> => {
       if (system.house.listAllRooms().length === 0) {
         system.house.createRoomSafe({ name: 'general', createdBy: 'system' })
       }
-      // Wire WS broadcasts + autosave. autoSaver is passed in (registry
-      // map entry isn't set until buildSystem returns). wsManager only
-      // exists for the HTTP runtime — headless boots a system before
-      // wsManager is built and runs without WS.
-      if (wsManager) wireSystemEvents(system, wsManager, autoSaver, id)
+      // Wire WS broadcasts + autosave. wsManager is guaranteed assigned
+      // by the time any getOrLoad runs (see the `let wsManager!:` block
+      // above). autoSaver is passed in directly because the registry map
+      // entry isn't set until buildSystem returns.
+      wireSystemEvents(system, wsManager, autoSaver, id)
     },
     onSystemEvicted: (system, id) => {
       // Close WS sessions for this instance — they hold dangling references.
-      if (wsManager) {
-        for (const [token, sess] of [...wsManager.sessions]) {
-          if (sess.instanceId !== id) continue
-          const ws = wsManager.wsConnections.get(token) as { close?: (code: number, reason?: string) => void } | undefined
-          try { ws?.close?.(1001, 'instance evicted') } catch { /* ignore */ }
-          wsManager.sessions.delete(token)
-          wsManager.wsConnections.delete(token)
-        }
+      for (const [token, sess] of [...wsManager.sessions]) {
+        if (sess.instanceId !== id) continue
+        const ws = wsManager.wsConnections.get(token) as { close?: (code: number, reason?: string) => void } | undefined
+        try { ws?.close?.(1001, 'instance evicted') } catch { /* ignore */ }
+        wsManager.sessions.delete(token)
+        wsManager.wsConnections.delete(token)
       }
       // Detach all agents from the reverse index — late provider events
       // for evicted agents drop silently. (per-agent detach also fires on
@@ -300,6 +299,21 @@ export const bootstrap = async (): Promise<void> => {
     }))
   }
 
+  // === wsManager — assigned NOW (before any registry.getOrLoad runs) ===
+  // wsManager is registry-aware: buildSnapshot and subscribeAgentState
+  // resolve the live System per instanceId rather than closing over a
+  // single boot system. State subscriptions broadcast scoped to the
+  // originating instance via broadcastToInstance.
+  // Order matters: this assignment MUST happen before the first getOrLoad,
+  // otherwise the onSystemCreated hook would observe `wsManager` undefined
+  // and silently skip wireSystemEvents — that was the source of a long
+  // latent bug fixed in commit 5d73a8e. Pre-assigning wsManager keeps the
+  // hook's wiring path single, with no rescue branch elsewhere.
+  wsManager = createWSManager({
+    getSystem: (id) => registry.tryGetLive(id),
+    limitMetrics: shared.limitMetrics,
+  })
+
   // === Provider routing event dispatcher (registry-aware) ===
   shared.setProviderEventDispatcher((event) => {
     if (!event.agentId) return   // events without an agentId can't be routed
@@ -356,26 +370,13 @@ export const bootstrap = async (): Promise<void> => {
   }
 
   // === HTTP mode ===
-  // Build the boot system (any cookie-less request lands here too via the
-  // bootstrap registry path). Provider event dispatcher already routes by
-  // agentId so this is just the seed instance.
+  // Boot system (any cookie-less request lands here too via the bootstrap
+  // registry path). Provider event dispatcher already routes by agentId so
+  // this is just the seed instance. wsManager was assigned above before
+  // any getOrLoad ran, so onSystemCreated has already wired its broadcasts.
+  // Deliberately NO rescue path here — single wiring site is the invariant.
   const bootInstanceId = generateInstanceId()
   const bootSystem = await registry.getOrLoad(bootInstanceId)
-  // wsManager is registry-aware: snapshot building + state subscriptions
-  // resolve the live System per instanceId. Ollama is shared across
-  // instances (one gateway in SharedRuntime) — we read it from the boot
-  // system, but any active system would yield the same gateway reference.
-  wsManager = createWSManager({
-    getSystem: (id) => registry.tryGetLive(id),
-    limitMetrics: shared.limitMetrics,
-  })
-
-  // Now that wsManager exists, re-wire the boot system's events (the
-  // first onSystemCreated ran with wsManager=undefined).
-  {
-    const autoSaver = registry.autoSaverFor(bootInstanceId)
-    if (autoSaver) wireSystemEvents(bootSystem, wsManager, autoSaver, bootInstanceId)
-  }
 
   // Warm provider model caches (best-effort, after first instance exists
   // so the router has someone to log against).
