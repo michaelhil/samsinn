@@ -118,7 +118,16 @@ export const bootstrap = async (): Promise<void> => {
     return defaultOn
   }
   const networkToolsEnabled = flag('SAMSINN_ENABLE_NETWORK_TOOLS', !isDeployMode)
+  // codegenEnabled gates write_skill + write_tool only — agents writing
+  // arbitrary TypeScript into ~/.samsinn/. Default-off in deploy mode is
+  // the right call there.
   const codegenEnabled = flag('SAMSINN_ENABLE_CODEGEN', !isDeployMode)
+  // packsEnabled gates install/update/uninstall/list_packs and
+  // list_available_packs — installing a vetted GitHub pack is a different
+  // threat profile (you trust the pack's source) than an agent producing
+  // arbitrary TS. Default-on everywhere; operator can flip to 0 to lock
+  // the runtime to whatever is on disk at boot.
+  const packsEnabled = flag('SAMSINN_ENABLE_PACKS', true)
 
   shared.sharedToolRegistry.register(createPassTool())
   shared.sharedToolRegistry.register(createGetTimeTool())
@@ -273,12 +282,15 @@ export const bootstrap = async (): Promise<void> => {
     }
   }
 
-  // Now that registry exists, finish wiring shared tools that needed it:
-  // write_tool (refreshes agents) and the pack admin tools.
+  // Now that registry exists, finish wiring shared tools that needed it.
+  // Two independent gates: codegenEnabled covers write_tool (arbitrary TS
+  // on disk); packsEnabled covers vetted GitHub pack management.
   if (codegenEnabled) {
     shared.sharedToolRegistry.register(createWriteToolTool(
       shared.sharedToolRegistry, shared.sharedSkillStore, crossInstanceRefreshAllAgentTools,
     ))
+  }
+  if (packsEnabled) {
     shared.sharedToolRegistry.registerAll(createPackTools({
       packsDir: sharedPaths.packs(),
       toolRegistry: shared.sharedToolRegistry,
