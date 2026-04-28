@@ -29,6 +29,24 @@
 //   - Snapshot path resolution (uses instancePaths from core/paths.ts)
 //   - Per-instance event-callback wiring (Phase F: wireSystemEvents)
 //   - Janitor (Phase E: instance-cleanup.ts) — operates on disk only
+//
+// === buildSystem ordering (subtle; was the source of 5d73a8e) ===
+// Inside buildSystem(id):
+//   1. createSystem(...)           — new in-memory System, no events wired.
+//   2. loadSnapshot + restoreFromSnapshot  — agents rehydrated.
+//   3. buildAutoSaver              — debounced snapshot writer.
+//   4. opts.onSystemCreated(...)   — caller's wiring runs HERE.
+//   5. seedFreshInstance (if no snapshot)  — demo content.
+//   6. return { system, autoSaver }
+// THEN in getOrLoad:
+//   7. map.set(id, entry)          — registry knows about the system.
+//
+// Steps 4 runs BEFORE step 7. Inside the hook, `registry.autoSaverFor(id)`
+// returns null (the entry isn't in the map yet) and `tryGetLive(id)` returns
+// undefined. Anything the hook needs that depends on per-id state must be
+// passed in directly — that's why onSystemCreated takes (system, id, autoSaver)
+// as arguments, not just (system, id). Resist any refactor that moves
+// "look up the saver from the registry" into the hook.
 // ============================================================================
 
 import type { System } from '../main.ts'
@@ -117,10 +135,16 @@ export interface SystemRegistry {
   // Returns null if the instance is not currently in memory.
   readonly autoSaverFor: (id: string) => AutoSaver | null
   // In-memory only lookup. Returns the live System for `id` if it is
-  // currently loaded and active (not evicting), else undefined. Used by
-  // boundary code that must NOT trigger a lazy-load — e.g. WS snapshot
-  // building (caller already resolved the system to bind the session)
-  // and late provider routing events for evicted instances.
+  // currently loaded and active (not evicting), else undefined.
+  //
+  // SILENTLY returns undefined for evicted/unloaded instances. Every
+  // existing caller depends on this — late provider events drop, WS
+  // snapshot building closes the socket with 4001, cross-instance fan-
+  // outs skip the missing instance. If you need a hard error or you
+  // need to materialize the system, use `getOrLoad` instead. Adding a
+  // call site that quietly skips when the answer should be "load this"
+  // is how silent-skip bugs hide — see CLAUDE.md "no silent skips on
+  // optional dependencies."
   readonly tryGetLive: (id: string) => System | undefined
   // Agent → instance reverse index for provider routing events. Phase F4
   // wires shared.setProviderEventDispatcher to use this.

@@ -8,6 +8,30 @@
 // lazy-loaded on first request, evicted after SAMSINN_IDLE_MS (default
 // 30 min), and persisted at $SAMSINN_HOME/instances/<id>/snapshot.json.
 // Shared runtime: provider router, gateways, ProviderKeys, MCP tools.
+//
+// === Construction order (matters; do not reshuffle without thinking) ===
+//
+//   1. SharedRuntime  — provider router, gateways, shared registry/store.
+//   2. MCP tools      — register into shared.sharedToolRegistry once.
+//   3. Process tools  — pure / network / codegen tools registered once
+//                       into shared (gated by SAMSINN_ENABLE_*).
+//   4. SystemRegistry — onSystemCreated hook closes over wsManager (set in 5).
+//   5. wsManager      — assigned BEFORE any registry.getOrLoad runs, so
+//                       the hook always sees a defined value. Failure to
+//                       respect this is how 5d73a8e happened: any cookie-
+//                       bound instance whose onSystemCreated fired with
+//                       wsManager undefined silently skipped wireSystemEvents.
+//   6. Pack admin     — install/update/uninstall_pack registered last
+//                       because they need the cross-instance refresh
+//                       callback that walks `registry.list()`.
+//   7. Boot system    — getOrLoad seeds the first cookieless visitor.
+//                       wsManager already exists; onSystemCreated wires it.
+//   8. Janitor + timers + HTTP server.
+//
+// Single wiring path: every instance (boot AND cookie-bound) gets its
+// broadcasts wired by the same onSystemCreated hook. There is NO rescue
+// branch elsewhere in this file. If you find yourself reaching for one,
+// the lifecycle invariant above is broken — fix it there.
 // ============================================================================
 
 import { createSharedRuntime } from './core/shared-runtime.ts'
