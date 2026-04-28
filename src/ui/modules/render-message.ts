@@ -5,6 +5,39 @@ import type { UIMessage, AgentInfo } from './render-types.ts'
 import { renderMermaidBlocks } from './mermaid/index.ts'
 import { icon } from './icon.ts'
 import { appendWhisperBadge } from './whisper-badge.ts'
+import { showToast } from './toast.ts'
+
+// Best-effort clipboard write. Tries the modern Async Clipboard API first
+// (https/localhost only; some browsers refuse on programmatic clicks), then
+// falls back to a hidden textarea + document.execCommand('copy') which works
+// on more contexts but is deprecated. Returns true if either path reported
+// success — caller decides what to surface to the user.
+const writeClipboard = async (text: string): Promise<boolean> => {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch { /* fall through to legacy path */ }
+  // Legacy path: an offscreen textarea selected and copied via execCommand.
+  // Preserved here because navigator.clipboard rejects on insecure contexts
+  // and on some packaged WebViews even when the document is focused.
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-1000px'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch {
+    return false
+  }
+}
 
 // Render Markdown content safely. Falls back to textContent if libraries not loaded.
 // Post-processes mermaid code blocks into rendered diagrams.
@@ -155,14 +188,16 @@ export const renderMessage = (opts: RenderMessageOptions): void => {
       copyBtn.appendChild(icon('copy', { size: 12 }))
       copyBtn.onclick = async (e) => {
         e.stopPropagation()
-        try {
-          await navigator.clipboard.writeText(msg.content)
-          // Brief check-mark feedback so the user sees the click registered.
+        const ok = await writeClipboard(msg.content)
+        if (ok) {
           copyBtn.replaceChildren(icon('check', { size: 12 }))
           setTimeout(() => {
             if (copyBtn.isConnected) copyBtn.replaceChildren(icon('copy', { size: 12 }))
           }, 1200)
-        } catch { /* clipboard denied or unavailable — no-op */ }
+          showToast(document.body, 'Copied to clipboard', { type: 'success', position: 'fixed' })
+        } else {
+          showToast(document.body, 'Copy failed — clipboard unavailable in this browser context', { type: 'error', position: 'fixed' })
+        }
       }
       header.appendChild(copyBtn)
 
