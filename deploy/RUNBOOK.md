@@ -166,7 +166,15 @@ done
 echo
 # Expect: 201 201 201 201 201 429 429 429
 
-# 3. Two-browser isolation check (manual):
+# 3. Streaming wiring smoke test (mandatory after every restart).
+#    The script verifies broadcast-to-WS wiring is alive — catches the
+#    silent-skip class of bug where streaming events disappear without
+#    error logs. See src/api/streaming.test.ts for the underlying chain.
+ssh user@yourhost.example.com 'cd /opt/samsinn && set -a; source /etc/samsinn/env; set +a; bun run scripts/smoke-streaming.ts'
+# Expect: "OK: ws snapshot + message broadcast received (...)"
+# Exit non-zero on red — investigate before opening invitations.
+
+# 4. Two-browser isolation check (manual):
 #    - Open https://yourhost.example.com in two profiles (or one normal +
 #      one private window). Each gets a unique samsinn_instance cookie.
 #    - Create an agent in one. Confirm it does NOT show up in the other.
