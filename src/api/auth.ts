@@ -4,15 +4,22 @@
 // every WS upgrade must present an HttpOnly session cookie issued by
 // /api/auth.
 //
-// The session is in-memory only; restart invalidates all sessions and any
-// connected client gets bounced to the token prompt. Acceptable for the
-// sandbox use case — the operator restarts rarely.
+// Sessions are STATELESS: the cookie value is sha256(SAMSINN_TOKEN). On each
+// request we hash the current env token and constant-time compare. This means:
+//   - Restarts no longer invalidate sessions (was a real UX bug — every
+//     restart bounced every connected client back to the token prompt).
+//   - Rotating SAMSINN_TOKEN invalidates every cookie at once — the desired
+//     revocation path.
+//   - The cookie value never carries the token itself; only proof that the
+//     bearer once submitted it.
+//   - There is no per-user session record. For a closed-invitation sandbox
+//     this is the right trade-off; not appropriate for multi-tenant SaaS.
 // ============================================================================
 
-const validSessions = new Set<string>()
+import { createHash } from 'node:crypto'
 
 const SESSION_COOKIE = 'samsinn_session'
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000  // 30 days
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000  // 30 days — cookie lifetime
 
 // Token check is constant-time to keep timing-leak surface tiny.
 const constantTimeEqual = (a: string, b: string): boolean => {
@@ -30,6 +37,9 @@ const requiredToken = (): string | null => {
   return raw
 }
 
+const expectedSessionValue = (): string =>
+  createHash('sha256').update(requiredToken() ?? '').digest('hex')
+
 export const authEnabled = (): boolean => requiredToken() !== null
 
 export const validateToken = (candidate: string): boolean => {
@@ -38,16 +48,12 @@ export const validateToken = (candidate: string): boolean => {
   return constantTimeEqual(candidate, required)
 }
 
-export const issueSession = (): string => {
-  const id = crypto.randomUUID()
-  validSessions.add(id)
-  return id
-}
+export const issueSession = (): string => expectedSessionValue()
 
 export const isValidSession = (id: string | null): boolean => {
   if (!authEnabled()) return true  // dev passthrough
   if (!id) return false
-  return validSessions.has(id)
+  return constantTimeEqual(id, expectedSessionValue())
 }
 
 // Parse a single cookie value out of the Cookie header. Tiny; avoids a dep.
