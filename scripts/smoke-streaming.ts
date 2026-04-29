@@ -30,11 +30,10 @@ const urlIdx = args.indexOf('--url')
 const baseUrl = urlIdx >= 0 ? args[urlIdx + 1]! : 'http://localhost:3000'
 const wsBaseUrl = baseUrl.replace(/^http/, 'ws')
 
+// SAMSINN_TOKEN is now optional. When set, we authenticate via /api/auth
+// to get a session cookie (deploy-mode token gate). When unset, the gate
+// is inert server-side and we skip the auth step entirely.
 const token = process.env.SAMSINN_TOKEN
-if (!token) {
-  console.error('FAIL: SAMSINN_TOKEN not set in env. Source /etc/samsinn/env first.')
-  process.exit(1)
-}
 
 const fail = (msg: string): never => {
   console.error(`FAIL: ${msg}`)
@@ -42,22 +41,25 @@ const fail = (msg: string): never => {
 }
 
 const main = async (): Promise<void> => {
-  // 1. Authenticate to get a session cookie.
-  const authRes = await fetch(`${baseUrl}/api/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  })
-  if (!authRes.ok) fail(`/api/auth returned ${authRes.status}`)
-  const sessionCookie = authRes.headers
-    .getSetCookie()
-    .find(c => c.startsWith('samsinn_session='))
-    ?.split(';')[0]
-  if (!sessionCookie) fail('no session cookie returned by /api/auth')
+  // 1. Authenticate (only when a token is configured).
+  let sessionCookie: string | undefined
+  if (token) {
+    const authRes = await fetch(`${baseUrl}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+    if (!authRes.ok) fail(`/api/auth returned ${authRes.status}`)
+    sessionCookie = authRes.headers
+      .getSetCookie()
+      .find(c => c.startsWith('samsinn_session='))
+      ?.split(';')[0]
+    if (!sessionCookie) fail('no session cookie returned by /api/auth')
+  }
 
   // 2. Hit diagnostics: at least one wired instance must exist already.
   const diagRes = await fetch(`${baseUrl}/api/system/diagnostics`, {
-    headers: { Cookie: sessionCookie! },
+    ...(sessionCookie ? { headers: { Cookie: sessionCookie } } : {}),
   })
   if (!diagRes.ok) fail(`/api/system/diagnostics returned ${diagRes.status}`)
   const diag = await diagRes.json() as {
@@ -73,9 +75,11 @@ const main = async (): Promise<void> => {
   //    receive a snapshot. Then send a synthetic chat message via REST
   //    and wait for the corresponding WS broadcast.
   const targetInstance = diag.instances.find(i => i.wired)!.id
-  const cookie = `${sessionCookie}; samsinn_instance=${targetInstance}`
-  const wsName = `smoke-${Date.now()}`
-  const ws = new WebSocket(`${wsBaseUrl}/ws?name=${encodeURIComponent(wsName)}`, {
+  const cookie = sessionCookie
+    ? `${sessionCookie}; samsinn_instance=${targetInstance}`
+    : `samsinn_instance=${targetInstance}`
+  // v15+: WS is a viewer; no `?name=` required.
+  const ws = new WebSocket(`${wsBaseUrl}/ws`, {
     headers: { Cookie: cookie },
   } as unknown as undefined)
 
