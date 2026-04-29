@@ -16,9 +16,10 @@
 
 import { json, errorResponse, parseBody } from './helpers.ts'
 import type { RouteEntry } from './types.ts'
-import { loadWikiStore, saveWikiStore, mergeWikis, isValidWikiId, STORE_VERSION } from '../../wiki/store.ts'
+import { loadWikiStore, saveWikiStore, mergeWithDiscovery, isValidWikiId, STORE_VERSION } from '../../wiki/store.ts'
 import { asAIAgent } from '../../agents/shared.ts'
 import type { WikiConfig } from '../../wiki/types.ts'
+import { getAvailableWikis } from '../../wiki/discovery.ts'
 
 interface WikiPatchBody {
   readonly owner?: string
@@ -45,7 +46,9 @@ export const wikisRoutes: RouteEntry[] = [
     pattern: /^\/api\/wikis$/,
     handler: async (_req, _match, { system }) => {
       const { data: store, warnings } = await loadWikiStore(system.wikisStorePath)
-      const merged = mergeWikis(store)
+      let discovered: Awaited<ReturnType<typeof getAvailableWikis>> = []
+      try { discovered = await getAvailableWikis() } catch { /* discovery failures are non-fatal here */ }
+      const merged = mergeWithDiscovery(store, discovered)
       const live = system.wikiRegistry.list()
       const liveById = new Map(live.map((w) => [w.id, w]))
       const wikis = merged.map((w) => ({
@@ -57,11 +60,41 @@ export const wikisRoutes: RouteEntry[] = [
         keyMask: w.maskedKey,
         hasKey: w.apiKey.length > 0,
         enabled: w.enabled,
+        source: w.source,
         pageCount: liveById.get(w.id)?.pageCount ?? 0,
         lastWarmAt: liveById.get(w.id)?.lastWarmAt ?? null,
         lastError: liveById.get(w.id)?.lastError ?? null,
       }))
       return json({ wikis, warnings })
+    },
+  },
+
+  // --- Discovery: list available wikis from SAMSINN_WIKI_SOURCES ---
+  // Separate endpoint so the UI Browse tab can show what's discoverable
+  // independently of what's in the merged active set. `installed` is true
+  // for ids already present in wikis.json (so we don't repeat the row).
+  {
+    method: 'GET',
+    pattern: /^\/api\/wikis\/available$/,
+    handler: async (_req, _match, { system }) => {
+      let discovered: Awaited<ReturnType<typeof getAvailableWikis>> = []
+      try { discovered = await getAvailableWikis() } catch (err) {
+        return errorResponse(`discovery failed: ${err instanceof Error ? err.message : String(err)}`, 502)
+      }
+      const { data: store } = await loadWikiStore(system.wikisStorePath)
+      const storedIds = new Set(store.wikis.map((w) => w.id))
+      return json({
+        wikis: discovered.map((d) => ({
+          id: d.id,
+          owner: d.owner,
+          repo: d.repo,
+          displayName: d.displayName,
+          description: d.description,
+          repoUrl: d.repoUrl,
+          installed: storedIds.has(d.id),
+        })),
+        sources: (process.env.SAMSINN_WIKI_SOURCES ?? 'samsinn-wikis').split(',').map((s) => s.trim()).filter(Boolean),
+      })
     },
   },
 
@@ -90,7 +123,9 @@ export const wikisRoutes: RouteEntry[] = [
       }
       const next = { version: STORE_VERSION, wikis: [...store.wikis, entry] }
       await saveWikiStore(system.wikisStorePath, next)
-      const merged = mergeWikis(next).filter((w) => w.enabled)
+      let discovered2: Awaited<ReturnType<typeof getAvailableWikis>> = []
+      try { discovered2 = await getAvailableWikis() } catch { /* non-fatal */ }
+      const merged = mergeWithDiscovery(next, discovered2).filter((w) => w.enabled)
       system.wikiRegistry.setWikis(merged)
 
       // Background warm — don't block the response.
@@ -131,7 +166,9 @@ export const wikisRoutes: RouteEntry[] = [
       }
       const next = { version: STORE_VERSION, wikis: [...store.wikis.slice(0, idx), updated, ...store.wikis.slice(idx + 1)] }
       await saveWikiStore(system.wikisStorePath, next)
-      const merged = mergeWikis(next).filter((w) => w.enabled)
+      let discovered2: Awaited<ReturnType<typeof getAvailableWikis>> = []
+      try { discovered2 = await getAvailableWikis() } catch { /* non-fatal */ }
+      const merged = mergeWithDiscovery(next, discovered2).filter((w) => w.enabled)
       system.wikiRegistry.setWikis(merged)
       try { broadcast({ type: 'wiki_changed', wikiId: id, action: 'updated' }) } catch { /* ignore */ }
       return json({ ok: true })
@@ -148,7 +185,13 @@ export const wikisRoutes: RouteEntry[] = [
       const next = { version: STORE_VERSION, wikis: store.wikis.filter((w) => w.id !== id) }
       if (next.wikis.length === store.wikis.length) return errorResponse(`wiki "${id}" not found`, 404)
       await saveWikiStore(system.wikisStorePath, next)
-      system.wikiRegistry.removeWiki(id)
+      // Re-merge with discovery so a delete that targets a stored override
+      // of a discovered wiki leaves the discovered entry active. setWikis is
+      // a diffing call: anything not in the new list is removed from the cache.
+      let discoveredDel: Awaited<ReturnType<typeof getAvailableWikis>> = []
+      try { discoveredDel = await getAvailableWikis() } catch { /* non-fatal */ }
+      const mergedDel = mergeWithDiscovery(next, discoveredDel).filter((w) => w.enabled)
+      system.wikiRegistry.setWikis(mergedDel)
       // Also clear bindings from any room.
       for (const profile of system.house.listAllRooms()) {
         const room = system.house.getRoom(profile.id)

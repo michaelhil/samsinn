@@ -13,6 +13,7 @@ import { readFile, writeFile, rename, chmod, mkdir, stat } from 'node:fs/promise
 import { dirname } from 'node:path'
 import { maskKey } from '../llm/providers-store.ts'
 import type { WikiConfig, MergedWikiEntry } from './types.ts'
+import type { DiscoveredWiki } from './discovery.ts'
 
 export const STORE_VERSION = 1
 
@@ -129,3 +130,63 @@ export const mergeWikis = (store: WikisFileShape): ReadonlyArray<MergedWikiEntry
   }))
 
 export const isValidWikiId = (id: string): boolean => ID_PATTERN.test(id)
+
+// === Merge file-store entries with discovered (env-sourced) entries ===
+//
+// Stored wins on id collision (operator edits, PATs, manual displayName,
+// manual `enabled: false` all preserved). Discovered entries fill the rest
+// with `apiKey: ''` and `enabled: true`. If a stored entry has no
+// displayName but the discovered entry has one, the discovered displayName
+// is used.
+//
+// Also annotates each entry with a non-persisted `source` flag so the UI
+// and REST surface can distinguish ephemeral discovered wikis from
+// operator-managed ones.
+
+export type WikiSource = 'stored' | 'discovered'
+
+export interface MergedWikiEntryWithSource extends MergedWikiEntry {
+  readonly source: WikiSource
+}
+
+export const mergeWithDiscovery = (
+  store: WikisFileShape,
+  discovered: ReadonlyArray<DiscoveredWiki>,
+): ReadonlyArray<MergedWikiEntryWithSource> => {
+  const out: MergedWikiEntryWithSource[] = []
+  const storedById = new Map(store.wikis.map((w) => [w.id, w]))
+  const discoveredById = new Map(discovered.map((d) => [d.id, d]))
+
+  for (const w of store.wikis) {
+    const d = discoveredById.get(w.id)
+    const fallbackDisplay = d?.displayName ?? `${w.owner}/${w.repo}`
+    out.push({
+      id: w.id,
+      owner: w.owner,
+      repo: w.repo,
+      ref: w.ref ?? 'main',
+      displayName: w.displayName ?? fallbackDisplay,
+      apiKey: w.apiKey ?? '',
+      maskedKey: maskKey(w.apiKey ?? ''),
+      enabled: w.enabled ?? true,
+      source: 'stored',
+    })
+  }
+
+  for (const d of discovered) {
+    if (storedById.has(d.id)) continue
+    out.push({
+      id: d.id,
+      owner: d.owner,
+      repo: d.repo,
+      ref: 'main',
+      displayName: d.displayName,
+      apiKey: '',
+      maskedKey: maskKey(''),
+      enabled: true,
+      source: 'discovered',
+    })
+  }
+
+  return out
+}

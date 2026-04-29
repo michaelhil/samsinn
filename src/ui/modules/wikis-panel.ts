@@ -20,6 +20,7 @@ interface WikiEntry {
   keyMask: string
   hasKey: boolean
   enabled: boolean
+  source: 'stored' | 'discovered'
   pageCount: number
   lastWarmAt: number | null
   lastError: string | null
@@ -98,15 +99,26 @@ export const renderWikisInto = async (container: HTMLElement): Promise<void> => 
     const keyBadge = w.hasKey
       ? `<span class="text-text-muted ml-2" title="Authenticated with PAT">🔑 ${escapeHtml(w.keyMask)}</span>`
       : `<span class="text-text-muted ml-2" title="Anonymous (60 req/hr GitHub limit)">no PAT</span>`
+    const sourceBadge = w.source === 'discovered'
+      ? `<span class="ml-2 text-[10px] uppercase tracking-wide text-text-subtle" title="Auto-discovered via SAMSINN_WIKI_SOURCES">discovered</span>`
+      : ''
+    const isDiscovered = w.source === 'discovered'
+    const deleteBtn = isDiscovered
+      ? '' // discovered wikis aren't in wikis.json — nothing to delete
+      : `<button data-act="delete" class="px-2 py-1 text-red-500 hover:bg-surface-muted rounded interactive" title="Remove">✕</button>`
+    const customizeBtn = isDiscovered
+      ? `<button data-act="customize" class="px-2 py-1 text-text hover:bg-surface-muted rounded interactive" title="Add PAT or override displayName">⚙</button>`
+      : ''
     row.innerHTML = `
       <div class="flex items-center gap-2">
         <div class="flex-1 min-w-0">
-          <div class="font-medium truncate">${escapeHtml(w.displayName)} <span class="text-text-muted">(${escapeHtml(w.id)})</span></div>
+          <div class="font-medium truncate">${escapeHtml(w.displayName)} <span class="text-text-muted">(${escapeHtml(w.id)})</span>${sourceBadge}</div>
           <div class="text-text-muted truncate">${escapeHtml(w.owner)}/${escapeHtml(w.repo)}@${escapeHtml(w.ref)} ${keyBadge}</div>
           <div>${status}</div>
         </div>
         <button data-act="refresh" class="px-2 py-1 text-text hover:bg-surface-muted rounded interactive" title="Refresh now">↻</button>
-        <button data-act="delete" class="px-2 py-1 text-red-500 hover:bg-surface-muted rounded interactive" title="Remove">✕</button>
+        ${customizeBtn}
+        ${deleteBtn}
       </div>
       <div data-bindings class="mt-2 pl-2 text-text-muted">Loading bindings…</div>
     `
@@ -121,7 +133,28 @@ export const renderWikisInto = async (container: HTMLElement): Promise<void> => 
         showToast(document.body, `Refresh failed: ${(await res.json().catch(() => ({ error: '?' })) as { error?: string }).error}`, { type: 'error', position: 'fixed' })
       }
     }
-    row.querySelector<HTMLButtonElement>('[data-act="delete"]')!.onclick = async () => {
+    const customizeEl = row.querySelector<HTMLButtonElement>('[data-act="customize"]')
+    if (customizeEl) {
+      customizeEl.onclick = async () => {
+        const apiKey = prompt(`Add a GitHub PAT for "${w.id}" (leave blank to skip):`)?.trim() || undefined
+        const displayName = prompt(`Override displayName for "${w.id}" (leave blank to keep current):`)?.trim() || undefined
+        const body: Record<string, unknown> = { id: w.id, owner: w.owner, repo: w.repo, ref: w.ref }
+        if (apiKey) body.apiKey = apiKey
+        if (displayName) body.displayName = displayName
+        const res = await fetch('/api/wikis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (res.ok) showToast(document.body, `Customized ${w.id}`, { type: 'success', position: 'fixed' })
+        else {
+          const data = await res.json().catch(() => ({ error: '?' })) as { error?: string }
+          showToast(document.body, `Customize failed: ${data.error}`, { type: 'error', position: 'fixed' })
+        }
+      }
+    }
+    const deleteEl = row.querySelector<HTMLButtonElement>('[data-act="delete"]')
+    if (deleteEl) deleteEl.onclick = async () => {
       if (!confirm(`Delete wiki "${w.id}"? This also removes all room bindings.`)) return
       const res = await fetch(`/api/wikis/${encodeURIComponent(w.id)}`, { method: 'DELETE' })
       if (res.ok) {

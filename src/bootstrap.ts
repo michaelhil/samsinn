@@ -45,7 +45,8 @@ import { loadSkills } from './skills/loader.ts'
 import { loadAllPacks } from './packs/loader.ts'
 import { asAIAgent } from './agents/shared.ts'
 import { warmProviderModels } from './llm/providers-setup.ts'
-import { loadWikiStore, mergeWikis } from './wiki/store.ts'
+import { loadWikiStore, mergeWithDiscovery } from './wiki/store.ts'
+import { getAvailableWikis } from './wiki/discovery.ts'
 import { createWikiTools } from './tools/built-in/wiki-tools.ts'
 import { parseLogConfigFromEnv } from './logging/config.ts'
 import { sharedPaths } from './core/paths.ts'
@@ -154,9 +155,24 @@ export const bootstrap = async (): Promise<void> => {
 
   // Load configured wikis and warm them in the background. Warm failures
   // are logged; agents see "wiki unavailable" on tool calls in the meantime.
+  //
+  // Discovery: SAMSINN_WIKI_SOURCES (default `samsinn-wikis`) lists GitHub
+  // owners/repos to discover wikis from. Discovered entries are merged
+  // ephemerally with the on-disk store (stored wins on id collision); they
+  // are NEVER written to wikis.json. See src/wiki/discovery.ts.
   const { data: wikiStoreData, warnings: wikiWarnings } = await loadWikiStore(sharedPaths.wikis())
   for (const w of wikiWarnings) console.warn(`[wikis.json] ${w}`)
-  const mergedWikis = mergeWikis(wikiStoreData).filter((w) => w.enabled)
+  let discoveredWikis: Awaited<ReturnType<typeof getAvailableWikis>> = []
+  try {
+    discoveredWikis = await getAvailableWikis()
+  } catch (err) {
+    console.warn(`[wiki/discovery] failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  const mergedWikis = mergeWithDiscovery(wikiStoreData, discoveredWikis).filter((w) => w.enabled)
+  console.log(
+    `[wiki] discovered ${discoveredWikis.length} from ${process.env.SAMSINN_WIKI_SOURCES ?? 'samsinn-wikis'}; `
+    + `${wikiStoreData.wikis.length} stored → ${mergedWikis.length} active`,
+  )
   shared.wikiRegistry.setWikis(mergedWikis)
   for (const w of mergedWikis) {
     shared.wikiRegistry.warm(w.id)
