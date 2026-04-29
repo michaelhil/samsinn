@@ -46,7 +46,7 @@ export interface Agent {
 //   UI "System prompt"   → `house`          (global housePrompt — NOT the LLM `role:'system'`)
 //   UI "Response format" → `responseFormat` (global responseFormat)
 // All default true; undefined at load → preserve current behavior.
-export type PromptSection = 'persona' | 'room' | 'house' | 'responseFormat' | 'skills'
+export type PromptSection = 'persona' | 'room' | 'house' | 'responseFormat' | 'skills' | 'wikis'
 export type IncludePrompts = Partial<Record<PromptSection, boolean>>
 
 // Sub-sections inside the generated CONTEXT block. Default all true; undefined
@@ -87,6 +87,8 @@ export interface AIAgent extends Agent {
   readonly updateMaxToolResultChars: (n: number | undefined) => void
   readonly getMaxToolIterations: () => number | undefined
   readonly updateMaxToolIterations: (n: number | undefined) => void
+  readonly getWikiBindings: () => ReadonlyArray<string>
+  readonly updateWikiBindings: (wikiIds: ReadonlyArray<string>) => void
   // Context preview — runs buildSystemSections for a specific room and
   // returns section-by-section text + token estimate plus budget resolution.
   // Used by the UI panel so every magnifier has ground truth.
@@ -184,6 +186,7 @@ export interface AIAgentConfig {
   readonly includeTools?: boolean               // master: send tool definitions to LLM (default: true)
   readonly promptsEnabled?: boolean             // master for all per-section prompt toggles (default: true)
   readonly contextEnabled?: boolean             // master for all context sub-section toggles (default: true)
+  readonly wikiBindings?: ReadonlyArray<string> // optional per-agent wiki override (effective set = room ∪ agent override)
 }
 
 // === Agent Response (parsed from LLM plain text output) ===

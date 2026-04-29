@@ -31,6 +31,7 @@ import type { ProviderSetupResult } from './llm/providers-setup.ts'
 import type { ProviderConfig } from './llm/providers-config.ts'
 import type { ProviderKeys } from './llm/provider-keys.ts'
 import { createSharedRuntime, type SharedRuntime } from './core/shared-runtime.ts'
+import { buildWikisCatalog } from './wiki/catalog.ts'
 import type { LimitMetrics } from './core/limit-metrics.ts'
 import type { ProviderGateway } from './llm/provider-gateway.ts'
 import { createOverlayToolRegistry } from './core/tool-registry.ts'
@@ -110,6 +111,9 @@ export interface System {
   readonly packsDir: string
   readonly knowledgeDir: string
   readonly providersStorePath: string
+  readonly wikisStorePath: string
+  // Shared wiki registry — read by tools and the wiki admin endpoints.
+  readonly wikiRegistry: import('./wiki/registry.ts').WikiRegistry
   // OllamaUrls editor — no-op when Ollama isn't configured.
   readonly ollamaUrls: OllamaUrlRegistry
   readonly removeAgent: (id: string) => boolean
@@ -587,10 +591,23 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
   })
   scriptHook.set((roomId, message) => scriptRunner.onRoomMessage(roomId, message))
 
+  const buildWikisCatalogForAgent = (roomId: string, agentId: string): string => {
+    const room = house.getRoom(roomId)
+    if (!room) return ''
+    const agent = team.getAgent(agentId)
+    const ai = agent ? asAIAgent(agent) : undefined
+    const agentBindings = ai?.getWikiBindings() ?? []
+    const ids = [...new Set([...room.getWikiBindings(), ...agentBindings])]
+    if (ids.length === 0) return ''
+    // Local import avoids a cycle: catalog imports registry, which we already have.
+    return buildWikisCatalog(shared.wikiRegistry, ids).text
+  }
+
   const boundSpawnAIAgent = (config: AIAgentConfig, options?: SpawnOptions) =>
     spawnAIAgent(config, llm, house, team, routeMessage, toolRegistry, {
       ...options,
       getSkills: getSkillsForRoom,
+      getWikisCatalog: buildWikisCatalogForAgent,
       getScriptContext: (roomId, agentName) => scriptRunner.getScriptContextForAgent(roomId, agentName),
       getAllowedToolsForRoom,
       onEvalEvent: evalEvent.proxy,
@@ -725,6 +742,8 @@ export const createSystem = (options: CreateSystemOptions = {}): System => {
     packsDir,
     knowledgeDir: sharedPaths.knowledge(),
     providersStorePath: sharedPaths.providers(),
+    wikisStorePath: sharedPaths.wikis(),
+    wikiRegistry: shared.wikiRegistry,
     ollamaUrls,
     removeAgent,
     removeRoom: systemRemoveRoom,

@@ -69,6 +69,9 @@ export interface AIAgentOptions {
   // whose messages it has already observed.
   readonly getRoomMembers?: (roomId: string) => ReadonlyArray<import('../core/types/messaging.ts').AgentProfile>
   readonly getSkills?: (roomName: string) => string
+  // Returns the per-room wikis catalog text (index.md + scope.md per bound
+  // wiki, deduped across room and per-agent bindings). '' when nothing is bound.
+  readonly getWikisCatalog?: (roomId: string, agentId: string) => string
   readonly getScriptContext?: (roomId: string, agentName: string) =>
     | { systemDoc: string; dialogue: ReadonlyArray<{ speaker: string; content: string }> }
     | undefined
@@ -104,6 +107,7 @@ export const createAIAgent = (
   let toolDefinitions = options?.toolDefinitions
   let currentTools: ReadonlyArray<string> | undefined = config.tools
   let currentTags: ReadonlyArray<string> = config.tags ?? []
+  let currentWikiBindings: ReadonlyArray<string> = config.wikiBindings ?? []
   // Context & Prompts toggles — resolve defaults to preserve current behavior
   const includePromptsState: Required<IncludePrompts> = {
     persona: config.includePrompts?.persona ?? true,
@@ -111,6 +115,7 @@ export const createAIAgent = (
     house: config.includePrompts?.house ?? true,
     responseFormat: config.includePrompts?.responseFormat ?? true,
     skills: config.includePrompts?.skills ?? true,
+    wikis: config.includePrompts?.wikis ?? true,
   }
   const includeContextState: Required<IncludeContext> = {
     participants: config.includeContext?.participants ?? true,
@@ -146,6 +151,7 @@ export const createAIAgent = (
   const getCompressedIds = options?.getCompressedIds
   const getRoomMembers = options?.getRoomMembers
   const getSkills = options?.getSkills
+  const getWikisCatalogOpt = options?.getWikisCatalog
   const getScriptContext = options?.getScriptContext
   const onEvalEvent = options?.onEvalEvent
 
@@ -173,6 +179,7 @@ export const createAIAgent = (
     getArtifactsForScope,
     getArtifactTypeDef,
     getSkills,
+    getWikisCatalog: getWikisCatalogOpt ? (roomId: string) => getWikisCatalogOpt(roomId, agentId) : undefined,
     getScriptContext,
     includePrompts: includePromptsState,
     includeContext: includeContextState,
@@ -433,6 +440,13 @@ export const createAIAgent = (
     updateMaxToolIterations: (n: number | undefined) => {
       maxToolIterationsCfg = (typeof n === 'number' && n > 0) ? n : 5
     },
+    getWikiBindings: () => currentWikiBindings,
+    updateWikiBindings: (ids: ReadonlyArray<string>) => {
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const id of ids) { if (!seen.has(id)) { seen.add(id); out.push(id) } }
+      currentWikiBindings = out
+    },
     getContextPreview: (roomId: string) => {
       const deps = contextDeps()
       const sections = buildSystemSections(deps, roomId)
@@ -472,6 +486,7 @@ export const createAIAgent = (
       contextEnabled,
       maxToolResultChars: maxToolResultCharsCfg,
       maxToolIterations: maxToolIterationsCfg,
+      ...(currentWikiBindings.length > 0 ? { wikiBindings: [...currentWikiBindings] } : {}),
     }),
     cancelGeneration: () => { activeAbortController?.abort(); activeAbortController = null; cm.cancelAll() },
     refreshTools: (support) => {

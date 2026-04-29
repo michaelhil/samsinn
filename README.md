@@ -184,6 +184,10 @@ Three ways to install:
 
 From the UI, **Settings → Packs** has an **Available** browse list (one-click install) and an **Installed** list with update/uninstall buttons. See [docs/packs.md](docs/packs.md) for the naming convention, authoring layout, and the registry env var (`SAMSINN_PACK_SOURCES`). Pack management is gated by `SAMSINN_ENABLE_PACKS` (default on).
 
+### Wikis (vetted knowledge)
+
+Bind GitHub-hosted [`llm-wiki-skills`](https://github.com/michaelhil/llm-wiki-skills) wikis (e.g. `nuclear-wiki`, `ai-human-factors-wiki`) to a room so agents can ground answers on vetted content via `wiki_search` / `wiki_get_page`. Configured under **Settings → Wikis**. See [docs/wikis.md](docs/wikis.md) for setup, multi-account PAT, and REST surface.
+
 ### Tools
 
 Agents invoke tools using the `::TOOL::` syntax (or native function-calling on supported models):

@@ -87,6 +87,16 @@ export type WSOutbound =
   | { readonly type: 'providers_changed'; readonly providers: ReadonlyArray<string> }
   // Fired after a pack is installed / updated / uninstalled. UI panels refresh.
   | { readonly type: 'packs_changed' }
+  // Fired after a wiki is created/updated/deleted/warmed/bound. UI panels refresh.
+  | {
+      readonly type: 'wiki_changed'
+      readonly wikiId?: string
+      readonly roomId?: string
+      readonly agentId?: string
+      readonly action: 'created' | 'updated' | 'deleted' | 'warmed' | 'warm_failed' | 'bound'
+      readonly pageCount?: number
+      readonly error?: string
+    }
   // Sandbox reset lifecycle. `commitsAtMs` is an absolute epoch ms — UI
   // computes its own countdown (no clock-skew handshake needed for ±1 s).
   | { readonly type: 'reset_pending'; readonly commitsAtMs: number }

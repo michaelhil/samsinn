@@ -547,6 +547,12 @@ const handlers: Handlers = {
     window.dispatchEvent(new CustomEvent('packs-changed'))
   },
 
+  wiki_changed(_msg) {
+    // A wiki was created / updated / deleted / warmed / bound. Wikis panel
+    // re-fetches /api/wikis on this event.
+    window.dispatchEvent(new CustomEvent('wikis-changed'))
+  },
+
   reset_pending(msg) {
     window.dispatchEvent(new CustomEvent('reset-pending', { detail: { commitsAtMs: msg.commitsAtMs } }))
   },

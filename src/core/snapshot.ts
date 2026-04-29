@@ -7,7 +7,9 @@
 //
 // Auto-saver: debounced timer (5s default), flushes on SIGINT/SIGTERM.
 //
-// v13: current. Older versions are rejected at load — no migration ladder.
+// v14: current. Older versions are rejected at load — no migration ladder.
+//      v14 adds RoomSnapshot.wikiBindings + AIAgentConfig.wikiBindings (per-room
+//      and per-agent wiki bindings for the wiki-backed knowledge feature).
 //      v13 removes the v1 script engine entirely (replaced by the v2 reactive
 //      runner — see docs/scripts.md). v1 ScriptRun was never persisted, so
 //      this is a clean drop with nothing to migrate.
@@ -29,7 +31,7 @@ import { dirname } from 'node:path'
 
 // --- Version ---
 
-export const SNAPSHOT_VERSION = 13
+export const SNAPSHOT_VERSION = 14
 
 // --- Snapshot schema ---
 
@@ -43,6 +45,7 @@ export interface RoomSnapshot {
   readonly compressedIds?: ReadonlyArray<string>
   readonly summaryConfig?: SummaryConfig
   readonly latestSummary?: string
+  readonly wikiBindings?: ReadonlyArray<string>
 }
 
 export interface AgentSnapshot {
@@ -52,7 +55,7 @@ export interface AgentSnapshot {
 }
 
 export interface SystemSnapshot {
-  readonly version: '13'
+  readonly version: '14'
   readonly timestamp: number
   readonly rooms: ReadonlyArray<RoomSnapshot>
   readonly agents: ReadonlyArray<AgentSnapshot>
@@ -107,6 +110,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
       compressedIds: room.getCompressedIds().size > 0 ? [...room.getCompressedIds()] : undefined,
       summaryConfig: room.summaryConfig,
       ...(state.latestSummary ? { latestSummary: state.latestSummary } : {}),
+      ...(room.getWikiBindings().length > 0 ? { wikiBindings: [...room.getWikiBindings()] } : {}),
     })
   }
 
@@ -127,7 +131,7 @@ export const serializeSystem = (system: SerializableSystem): SystemSnapshot => {
   const artifacts = system.house.artifacts.list({ includeResolved: true })
 
   return {
-    version: '13',
+    version: '14',
     timestamp: Date.now(),
     rooms,
     agents,
@@ -224,6 +228,7 @@ export const restoreFromSnapshot = async (
       compressedIds: roomSnap.compressedIds,
       ...(roomSnap.summaryConfig ? { summaryConfig: roomSnap.summaryConfig } : {}),
       ...(roomSnap.latestSummary ? { latestSummary: roomSnap.latestSummary } : {}),
+      ...(roomSnap.wikiBindings ? { wikiBindings: roomSnap.wikiBindings } : {}),
     })
     roomMap.set(room.profile.id, room)
   }

@@ -69,6 +69,7 @@ export const createRoom = (
   let paused = false
   let summaryConfig: SummaryConfig = DEFAULT_SUMMARY_CONFIG
   let latestSummary: string | undefined
+  let wikiBindings: ReadonlyArray<string> = []
 
   // --- Eligible set: members minus user-muted ---
 
@@ -270,7 +271,17 @@ export const createRoom = (
       members: [...members],
       summaryConfig,
       ...(latestSummary ? { latestSummary } : {}),
+      ...(wikiBindings.length > 0 ? { wikiBindings: [...wikiBindings] } : {}),
     }),
+
+    getWikiBindings: (): ReadonlyArray<string> => wikiBindings,
+    setWikiBindings: (ids: ReadonlyArray<string>): void => {
+      // Dedup + preserve order.
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const id of ids) { if (!seen.has(id)) { seen.add(id); out.push(id) } }
+      wikiBindings = out
+    },
 
     setMuted,
     isMuted: (agentId: string): boolean => muted.has(agentId),
@@ -331,6 +342,7 @@ export const createRoom = (
       }
       if (state.summaryConfig) summaryConfig = state.summaryConfig
       if (state.latestSummary !== undefined) latestSummary = state.latestSummary
+      if (state.wikiBindings) wikiBindings = [...state.wikiBindings]
     },
   }
 }

@@ -117,6 +117,9 @@ export interface BuildContextDeps {
   readonly responseFormat?: string
   readonly history: AgentHistory
   readonly getSkills?: (roomName: string) => string
+  // Returns the per-room wikis catalog text (index.md + scope.md per bound
+  // wiki), or '' when nothing is bound. Section gated by IncludePrompts.wikis.
+  readonly getWikisCatalog?: (roomId: string) => string
   // Script-mode bypass. When this returns a value (cast member in an
   // active run), the agent's context is built ENTIRELY from these
   // pieces — house prompt, room context, message history are suppressed.
@@ -151,6 +154,7 @@ const resolveIncludes = (inc: IncludePrompts | undefined): Required<IncludePromp
   house: inc?.house ?? true,
   responseFormat: inc?.responseFormat ?? true,
   skills: inc?.skills ?? true,
+  wikis: inc?.wikis ?? true,
 })
 
 const resolveIncludeContext = (inc: IncludeContext | undefined): Required<IncludeContext> => ({
@@ -221,7 +225,7 @@ export interface SystemSection {
 }
 
 export type SystemSectionKey =
-  | 'house' | 'room' | 'persona' | 'responseFormat' | 'skills'
+  | 'house' | 'room' | 'persona' | 'responseFormat' | 'skills' | 'wikis'
   | 'ctx_intro'           // "You are in room X" — always emitted
   | 'ctx_flow'
   | 'ctx_participants'
@@ -247,7 +251,7 @@ export const buildSystemSections = (
   const contextEnabled = deps.contextEnabled ?? true
   const includes = promptsEnabled
     ? resolveIncludes(deps.includePrompts)
-    : { persona: false, room: false, house: false, responseFormat: false, skills: false }
+    : { persona: false, room: false, house: false, responseFormat: false, skills: false, wikis: false }
   const ctxIncludes = contextEnabled
     ? resolveIncludeContext(deps.includeContext)
     : { participants: false, artifacts: false, activity: false, knownAgents: false }
@@ -284,6 +288,15 @@ export const buildSystemSections = (
     label: 'SKILLS',
     text: skillsText,
     enabled: includes.skills && !!skillsText,
+    optional: true,
+  })
+
+  const wikisText = deps.getWikisCatalog ? deps.getWikisCatalog(triggerRoomId) : ''
+  out.push({
+    key: 'wikis',
+    label: 'WIKIS',
+    text: wikisText,
+    enabled: includes.wikis && !!wikisText,
     optional: true,
   })
 
@@ -400,7 +413,7 @@ const buildSystemBlocks = (
 
   // Stable top-level prompt sections, in order.
   const promptOrder: ReadonlyArray<SystemSectionKey> = [
-    'house', 'room', 'persona', 'skills', 'responseFormat',
+    'house', 'room', 'persona', 'skills', 'wikis', 'responseFormat',
   ]
   const stableLines: string[] = []
   for (const key of promptOrder) {

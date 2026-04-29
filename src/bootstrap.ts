@@ -49,6 +49,8 @@ import { asAIAgent } from './agents/shared.ts'
 import { parseProviderConfig, summariseProviderConfig } from './llm/providers-config.ts'
 import { buildProvidersFromConfig, warmProviderModels } from './llm/providers-setup.ts'
 import { loadProviderStore, mergeWithEnv } from './llm/providers-store.ts'
+import { loadWikiStore, mergeWikis } from './wiki/store.ts'
+import { createWikiTools } from './tools/built-in/wiki-tools.ts'
 import { parseLogConfigFromEnv } from './logging/config.ts'
 import { sharedPaths } from './core/paths.ts'
 import { createToolRegistry } from './core/tool-registry.ts'
@@ -157,6 +159,24 @@ export const bootstrap = async (): Promise<void> => {
   shared.sharedToolRegistry.register(createGetTimeTool())
   shared.sharedToolRegistry.register(createTestToolTool(shared.sharedToolRegistry))
   shared.sharedToolRegistry.register(createListSkillsTool(shared.sharedSkillStore))
+  for (const tool of createWikiTools(shared.wikiRegistry)) {
+    shared.sharedToolRegistry.register(tool)
+  }
+
+  // Load configured wikis and warm them in the background. Warm failures
+  // are logged; agents see "wiki unavailable" on tool calls in the meantime.
+  const { data: wikiStoreData, warnings: wikiWarnings } = await loadWikiStore(sharedPaths.wikis())
+  for (const w of wikiWarnings) console.warn(`[wikis.json] ${w}`)
+  const mergedWikis = mergeWikis(wikiStoreData).filter((w) => w.enabled)
+  shared.wikiRegistry.setWikis(mergedWikis)
+  for (const w of mergedWikis) {
+    shared.wikiRegistry.warm(w.id)
+      .then(({ pageCount, warnings }) => {
+        console.log(`[wiki:${w.id}] warmed ${pageCount} pages${warnings.length ? ` (${warnings.length} warnings)` : ''}`)
+        for (const ww of warnings) console.warn(`[wiki:${w.id}] ${ww}`)
+      })
+      .catch((err) => console.error(`[wiki:${w.id}] warm failed: ${(err as Error).message}`))
+  }
   if (networkToolsEnabled) {
     shared.sharedToolRegistry.registerAll(createWebTools({
       tavilyApiKey: process.env.TAVILY_API_KEY,

@@ -168,6 +168,10 @@ const resolveAgentTools = async (
 export interface SpawnOptions {
   readonly overrideId?: string
   readonly getSkills?: (roomName: string) => string
+  // Resolves the per-room+per-agent wikis catalog text. The agent's effective
+  // wiki bindings are room.wikiBindings ∪ agent.wikiBindings; this resolver
+  // applies the union and returns the rendered catalog.
+  readonly getWikisCatalog?: (roomId: string, agentId: string) => string
   readonly getScriptContext?: (roomId: string, agentName: string) =>
     | { systemDoc: string; dialogue: ReadonlyArray<{ speaker: string; content: string }> }
     | undefined
@@ -254,6 +258,7 @@ export const spawnAIAgent = async (
       return profiles
     },
     getSkills: spawnOptions?.getSkills,
+    getWikisCatalog: spawnOptions?.getWikisCatalog,
     getScriptContext: spawnOptions?.getScriptContext,
     onEvalEvent: spawnOptions?.onEvalEvent,
   }, spawnOptions?.overrideId)

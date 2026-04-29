@@ -48,6 +48,7 @@ export interface RoomState {
   readonly members: ReadonlyArray<string>
   readonly summaryConfig?: SummaryConfig
   readonly latestSummary?: string
+  readonly wikiBindings?: ReadonlyArray<string>
 }
 
 // === Room — self-contained component: stores messages and delivers to members ===
@@ -102,6 +103,11 @@ export interface Room {
   // Current `room_summary` at top of stream, if any.
   readonly getCurrentCompressionMessage: () => Message | undefined
 
+  // Wiki bindings — wikis bound to this room. Effective bindings for an
+  // agent in this room = room.wikiBindings ∪ agent.wikiBindings.
+  readonly getWikiBindings: () => ReadonlyArray<string>
+  readonly setWikiBindings: (wikiIds: ReadonlyArray<string>) => void
+
   // Snapshot restore — bypass delivery, populate state directly
   readonly injectMessages: (msgs: ReadonlyArray<Message>) => void
   readonly restoreState: (state: RoomRestoreParams) => void
@@ -115,6 +121,7 @@ export interface RoomRestoreParams {
   readonly compressedIds?: ReadonlyArray<string>
   readonly summaryConfig?: SummaryConfig
   readonly latestSummary?: string
+  readonly wikiBindings?: ReadonlyArray<string>
 }
 
 // === CreateResult — returned when name uniqueness is enforced ===
