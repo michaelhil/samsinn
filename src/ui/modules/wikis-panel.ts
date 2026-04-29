@@ -10,6 +10,7 @@
 // ============================================================================
 
 import { showToast } from './toast.ts'
+import { createModal } from './detail-modal.ts'
 
 interface WikiEntry {
   id: string
@@ -195,7 +196,41 @@ const renderBindingsCell = async (cell: HTMLElement, wikiId: string, rooms: Room
   cell.appendChild(wrap)
 }
 
-export const promptAddWiki = async (): Promise<void> => {
+interface AvailableWiki {
+  id: string
+  owner: string
+  repo: string
+  displayName: string
+  description: string
+  repoUrl: string
+  installed: boolean
+}
+
+const fetchAvailable = async (): Promise<{ wikis: AvailableWiki[]; sources: string[] }> => {
+  try {
+    const res = await fetch('/api/wikis/available')
+    if (!res.ok) return { wikis: [], sources: [] }
+    return await res.json() as { wikis: AvailableWiki[]; sources: string[] }
+  } catch { return { wikis: [], sources: [] } }
+}
+
+const submitAdd = async (body: Record<string, unknown>): Promise<boolean> => {
+  showToast(document.body, `Adding ${body.id}…`, { position: 'fixed' })
+  const res = await fetch('/api/wikis', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'add failed' })) as { error?: string }
+    showToast(document.body, `Add failed: ${data.error ?? 'unknown'}`, { type: 'error', position: 'fixed' })
+    return false
+  }
+  showToast(document.body, `Added ${body.id} — warming in background`, { type: 'success', position: 'fixed' })
+  return true
+}
+
+const manualAddFlow = async (): Promise<void> => {
   const id = prompt('Wiki id (lowercase, kebab-case):')?.trim()
   if (!id) return
   const owner = prompt('GitHub owner (e.g. michaelhil):')?.trim()
@@ -207,16 +242,76 @@ export const promptAddWiki = async (): Promise<void> => {
   const body: Record<string, unknown> = { id, owner, repo }
   if (ref) body.ref = ref
   if (apiKey) body.apiKey = apiKey
-  showToast(document.body, `Adding ${id}…`, { position: 'fixed' })
-  const res = await fetch('/api/wikis', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'add failed' })) as { error?: string }
-    showToast(document.body, `Add failed: ${data.error ?? 'unknown'}`, { type: 'error', position: 'fixed' })
-    return
+  await submitAdd(body)
+}
+
+const customizeFlow = async (w: AvailableWiki): Promise<void> => {
+  const apiKey = prompt(`Optional GitHub PAT for "${w.id}" (leave blank for anonymous):`)?.trim() || undefined
+  const displayName = prompt(`Optional displayName override (current: "${w.displayName}"):`)?.trim() || undefined
+  const body: Record<string, unknown> = { id: w.id, owner: w.owner, repo: w.repo }
+  if (apiKey) body.apiKey = apiKey
+  if (displayName) body.displayName = displayName
+  await submitAdd(body)
+}
+
+export const promptAddWiki = async (): Promise<void> => {
+  const modal = createModal({ title: 'Add wiki', width: 'max-w-xl' })
+  document.body.appendChild(modal.overlay)
+
+  const body = modal.scrollBody
+  body.innerHTML = '<div class="text-xs text-text-muted italic">Loading available wikis…</div>'
+
+  const { wikis: available, sources } = await fetchAvailable()
+  body.innerHTML = ''
+
+  // === Discovered section ===
+  const sourceLabel = sources.length > 0 ? sources.join(', ') : 'samsinn-wikis'
+  const header = document.createElement('div')
+  header.className = 'text-[11px] uppercase tracking-wide text-text-subtle pb-1 mb-2 border-b border-border'
+  header.innerHTML = `Discovered (${available.length}) <span class="text-[10px] normal-case tracking-normal text-text-muted">via ${escapeHtml(sourceLabel)}</span>`
+  body.appendChild(header)
+
+  if (available.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'text-xs text-text-muted italic mb-3'
+    empty.textContent = `No wikis discovered. Set SAMSINN_WIKI_SOURCES env var to a GitHub org (default: samsinn-wikis) and restart.`
+    body.appendChild(empty)
   }
-  showToast(document.body, `Added ${id} — warming in background`, { type: 'success', position: 'fixed' })
+
+  for (const w of available) {
+    const row = document.createElement('div')
+    row.className = 'py-2 text-xs border-b border-border flex items-center gap-2'
+    const desc = w.description || 'no description'
+    const status = w.installed
+      ? `<span class="text-[10px] uppercase tracking-wide text-text-subtle">customized</span>`
+      : `<span class="text-[10px] uppercase tracking-wide text-text-subtle">auto-active</span>`
+    row.innerHTML = `
+      <div class="flex-1 min-w-0">
+        <div class="font-medium truncate">${escapeHtml(w.displayName)} <span class="text-text-muted">(${escapeHtml(w.id)})</span> ${status}</div>
+        <div class="text-text-muted truncate" title="${escapeHtml(desc)}">${escapeHtml(desc)}</div>
+        <div class="text-text-subtle text-[10px]"><a href="${escapeHtml(w.repoUrl)}" target="_blank" rel="noopener" class="hover:underline">${escapeHtml(w.owner)}/${escapeHtml(w.repo)}</a></div>
+      </div>
+      <button data-act="pick" class="px-2 py-1 text-xs bg-accent text-white rounded hover:opacity-90">${w.installed ? 'Edit' : 'Add PAT'}</button>
+    `
+    row.querySelector<HTMLButtonElement>('[data-act="pick"]')!.onclick = async () => {
+      modal.close()
+      await customizeFlow(w)
+    }
+    body.appendChild(row)
+  }
+
+  // === Manual section ===
+  const manualHeader = document.createElement('div')
+  manualHeader.className = 'text-[11px] uppercase tracking-wide text-text-subtle pt-3 pb-1 mt-3 mb-2 border-t border-border'
+  manualHeader.textContent = 'Manual'
+  body.appendChild(manualHeader)
+
+  const manualBtn = document.createElement('button')
+  manualBtn.className = 'text-xs px-3 py-2 bg-surface-muted hover:bg-surface-muted/80 rounded interactive w-full text-left'
+  manualBtn.innerHTML = `<span class="font-medium">Add by GitHub owner/repo</span><div class="text-text-muted text-[11px]">For wikis not in the configured discovery sources.</div>`
+  manualBtn.onclick = async () => {
+    modal.close()
+    await manualAddFlow()
+  }
+  body.appendChild(manualBtn)
 }
