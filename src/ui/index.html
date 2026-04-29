@@ -555,19 +555,28 @@
   </dialog>
 
   <!-- Create Agent Modal -->
-  <dialog id="agent-modal" class="rounded-lg shadow-xl p-0 w-96">
+  <dialog id="agent-modal" class="rounded-lg shadow-xl p-0 w-96 bg-surface text-text">
     <form id="agent-form" class="p-4 space-y-3">
-      <h3 class="font-medium text-text-strong">Create AI Agent</h3>
-      <input name="name" placeholder="Agent name" required class="w-full px-3 py-2 border rounded text-sm">
-      <select name="model" required class="w-full px-3 py-2 border rounded text-sm bg-surface">
-        <option value="">Loading models...</option>
-      </select>
-      <label class="flex items-center gap-1.5 text-xs text-text-subtle">
-        <input type="checkbox" id="model-show-all" class="rounded">
-        Show all models (not just recommended)
-      </label>
-      <textarea name="persona" placeholder="Agent persona..." required rows="4" class="w-full px-3 py-2 border rounded text-sm"></textarea>
-      <input name="tags" placeholder="Tags (comma-separated, optional)" class="w-full px-3 py-2 border rounded text-sm">
+      <h3 id="agent-modal-title" class="font-medium text-text-strong">Create Agent</h3>
+      <!-- Kind tabs: AI / Human. The selected tab toggles which form
+           fields are shown; submit handler in app.ts branches by kind. -->
+      <div id="agent-kind-tabs" class="flex gap-1 border-b border-border" role="tablist">
+        <button type="button" data-kind="ai"    class="px-3 py-1.5 text-sm border-b-2 border-accent text-text-strong" role="tab" aria-selected="true">AI</button>
+        <button type="button" data-kind="human" class="px-3 py-1.5 text-sm border-b-2 border-transparent text-text-muted hover:text-text" role="tab" aria-selected="false">Human</button>
+      </div>
+      <input name="name" placeholder="Agent name" required class="w-full px-3 py-2 border rounded text-sm bg-surface text-text">
+      <!-- AI-only fields. Hidden when kind=human. -->
+      <div data-ai-fields class="space-y-3">
+        <select name="model" class="w-full px-3 py-2 border rounded text-sm bg-surface text-text">
+          <option value="">Loading models...</option>
+        </select>
+        <label class="flex items-center gap-1.5 text-xs text-text-subtle">
+          <input type="checkbox" id="model-show-all" class="rounded">
+          Show all models (not just recommended)
+        </label>
+        <textarea name="persona" placeholder="Agent persona..." rows="4" class="w-full px-3 py-2 border rounded text-sm bg-surface text-text"></textarea>
+        <input name="tags" placeholder="Tags (comma-separated, optional)" class="w-full px-3 py-2 border rounded text-sm bg-surface text-text">
+      </div>
       <div class="flex justify-end gap-2">
         <button type="button" onclick="this.closest('dialog').close()" class="px-3 py-1 text-sm text-text">Cancel</button>
         <button type="submit" class="px-3 py-1 text-sm bg-success text-white rounded">Create</button>
@@ -583,7 +592,7 @@
     <div class="flex flex-col" style="max-height: 90vh;">
       <div class="px-4 py-3 border-b flex items-center justify-between">
         <h3 id="agent-detail-title" class="font-medium text-text-strong truncate">Agent</h3>
-        <button type="button" id="agent-detail-close" class="text-text-subtle hover:text-text shrink-0" aria-label="Close">×</button>
+        <button type="button" id="agent-detail-close" class="hidden" aria-label="Close">×</button>
       </div>
       <div id="agent-detail-body" class="flex-1 overflow-y-auto px-4 py-3"></div>
     </div>
@@ -606,7 +615,7 @@
         <div id="instances-header-actions" class="flex items-center gap-2 shrink-0">
           <!-- Populated by instances-modal.ts based on browse / bulk mode -->
         </div>
-        <button type="button" id="instances-close" class="text-text-subtle hover:text-text shrink-0" aria-label="Close">×</button>
+        <button type="button" id="instances-close" class="hidden" aria-label="Close">×</button>
       </div>
       <div class="px-4 py-2 text-xs text-text-subtle border-b">
         Each instance is an isolated sandbox: its own rooms, agents, messages, and snapshot. The current instance is bound to your browser by a cookie.
@@ -622,7 +631,7 @@
     <form id="bug-form" class="flex flex-col" style="max-height: 80vh;">
       <div class="px-4 py-3 border-b flex items-center justify-between">
         <h3 class="font-medium text-text-strong inline-flex items-center gap-2"><span data-icon="bug"></span> Report a bug</h3>
-        <button type="button" id="bug-close" class="text-text-subtle hover:text-text" aria-label="Close">×</button>
+        <button type="button" id="bug-close" class="hidden" aria-label="Close">×</button>
       </div>
       <div class="px-4 py-3 space-y-3 flex-1 overflow-y-auto">
         <div>
@@ -655,7 +664,7 @@
       <!-- Fixed header — matches createModal chrome -->
       <div class="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
         <h3 class="text-lg font-semibold">Providers</h3>
-        <button id="ollama-dashboard-close" class="text-lg leading-none ml-2 text-text-muted">&times;</button>
+        <button id="ollama-dashboard-close" class="hidden">&times;</button>
       </div>
       <!-- Scrollable body -->
       <div class="px-6 py-4 overflow-y-auto min-h-0 flex-1 space-y-3">

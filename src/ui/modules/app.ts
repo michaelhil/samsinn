@@ -751,12 +751,75 @@ roomForm.onsubmit = (e) => {
   roomModal.close(); roomForm.reset()
 }
 
+// Kind-tab state. Default 'ai' on each open. Reset on close in the
+// agentModal close listener below.
+let agentModalKind: 'ai' | 'human' = 'ai'
+const setAgentModalKind = (kind: 'ai' | 'human'): void => {
+  agentModalKind = kind
+  const titleEl = document.getElementById('agent-modal-title')
+  if (titleEl) titleEl.textContent = kind === 'ai' ? 'Create AI Agent' : 'Create Human'
+  const aiFields = document.querySelector('[data-ai-fields]') as HTMLElement | null
+  if (aiFields) aiFields.style.display = kind === 'ai' ? '' : 'none'
+  const tabsRoot = document.getElementById('agent-kind-tabs')
+  if (tabsRoot) {
+    for (const btn of Array.from(tabsRoot.querySelectorAll<HTMLButtonElement>('button[data-kind]'))) {
+      const active = btn.dataset.kind === kind
+      btn.setAttribute('aria-selected', String(active))
+      btn.classList.toggle('border-accent', active)
+      btn.classList.toggle('text-text-strong', active)
+      btn.classList.toggle('border-transparent', !active)
+      btn.classList.toggle('text-text-muted', !active)
+    }
+  }
+  // Toggle `required` on AI-only fields so the browser doesn't block
+  // the human-form submit on missing model/persona.
+  const modelSelect = agentForm.querySelector('select[name="model"]') as HTMLSelectElement | null
+  const personaTA = agentForm.querySelector('textarea[name="persona"]') as HTMLTextAreaElement | null
+  if (modelSelect) modelSelect.required = kind === 'ai'
+  if (personaTA) personaTA.required = kind === 'ai'
+}
+const tabsRoot = document.getElementById('agent-kind-tabs')
+if (tabsRoot) {
+  tabsRoot.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-kind]')
+    if (!btn) return
+    setAgentModalKind(btn.dataset.kind as 'ai' | 'human')
+  })
+}
+
 agentForm.onsubmit = (e) => {
   e.preventDefault()
   const data = new FormData(agentForm)
+  const agentName = (data.get('name') as string).trim()
+  if (!agentName) return
+
+  if (agentModalKind === 'human') {
+    // POST to /api/agents/human, optionally adding to the originating room.
+    const autoAddRoom = consumeAutoAddRoom()
+    void (async () => {
+      try {
+        const res = await fetch('/api/agents/human', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: agentName, ...(autoAddRoom ? { roomName: autoAddRoom } : {}) }),
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({})) as { error?: string }
+          showToast(document.body, body.error ?? `Create failed (${res.status})`, { type: 'error', position: 'fixed' })
+          return
+        }
+        showToast(document.body, `Created ${agentName}`, { type: 'success', position: 'fixed' })
+      } catch {
+        showToast(document.body, 'Create failed', { type: 'error', position: 'fixed' })
+      }
+    })()
+    agentModal.close(); agentForm.reset()
+    return
+  }
+
+  // AI path (existing flow).
   const rawTags = (data.get('tags') as string | null)?.trim() ?? ''
   const tags = rawTags ? rawTags.split(',').map(t => t.trim()).filter(Boolean) : undefined
-  const agentName = data.get('name') as string
   const autoAddRoom = consumeAutoAddRoom()
   if (autoAddRoom) registerPendingCreateAdd(agentName, autoAddRoom)
   send({ type: 'create_agent', config: { name: agentName, model: data.get('model') as string, persona: data.get('persona') as string, ...(tags && tags.length > 0 ? { tags } : {}) } })
@@ -764,11 +827,11 @@ agentForm.onsubmit = (e) => {
 }
 
 // If the create-agent modal is closed without submitting, drop any pending
-// auto-add-to-room intent so it doesn't leak into the next open.
+// auto-add-to-room intent so it doesn't leak into the next open. Also reset
+// the kind tabs so the next open defaults to AI.
 agentModal.addEventListener('close', () => {
-  // Consuming clears it; we only need to clear if still set (i.e. cancel path,
-  // since submit already consumed it before close).
   clearAutoAddRoom()
+  setAgentModalKind('ai')
 })
 
 // Artifact submit + input handlers now live inside the workspace modal
@@ -797,6 +860,20 @@ agentsToggleBtn.onclick = () => {
 // Settings sidebar section — single nav entry to six modal rows.
 hydrateIconPlaceholders()
 initSettingsNav()
+
+// === Global modal UX: click outside to close ===
+//
+// Native <dialog>.showModal() supports Escape via the `cancel` event and a
+// click on the dialog element targets the backdrop area. We wire a single
+// listener per <dialog> that closes on backdrop click. Dialogs built via
+// createModal() already have their own overlay-click handler; that path is
+// untouched. Visible × close buttons are de-emphasized (CSS) so click-
+// outside is the canonical close affordance.
+for (const dlg of Array.from(document.querySelectorAll<HTMLDialogElement>('dialog'))) {
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg && dlg.open) dlg.close()
+  })
+}
 // Keep the logging recording dot fresh in the sidebar even when the
 // Logging modal isn't open.
 startLoggingStateDot()

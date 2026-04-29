@@ -203,8 +203,10 @@ export const createModal = (config: ModalConfig): ModalElements => {
   title.textContent = config.title
   header.appendChild(title)
   const close = (): void => { overlay.remove() }
+  // Hidden × — overlay click + Escape are the canonical close affordances.
+  // Kept in DOM for callers that look up `header.querySelector('button')`.
   const closeBtn = document.createElement('button')
-  closeBtn.className = 'text-lg leading-none ml-2 text-text-muted'
+  closeBtn.className = 'hidden'
   closeBtn.textContent = '×'
   closeBtn.onclick = close
   header.appendChild(closeBtn)
