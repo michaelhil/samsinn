@@ -31,7 +31,7 @@ export const renderRooms = (
     const unread = opts.unreadCounts[room.id] ?? 0
     const isThinking = opts.generatingRoomIds.has(room.id)
     const div = document.createElement('div')
-    div.className = `px-3 py-1 cursor-pointer text-xs flex items-center gap-1.5 group relative ${isSelected ? 'bg-surface-muted font-semibold text-accent' : 'text-text hover:bg-surface-muted'}`
+    div.className = `px-3 py-1 cursor-pointer text-xs flex items-center gap-1.5 group relative ${isSelected ? 'bg-surface-muted font-semibold text-text-strong' : 'text-text hover:bg-surface-muted'}`
 
     // Status dot doubles as pause toggle (if onTogglePaused provided).
     // Clicking the dot does NOT select the room — it only toggles pause.
