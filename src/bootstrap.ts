@@ -231,10 +231,11 @@ export const bootstrap = async (): Promise<void> => {
         subscribeAgentState: wsManager.subscribeAgentState,
         unsubscribeAgentState: wsManager.unsubscribeAgentState,
       })
-      // Default room if empty (first-time creation only).
-      if (system.house.listAllRooms().length === 0) {
-        system.house.createRoomSafe({ name: 'general', createdBy: 'system' })
-      }
+      // (Default-room fallback removed — seedFreshInstance below handles
+      // the empty-instance case with a properly-themed 'demo' room and a
+      // Helper agent. The old `general` fallback always created a room
+      // BEFORE seed ran, so seed's `if rooms.length > 0 return` check
+      // would short-circuit and Helper never spawned.)
       // Wire WS broadcasts + autosave. wsManager is guaranteed assigned
       // by the time any getOrLoad runs (see the `let wsManager!:` block
       // above). autoSaver is passed in directly because the registry map

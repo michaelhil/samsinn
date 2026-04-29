@@ -173,6 +173,14 @@ describe('per-agent state subscription is wired for every spawn path', () => {
     const sys = await registry.getOrLoad(cookieId)
 
     // 1. Seed must have produced exactly one AI agent (Helper).
+    // Regression context: there used to be a 'general' fallback room
+    // creation in onSystemCreated that ran sync before seed could check
+    // `rooms.length > 0`, causing seed to short-circuit and Helper to
+    // never spawn. The fallback was removed; if it sneaks back in,
+    // this assertion catches it.
+    const rooms = sys.house.listAllRooms()
+    expect(rooms.length).toBe(1)
+    expect(rooms[0]?.name).toBe('demo')
     const aiAgents = sys.team.listAgents().filter(a => a.kind === 'ai')
     expect(aiAgents.length).toBe(1)
     const helper = aiAgents[0]!
