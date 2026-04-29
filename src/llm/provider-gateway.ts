@@ -84,7 +84,20 @@ export const createProviderGateway = (
   configOverrides?: Partial<ProviderGatewayConfig>,
   deps: ProviderGatewayDeps = {},
 ): ProviderGateway => {
-  let config: ProviderGatewayConfig = { ...PROVIDER_GATEWAY_DEFAULTS, ...configOverrides }
+  // Drop undefined keys before merging so defaults survive when callers
+  // construct an override object with optional fields that came back
+  // undefined. Otherwise `{ ...DEFAULTS, maxConcurrent: undefined }` clobbers
+  // the default maxConcurrent (=2) with undefined, the semaphore's `max`
+  // becomes undefined, and `active < max` is always false → every acquire
+  // queues and times out after 30s. This bit gemini-via-router on samsinn.app
+  // when fallback providers had no explicit maxConcurrent.
+  const definedOverrides: Partial<ProviderGatewayConfig> = {}
+  if (configOverrides) {
+    for (const [k, v] of Object.entries(configOverrides)) {
+      if (v !== undefined) (definedOverrides as Record<string, unknown>)[k] = v
+    }
+  }
+  let config: ProviderGatewayConfig = { ...PROVIDER_GATEWAY_DEFAULTS, ...definedOverrides }
   const isPermanent = deps.isPermanentError ?? (() => false)
   const enrich = deps.enrichRequest ?? ((r: ChatRequest) => r)
 
@@ -251,7 +264,13 @@ export const createProviderGateway = (
   }
 
   const updateConfig = (partial: Partial<ProviderGatewayConfig>): void => {
-    config = { ...config, ...partial }
+    // Same defined-only merge as the constructor — see comment there. An
+    // undefined in `partial` must NOT clobber a real value already in config.
+    const definedPartial: Partial<ProviderGatewayConfig> = {}
+    for (const [k, v] of Object.entries(partial)) {
+      if (v !== undefined) (definedPartial as Record<string, unknown>)[k] = v
+    }
+    config = { ...config, ...definedPartial }
     if (partial.maxConcurrent !== undefined) semaphore.updateMax(partial.maxConcurrent)
     if (partial.circuitBreakerThreshold !== undefined || partial.circuitBreakerCooldownMs !== undefined) {
       cb.updateConfig({
