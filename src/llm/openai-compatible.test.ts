@@ -224,6 +224,32 @@ describe('createOpenAICompatibleProvider', () => {
     } finally { fx.stop() }
   })
 
+  test('models() strips Gemini "models/" id prefix so router catalog match works', async () => {
+    // Regression: the Gemini OpenAI-compat /models endpoint returns ids in
+    // the form "models/gemini-2.5-flash-lite". Without stripping, the
+    // router's `list.includes(modelId)` membership check fails for unprefixed
+    // user-facing names ("gemini-2.5-flash-lite") and gemini gets filtered
+    // out of candidates — the request falls through to ollama (or whichever
+    // catalog-empty optimistic-include provider is next), which on a host
+    // without ollama hangs forever or returns "Unable to connect". This was
+    // the root cause of "Send does nothing" on samsinn.app.
+    const fx = startFixture(() => ({
+      status: 200,
+      body: JSON.stringify({
+        data: [
+          { id: 'models/gemini-2.5-flash-lite' },
+          { id: 'models/gemini-2.5-pro' },
+          { id: 'plain-id-no-prefix' },        // non-gemini ids unchanged
+        ],
+      }),
+    }))
+    try {
+      const provider = createOpenAICompatibleProvider({ name: 'gemini', baseUrl: fx.url, getApiKey: () => 'k' })
+      const list = await provider.models()
+      expect(list).toEqual(['gemini-2.5-flash-lite', 'gemini-2.5-pro', 'plain-id-no-prefix'])
+    } finally { fx.stop() }
+  })
+
   test('non-streaming tool_calls: arguments string parsed to object', async () => {
     const fx = startFixture(() => ({
       status: 200,

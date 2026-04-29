@@ -584,7 +584,16 @@ export const createOpenAICompatibleProvider = (config: OpenAICompatConfig): LLMP
       throw mapHttpError(config.name, response.status, text, response.headers.get('retry-after'))
     }
     const data = (await response.json()) as OAIModelsResponse
-    return (data.data ?? []).map(m => m.id)
+    // Strip Gemini's "models/" prefix so the router's catalog membership
+    // check matches the user-facing model name. Without this, Gemini's
+    // /models lists ids as "models/gemini-2.5-flash-lite", but agents and
+    // the seed config use "gemini-2.5-flash-lite", so the router's
+    // `list.includes(modelId)` check fails — gemini gets filtered out of
+    // candidates and the request falls through to keyless / unreachable
+    // providers (e.g. ollama on a host without ollama). Production samsinn
+    // exhibited this as silent "Send does nothing" + ollama 'Unable to
+    // connect' errors.
+    return (data.data ?? []).map(m => m.id.startsWith('models/') ? m.id.slice(7) : m.id)
   }
 
   return { chat, stream, models }
