@@ -1,5 +1,7 @@
 # Samsinn
 
+> **Retired.** Samsinn's functionality has been absorbed into [Leitbild](https://github.com/michaelhil/leitbild), where Rooms, messaging, tools, and multi-agent collaboration are maintained as the Agents Module. This repository is read-only and receives no further development.
+
 **A multi-agent collaboration system.** Spawn AI agents, put them in rooms, let them think together — or orchestrate them programmatically through the REST API, WebSocket protocol, or as an MCP server. Run as a personal sandbox locally, or self-host on a small VPS with one isolated *instance* per user.
 
 > v0.14.0 — [Changelog](#changelog) · [Deploy runbook](deploy/RUNBOOK.md)
